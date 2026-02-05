@@ -6,6 +6,7 @@ import ProfileScreen from './src/screens/profileScreen';
 import CatProfile from './src/screens/catprofile';
 import UserInfoScreen from './src/screens/UserInfoScreen';
 import supabase from './src/screens/config/supabaseClient';
+import Dashboard from './src/screens/Dashbord';
 
 // ✅ 1. Import ไฟล์ LogDailyNormal เข้ามา
 import LogDailyNormal from './src/screens/LogDailyNormal';
