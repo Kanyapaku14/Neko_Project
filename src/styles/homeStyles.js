@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
       height: 140,
       borderRadius: 20,
       overflow: 'hidden',
-      marginBottom: 30, // Reduced from 100 to keep it closer to other elements
+      marginBottom: 10, // Reduced from 100 to keep it closer to other elements
       alignSelf: 'center',
   },
   
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
       height: '100%',
       justifyContent: 'center', 
       alignItems: 'center',    
-      padding: 20,
+
   },
   
   dailyLogTitle: {
