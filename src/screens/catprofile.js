@@ -125,37 +125,41 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
                 <Text style={styles.sectionTitle}>ATTRIBUTES</Text>
                 <View style={styles.contentContainer}>
                     {/* Gender Toggle */}
+                    {/* Gender and Sterilization Row */}
                     <View style={styles.rowContainer}>
-                        {/* Gender Picker */}
-                    <View style={styles.inputGroup}>
-                        <Text style={styles.labelprofile}>Gender</Text>
-                        <View style={[styles.input, { paddingHorizontal: 0, justifyContent: 'center' }]}>
-                            <Picker
-                                selectedValue={gender}
-                                onValueChange={(itemValue) => setGender(itemValue)}
-                                style={{ width: '100%', height: 50 }}
-                                dropdownIconColor="#2F6A62"
-                            >
-                                <Picker.Item label="Male" value="Male" />
-                                <Picker.Item label="Female" value="Female" />
-                            </Picker>
+                        {/* Gender Column */}
+                        <View style={{ width: '48%' }}>
+                            <Text style={[styles.label, { marginBottom: 5 }]}>Gender</Text>
+                            <View style={[styles.input, { width: '100%', paddingHorizontal: 0, justifyContent: 'center' }]}>
+                                <Picker
+                                    selectedValue={gender}
+                                    onValueChange={(itemValue) => setGender(itemValue)}
+                                    style={{ width: '100%', height: 50 }}
+                                    dropdownIconColor="#2F6A62"
+                                >
+                                    <Picker.Item label="Male" value="Male" />
+                                    <Picker.Item label="Female" value="Female" />
+                                </Picker>
+                            </View>
                         </View>
-                    </View>
 
-                        {/* Neutered Toggle - Assuming Yes/No maps to Neutered status */}
-                        <View style={styles.toggleContainer}>
-                             <TouchableOpacity 
-                                style={[styles.toggleButton, isNeutered === 'Yes' && styles.toggleButtonActive]}
-                                onPress={() => setIsNeutered('Yes')}
-                            >
-                                <Text style={[styles.toggleText, isNeutered === 'Yes' && styles.toggleTextActive]}>Yes</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity 
-                                style={[styles.toggleButton, isNeutered === 'No' && styles.toggleButtonActive]}
-                                onPress={() => setIsNeutered('No')}
-                            >
-                                <Text style={[styles.toggleText, isNeutered === 'No' && styles.toggleTextActive]}>No</Text>
-                            </TouchableOpacity>
+                        {/* Sterilization Column */}
+                        <View style={{ width: '48%' }}>
+                            <Text style={[styles.label, { marginBottom: 5 }]}>Sterilization</Text>
+                            <View style={[styles.toggleContainer, { width: '100%' }]}>
+                                <TouchableOpacity 
+                                    style={[styles.toggleButton, isNeutered === 'Yes' && styles.toggleButtonActive]}
+                                    onPress={() => setIsNeutered('Yes')}
+                                >
+                                    <Text style={[styles.toggleText, isNeutered === 'Yes' && styles.toggleTextActive]}>Yes</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[styles.toggleButton, isNeutered === 'No' && styles.toggleButtonActive]}
+                                    onPress={() => setIsNeutered('No')}
+                                >
+                                    <Text style={[styles.toggleText, isNeutered === 'No' && styles.toggleTextActive]}>No</Text>
+                                </TouchableOpacity>
+                            </View>
                         </View>
                     </View>
 

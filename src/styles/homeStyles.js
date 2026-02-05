@@ -124,14 +124,21 @@ const styles = StyleSheet.create({
   /* ====== PHOTO CARD ====== */
   photoCard: {
     width: '100%',
-    height: 90,
-    backgroundColor: "rgba(178, 223, 219, 0.3)", // More transparent
+    // height: 90, // Removed fixed height
+    minHeight: 90, // Optional: Keep a minimum height if desired
+    backgroundColor: "rgba(178, 223, 219, 0.3)", 
     borderRadius: 20,
     paddingHorizontal: 20,
+    paddingVertical: 15, // Added vertical padding
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 20,
+  },
+
+  photoLeft: {
+      flex: 1,
+      paddingRight: 10,
   },
 
   
