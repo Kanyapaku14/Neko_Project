@@ -44,6 +44,7 @@ const handleSignIn = async () => {
                         style={styles.textimage} />
                 </View>
 
+
                 {/* Content Card */}
                 <View style={styles.contentContainer}>
                     <Text style={styles.title}>Welcome Back</Text>
@@ -79,6 +80,7 @@ const handleSignIn = async () => {
                             secureTextEntry
                         />
                     </View>
+
 
                     {/* Sign In Button */}
                     <TouchableOpacity style={styles.button} onPress={handleSignIn}>

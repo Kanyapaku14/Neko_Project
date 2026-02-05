@@ -21,7 +21,9 @@ export default function SignUpScreen({ onNavigate }) {
             return;
         }
 
+
         setLoading(true); // เริ่มหมุน
+
 
         try {
             // 2. ส่งข้อมูลไป Supabase (ต้องอยู่ภายในฟังก์ชัน async นี้)
@@ -62,10 +64,6 @@ export default function SignUpScreen({ onNavigate }) {
             setLoading(false); // หยุดหมุนไม่ว่าจะสำเร็จหรือล้มเหลว
         }
     };
-
-
-
-
 
 
 
