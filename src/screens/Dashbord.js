@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, SafeAreaView, TouchableOpacity, Dimensions } from 'react-native';
+import BottomNav from "../components/BottomNav";
 
 // ===== 1. Logic การคำนวณ (เหมือน ResultScreen) =====
 const getHealthStatus = (score) => {
@@ -9,7 +10,7 @@ const getHealthStatus = (score) => {
   return { label: "Attention", color: "#EB5757", text: "ควรปรึกษาแพทย์" };
 };
 
-export default function Dashboard({ onBack }) {
+export default function Dashboard({ onBack, onNavigate }) {
   // สมมติคะแนนรวม (ในอนาคตอาจจะดึงมาจาก Database)
   const [currentScore, setCurrentScore] = useState(75); 
   const status = getHealthStatus(currentScore);
@@ -62,6 +63,12 @@ export default function Dashboard({ onBack }) {
         </View>
 
       </ScrollView>
+
+      {/* ===== Bottom Nav ===== */}
+      <BottomNav
+        current="Overview"
+        onNavigate={onNavigate}
+      />
     </SafeAreaView>
   );
 }
@@ -74,7 +81,8 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     padding: 20,
-    paddingBottom: 40,
+    padding: 20,
+    paddingBottom: 100, // Increased for BottomNav
   },
   header: {
     marginBottom: 20,

@@ -172,6 +172,13 @@ export default function App() {
           />;
       }
 
+      if (authScreen === 'Overview') {
+          return <Dashboard 
+             onBack={() => setAuthScreen('Home')}
+             onNavigate={(screen) => setAuthScreen(screen)}
+          />;
+      }
+
       // ✅ Default Home
       return <HomeScreen 
           onLogout={navigateToSignIn} 
