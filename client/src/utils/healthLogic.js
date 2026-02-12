@@ -3,10 +3,10 @@
  */
 
 export const getHealthStatus = (score) => {
-  if (score >= 80) return { label: "Excellent", color: "#6FCF97", text: "สุขภาพแข็งแรงดีเยี่ยม" };
-  if (score >= 60) return { label: "Good", color: "#2D9CDB", text: "สุขภาพดี ปกติ" };
-  if (score >= 40) return { label: "Fair", color: "#F2C94C", text: "ควรเริ่มดูแลใกล้ชิด" };
-  return { label: "Attention", color: "#EB5757", text: "ควรปรึกษาสัตวแพทย์" };
+  if (score >= 80) return { label: "Excellent", color: "#6FCF97", text: "Excellent health condition" };
+  if (score >= 60) return { label: "Good", color: "#2D9CDB", text: "Generally good health" };
+  if (score >= 40) return { label: "Fair", color: "#F2C94C", text: "Requires close monitoring" };
+  return { label: "Attention", color: "#EB5757", text: "Consult a veterinarian" };
 };
 
 export const analyzeHealthLog = (log) => {
