@@ -52,7 +52,6 @@ export default function App() {
       setCurrentScreen('SignIn');
       setLoading(false);
   };
-
   const navigateToSignIn = () => {
       handleSignOut(); // Logout if navigating to SignIn
   };
