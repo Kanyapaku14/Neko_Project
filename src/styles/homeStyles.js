@@ -20,9 +20,16 @@ const styles = StyleSheet.create({
   },
 
   titleContainer: {
-     flexDirection: 'row',
+     position: 'absolute',
+     left: 0,
+     right: 0,
+     top: 10, // Match headerBg padding
+     bottom: 0,
+     justifyContent: 'center',
      alignItems: 'center',
-     gap: 5
+     flexDirection: 'row',
+     gap: 5,
+     zIndex: -1, 
   },
 
   title: {

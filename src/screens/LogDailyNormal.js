@@ -12,7 +12,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import supabase from "./config/supabaseClient";
 import { styles } from './Style/LogDailyStyle';
 
-export default function LogDailyNormal({ session, onBack }) {
+export default function LogDailyNormal({ session, onBack, initialDate }) {
     const [catId, setCatId] = useState(null);
     const [status, setStatus] = useState('Normal'); // Normal, Something off
     const [foodIntake, setFoodIntake] = useState('');
@@ -29,6 +29,9 @@ export default function LogDailyNormal({ session, onBack }) {
     const [notes, setNotes] = useState('');
 
     const [loading, setLoading] = useState(false);
+
+    // Format date for display if needed, or use logic
+    const logDate = initialDate ? new Date(initialDate) : new Date();
 
     useEffect(() => {
         if (session?.user) {
@@ -62,9 +65,14 @@ export default function LogDailyNormal({ session, onBack }) {
 
         const formatToEnum = (val) => val ? String(val).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : null;
 
+        const year = logDate.getFullYear();
+        const month = String(logDate.getMonth() + 1).padStart(2, '0');
+        const day = String(logDate.getDate()).padStart(2, '0');
+        const localDateString = `${year}-${month}-${day}`;
+
         const payload = {
             cat_id: catId,
-            log_date: new Date().toISOString().split('T')[0], // yyyy-mm-dd
+            log_date: localDateString, // Use local date strictly
             food_intake: foodIntake ? Number(foodIntake) : null,
             water_level: waterIntake ? Number(waterIntake) : null,
             urine_level_enum: String(getLevelValue(urineLevel)).toLowerCase(),
@@ -216,7 +224,10 @@ export default function LogDailyNormal({ session, onBack }) {
                 <TouchableOpacity onPress={onBack} style={styles.backBtn}>
                     <Ionicons name="chevron-back" size={24} color="#000000ff" />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>daily log <Text style={{ fontSize: 10, color: '#999' }}>v1.8</Text></Text>
+                <Text style={styles.headerTitle}>
+                    daily log {initialDate ? `(${logDate.getDate()}/${logDate.getMonth() + 1})` : ''} 
+                    <Text style={{ fontSize: 10, color: '#999' }}> v1.8</Text>
+                </Text>
                 <View style={{ width: 24 }} />
             </View>
 

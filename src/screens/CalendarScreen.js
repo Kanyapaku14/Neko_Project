@@ -21,8 +21,8 @@ const MONTHS = [
 ];
 
 export default function CalendarScreen({ onNavigate, session }) {
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 0, 1)); // Start at Jan 2026 as per design
-  const [selectedDate, setSelectedDate] = useState(new Date(2026, 0, 17)); // Default selection
+  const [currentDate, setCurrentDate] = useState(new Date()); 
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [dailyLog, setDailyLog] = useState(null);
   const [loading, setLoading] = useState(false);
   const [catId, setCatId] = useState(null);
@@ -48,15 +48,18 @@ export default function CalendarScreen({ onNavigate, session }) {
     const fetchLog = async () => {
       if (!catId || !selectedDate) return;
       
-      setLoading(true);
-      const dateString = selectedDate.toISOString().split('T')[0];
+      // Use local date string instead of UTC
+      const year = selectedDate.getFullYear();
+      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(selectedDate.getDate()).padStart(2, '0');
+      const dateString = `${year}-${month}-${day}`;
       
       const { data, error } = await supabase
         .from('daily_logs')
         .select('*')
         .eq('cat_id', catId)
         .eq('log_date', dateString)
-        .single();
+        .maybeSingle(); 
       
       setDailyLog(data || null);
       setLoading(false);
@@ -162,19 +165,22 @@ export default function CalendarScreen({ onNavigate, session }) {
         {loading ? (
           <ActivityIndicator size="small" color="#147C78" style={{ marginTop: 20 }} />
         ) : dailyLog ? (
-          <View style={styles.textLogContainer}>
-             <View style={styles.textLogRow}>
-                <MaterialCommunityIcons name="food-apple" size={18} color="#147C78" />
-                <Text style={styles.textLogLabel}>Food Intake: </Text>
-                <Text style={styles.textLogValue}>{dailyLog.food_intake || '-'} g</Text>
-             </View>
+          <View>
+            {/* Summary Card (Food & Water) */}
+            <View style={styles.summaryCard}>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>FOOD</Text>
+                <Text style={styles.summaryValue}>{dailyLog.food_intake || '-'} g</Text>
+              </View>
+              <View style={styles.summaryDivider} />
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>WATER</Text>
+                <Text style={styles.summaryValue}>{dailyLog.water_level || '-'} ml</Text>
+              </View>
+            </View>
 
-             <View style={styles.textLogRow}>
-                <MaterialCommunityIcons name="water" size={18} color="#147C78" />
-                <Text style={styles.textLogLabel}>Water Intake: </Text>
-                <Text style={styles.textLogValue}>{dailyLog.water_level || '-'} ml</Text>
-             </View>
-
+            {/* Detailed List (Optional: keeping it for completeness but styled less prominently if needed, or just below) */}
+            <View style={styles.textLogContainer}>
              <View style={styles.textLogRow}>
                 <MaterialCommunityIcons name="water-percent" size={18} color="#147C78" />
                 <Text style={styles.textLogLabel}>Urine: </Text>
@@ -220,6 +226,7 @@ export default function CalendarScreen({ onNavigate, session }) {
                 </View>
              )}
           </View>
+        </View>
         ) : (
           <Text style={styles.noRecordText}>There is no record for this day.</Text>
         )}
@@ -230,9 +237,14 @@ export default function CalendarScreen({ onNavigate, session }) {
         </TouchableOpacity>
 
         {/* Backdated Edit Button */}
-        <TouchableOpacity style={styles.editButton} onPress={() => onNavigate('LogDaily')}>
+        <TouchableOpacity 
+            style={styles.editButton} 
+            onPress={() => onNavigate({ screen: 'LogDaily', params: { date: selectedDate.toISOString() } })}
+        >
           <Feather name="plus-circle" size={18} color="#147C78" style={{ marginRight: 8 }} />
-          <Text style={styles.editButtonText}>Add Log Today</Text>
+          <Text style={styles.editButtonText}>
+            Add Log for {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -282,7 +294,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   weekDayText: {
-    width: (width * 0.9 - 32) / 7,
+    flex: 1,
     textAlign: "center",
     fontSize: 10,
     color: "#147C78",
@@ -293,7 +305,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   dayCell: {
-    width: (width * 0.9 - 32) / 7,
+    width: `${100 / 7}%`,
     height: 36,
     alignItems: "center",
     justifyContent: "center",
@@ -426,5 +438,46 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "bold", // Bolder
     fontSize: 18, // Larger
+  },
+  
+  /* ====== Summary Card Styles ====== */
+  summaryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)', // Semi-transparent like the example
+    borderRadius: 12,
+    paddingVertical: 15,
+    paddingHorizontal: 10,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#147C78', // Accent border like the example
+  },
+  summaryItem: {
+    flex: 1,
+    alignItems: 'flex-start', // Align left like example
+    paddingLeft: 10,
+  },
+  summaryLabel: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#147C78',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  summaryValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFFFFF', // White text like the example
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  summaryDivider: {
+    width: 1,
+    height: '80%',
+    backgroundColor: '#147C78',
+    opacity: 0.5,
+    marginHorizontal: 5,
   },
 });

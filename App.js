@@ -151,10 +151,11 @@ export default function App() {
          />;
       }
       
-      if (authScreen === 'LogDaily') {
+      if (authScreen === 'LogDaily' || (typeof authScreen === 'object' && authScreen.screen === 'LogDaily')) {
          return <LogDailyNormal 
             session={session}
             onBack={() => setAuthScreen('Home')} 
+            initialDate={typeof authScreen === 'object' ? authScreen.params?.date : null}
          />;
       }
 
@@ -174,6 +175,7 @@ export default function App() {
 
       if (authScreen === 'Overview') {
           return <Dashboard 
+             session={session}
              onBack={() => setAuthScreen('Home')}
              onNavigate={(screen) => setAuthScreen(screen)}
           />;
@@ -210,11 +212,11 @@ export default function App() {
       )}
 
       {/* ===== ✅ 3. เพิ่มหน้า LogDaily ตรงนี้ ===== */}
-      {/* ===== ✅ 3. เพิ่มหน้า LogDaily ตรงนี้ ===== */}
       {currentScreen === 'LogDaily' && (
         <LogDailyNormal 
             session={session}
             onBack={navigateToHome}
+            initialDate={authScreen.params?.date} // Pass date if available
         />
       )}
 
