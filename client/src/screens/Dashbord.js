@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, SafeAreaView, TouchableOpacity, Dimensions, ActivityIndicator } from 'react-native';
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import BottomNav from "../components/BottomNav";
 import HealthTrendsChart from "../components/HealthTrendsChart";
 import HomeHeader from "../components/HomeHeader";
@@ -243,6 +244,55 @@ export default function Dashboard({ onBack, onNavigate, session }) {
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+
+        {/* ===== Timeline & Export Buttons ===== */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 16, marginBottom: 24 }}>
+          <TouchableOpacity 
+            style={{ 
+              flex: 1, 
+              backgroundColor: '#B8D8D4', 
+              borderRadius: 24, 
+              paddingVertical: 14, 
+              flexDirection: 'row', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 4,
+              elevation: 3
+            }}
+            onPress={() => onNavigate && onNavigate('Timeline')}
+          >
+            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#2D4A47', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+               <MaterialCommunityIcons name="chart-timeline-variant" size={20} color="#fff" />
+            </View>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#2D4A47' }}>Timeline</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={{ 
+              flex: 1, 
+              backgroundColor: '#B8D8D4', 
+              borderRadius: 24, 
+              paddingVertical: 14, 
+              flexDirection: 'row', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 4,
+              elevation: 3
+            }}
+            onPress={() => console.log('Export pressed')}
+          >
+            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#2D4A47', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+               <MaterialCommunityIcons name="export-variant" size={20} color="#fff" />
+            </View>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#2D4A47' }}>Export</Text>
+          </TouchableOpacity>
         </View>
 
       
