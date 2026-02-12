@@ -13,6 +13,7 @@ import LogDailyNormal from './src/screens/LogDailyNormal';
 import HomeScreen from './src/screens/HomeScreen'; // อย่าลืม Import Home ด้วยถ้าจะใช้
 import CalendarScreen from './src/screens/CalendarScreen'; 
 import ResultScreen from './src/screens/ResultScreen';
+import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScreen
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import { useFonts } from 'expo-font';
@@ -181,6 +182,14 @@ export default function App() {
           />;
       }
 
+      // ✅ Timeline Screen
+      if (authScreen === 'Timeline') {
+          return <TimelineScreen 
+            session={session}
+            onBack={() => setAuthScreen('Overview')} // Back to Dashboard
+          />;
+      }
+
       // ✅ Default Home
       return <HomeScreen 
           onLogout={navigateToSignIn} 
@@ -219,6 +228,8 @@ export default function App() {
             initialDate={authScreen.params?.date} // Pass date if available
         />
       )}
+
+
 
     </>
   );
