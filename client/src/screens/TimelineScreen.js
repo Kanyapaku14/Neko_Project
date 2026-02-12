@@ -103,7 +103,7 @@ export default function TimelineScreen({ session, onBack }) {
                     <Text style={styles.activeTabText}>ALL</Text>
                 </TouchableOpacity>
                  <TouchableOpacity style={styles.tab}>
-                    <Text style={styles.inactiveTabText}>Camera</Text>
+                    <Text style={styles.inactiveTabText}>log</Text>
                 </TouchableOpacity>
             </View>
 
