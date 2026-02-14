@@ -6,9 +6,9 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  StyleSheet
+  StyleSheet,
+  Modal // ✅ Import Modal เพิ่มเข้ามา
 } from "react-native";
-// ✅ 1. Import LinearGradient
 import { LinearGradient } from "expo-linear-gradient";
 import styles from "../styles/resultStyles";
 
@@ -21,7 +21,6 @@ const DISEASE_OPTIONS = [
   { label: "โรคเบาหวาน", value: "Diabetes" },
 ];
 
-// ===== ค่าเริ่มต้น (Default Value = 0 / No Data) =====
 const INITIAL_RISK_DATA = [
   { label: "Kidney Disease", value: "No Data", score: 0 },
   { label: "Diabetes", value: "No Data", score: 0 },
@@ -30,7 +29,17 @@ const INITIAL_RISK_DATA = [
   { label: "Feline Panleukopenia", value: "No Data", score: 0 },
 ];
 
-// ===== Helper function: จัดรูปแบบ JSON =====
+const getRiskColor = (riskLevel) => {
+  switch (riskLevel) {
+    case "Normal": return "#2ecc71";
+    case "Low": return "#1abc9c";
+    case "Moderate": return "#f1c40f";
+    case "High": return "#e67e22";
+    case "Extreme": return "#e74c3c";
+    default: return "#bdc3c7";
+  }
+};
+
 const formatPreventionData = (data) => {
   if (!data) return "";
   let text = `${data.intro}\n\n`;
@@ -53,18 +62,18 @@ const formatCounselingData = (data) => {
   return text.trim();
 };
 
-// ===== Factory Methods =====
 const ResultScreenFactory = {
   async fetchAssessment(catId) {
     try {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return {
-        success: true,
-        riskData: INITIAL_RISK_DATA,
-        overallRisk: "Waiting for analysis...",
-        summaryTitle: "Processing Data",
-        summaryDesc: "Please wait while we analyze the health data from the server.",
-      };
+      const API_URL = "http://10.0.2.2:3000/api/assessment";
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ catId }),
+      });
+
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      return await response.json();
     } catch (error) {
       console.error("fetchAssessment error:", error);
       return { success: false, error: error.message };
@@ -92,36 +101,23 @@ const ResultScreenFactory = {
       console.error("fetchGuidance error:", error.message);
       return { success: false, error: error.message };
     }
-  },
-
-  validateBeforeSave(selectedCondition, preventionText, counselingText) {
-    const errors = [];
-    if (!selectedCondition) errors.push("Please select a condition");
-    return { isValid: errors.length === 0, errors };
-  },
-
-  async saveAssessment(payload) {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return { success: true, assessmentId: "mock-id-123" };
   }
 };
 
-// ===== Main Component =====
-export default function ResultScreen({ onBack, onSave, route }) {
+export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
   const [loadingData, setLoadingData] = useState(true);
   const [loadingGuidance, setLoadingGuidance] = useState(false);
-  const [savingAssessment, setSavingAssessment] = useState(false);
 
-  // Dropdown State
+  // ✅ State สำหรับควบคุมการเปิด/ปิด Pop-up แจ้งเตือนเมื่อไม่มีข้อมูล
+  const [showNoDataModal, setShowNoDataModal] = useState(false);
+
   const [selectedConditionValue, setSelectedConditionValue] = useState(null);
   const [selectedConditionLabel, setSelectedConditionLabel] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // Data State
   const [preventionData, setPreventionData] = useState(null);
   const [counselingData, setCounselingData] = useState(null);
 
-  // API Data
   const [riskData, setRiskData] = useState(INITIAL_RISK_DATA);
   const [overallRisk, setOverallRisk] = useState("Unknown");
   const [summaryTitle, setSummaryTitle] = useState("");
@@ -129,25 +125,48 @@ export default function ResultScreen({ onBack, onSave, route }) {
 
   const catId = route?.params?.catId;
 
-  // Load Initial Data
   useEffect(() => {
     const loadInitialData = async () => {
+      if (!catId) {
+        setShowNoDataModal(true); // เปิด Modal แจ้งเตือน
+        setLoadingData(false);
+        return;
+      }
+
       setLoadingData(true);
       try {
         const result = await ResultScreenFactory.fetchAssessment(catId);
+
         if (result.success) {
-          setRiskData(result.riskData);
-          setOverallRisk(result.overallRisk);
-          setSummaryTitle(result.summaryTitle);
-          setSummaryDesc(result.summaryDesc);
+          const validRiskData = (result.riskData && result.riskData.length > 0)
+            ? result.riskData
+            : INITIAL_RISK_DATA;
+
+          setRiskData(validRiskData);
+          setOverallRisk(result.overallRisk || "No Data");
+          setSummaryTitle(result.summaryTitle || "");
+          setSummaryDesc(result.summaryDesc || "");
+
+          // ตรวจสอบข้อมูลว่าง
+          if (result.overallRisk === "No Data") {
+            setShowNoDataModal(true); // เปิด Modal แทน Alert แบบเดิม
+          }
+
+        } else {
+          Alert.alert("Error", "ไม่สามารถวิเคราะห์ข้อมูลได้");
+          setRiskData(INITIAL_RISK_DATA);
         }
-      } catch (error) { console.error(error); }
+      } catch (error) {
+        console.error(error);
+        Alert.alert("Connection Error", "ไม่สามารถติดต่อ Server ได้");
+        setRiskData(INITIAL_RISK_DATA);
+      }
       finally { setLoadingData(false); }
     };
+
     loadInitialData();
   }, [catId]);
 
-  // Fetch Guidance
   useEffect(() => {
     if (!selectedConditionValue) {
       setPreventionData(null);
@@ -170,26 +189,69 @@ export default function ResultScreen({ onBack, onSave, route }) {
     loadGuidance();
   }, [selectedConditionValue, catId]);
 
-  const handleSave = async () => {
-    Alert.alert("Success", "บันทึกเรียบร้อย (Mock)");
-  };
-
   if (loadingData) {
     return (
-      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+      <LinearGradient
+        colors={['#FFFFFF', '#B2E1DB']}
+        locations={[0.42, 1]}
+        style={[styles.container, { justifyContent: "center", alignItems: "center" }]}
+      >
         <ActivityIndicator size="large" color="#1abc9c" />
-        <Text style={{ marginTop: 10 }}>Loading assessment...</Text>
-      </View>
+        <Text style={{ marginTop: 10, color: '#666' }}>กำลังวิเคราะห์ข้อมูลสุขภาพแมว...</Text>
+      </LinearGradient>
     );
   }
 
   return (
-    // ✅ 2. เปลี่ยน View เป็น LinearGradient และตั้งค่า สี/ตำแหน่ง
     <LinearGradient
       colors={['#FFFFFF', '#B2E1DB']}
       locations={[0.42, 1]}
       style={styles.container}
     >
+      {/* ========================================================= */}
+      {/* ✅ Custom Modal (Pop-up แบบแต่งสีได้) */}
+      {/* ========================================================= */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showNoDataModal}
+        onRequestClose={() => setShowNoDataModal(false)}
+      >
+        <View style={customStyles.modalOverlay}>
+          <View style={customStyles.modalContainer}>
+
+            <Text style={customStyles.modalTitle}>ยังไม่มีข้อมูลสุขภาพ</Text>
+
+            <Text style={customStyles.modalText}>
+              AI ต้องการข้อมูลประจำวัน (Daily Log) เพื่อใช้ประเมินความเสี่ยง ไปบันทึกข้อมูลของน้องแมวตอนนี้เลยไหม?
+            </Text>
+
+            <View style={customStyles.modalButtonRow}>
+              {/* ปุ่มสีเทาอ่อน (Cancel) */}
+              <TouchableOpacity
+                style={[customStyles.modalButton, customStyles.modalButtonCancel]}
+                onPress={() => setShowNoDataModal(false)}
+              >
+                <Text style={customStyles.modalButtonCancelText}>ไว้ทีหลัง</Text>
+              </TouchableOpacity>
+
+              {/* ปุ่มสีเด่น (OK -> ไปหน้า LogDaily) */}
+              <TouchableOpacity
+                style={[customStyles.modalButton, customStyles.modalButtonConfirm]}
+                onPress={() => {
+                  setShowNoDataModal(false);
+                  if (onNavigate) onNavigate('LogDaily');
+                }}
+              >
+                <Text style={customStyles.modalButtonConfirmText}>บันทึกเลย</Text>
+              </TouchableOpacity>
+            </View>
+
+          </View>
+        </View>
+      </Modal>
+      {/* ========================================================= */}
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack}><Text style={styles.backArrow}>‹</Text></TouchableOpacity>
@@ -198,7 +260,6 @@ export default function ResultScreen({ onBack, onSave, route }) {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 150 }} nestedScrollEnabled={true}>
-        {/* Risk Circle */}
         <View style={styles.circleWrapper}>
           <View style={styles.circleBg}>
             <View style={styles.circleProgress} /><Text style={styles.riskText}>{overallRisk}</Text>
@@ -207,34 +268,37 @@ export default function ResultScreen({ onBack, onSave, route }) {
           <Text style={styles.subText}>Overall Health Risk</Text>
         </View>
 
-        {/* Summary */}
         <View style={styles.summary}>
           <Text style={styles.summaryTitle}>{summaryTitle}</Text>
           <Text style={styles.summaryDesc}>{summaryDesc}</Text>
         </View>
 
-        {/* ===== Risk Breakdown ===== */}
         <Text style={styles.sectionTitle}>Risk Breakdown</Text>
-        {riskData.map((item, index) => (
-          <View key={index} style={styles.riskItem}>
-            <View style={styles.riskRow}>
-              <Text style={styles.riskLabel}>{item.label}</Text>
-              <Text style={styles.riskValue}>{item.value}</Text>
+        {riskData.map((item, index) => {
+          const barColor = getRiskColor(item.value);
+          return (
+            <View key={index} style={styles.riskItem}>
+              <View style={styles.riskRow}>
+                <Text style={styles.riskLabel}>{item.label}</Text>
+                <Text style={[styles.riskValue, { color: barColor }]}>{item.value}</Text>
+              </View>
+              <View style={styles.riskBarBg}>
+                <View
+                  style={[
+                    styles.riskBarFill,
+                    {
+                      width: `${item.score}%`,
+                      backgroundColor: barColor
+                    }
+                  ]}
+                />
+              </View>
             </View>
-            <View style={styles.riskBarBg}>
-              <View
-                style={[
-                  styles.riskBarFill,
-                  { width: `${item.score}%` }
-                ]}
-              />
-            </View>
-          </View>
-        ))}
+          );
+        })}
 
         <Text style={styles.sectionTitle}>Recommended Approach</Text>
 
-        {/* Card 1: Disease Prevention */}
         <View style={[styles.card, { zIndex: 2000 }]}>
           <Text style={styles.cardTitle}>Disease Prevention</Text>
           <View style={{ marginBottom: 15, zIndex: 3000 }}>
@@ -293,7 +357,6 @@ export default function ResultScreen({ onBack, onSave, route }) {
           )}
         </View>
 
-        {/* Card 2: Counseling */}
         <View style={[styles.card, { zIndex: 1000 }]}>
           <Text style={styles.cardTitle}>Counseling</Text>
           {loadingGuidance ? (
@@ -319,10 +382,6 @@ export default function ResultScreen({ onBack, onSave, route }) {
         </View>
 
       </ScrollView>
-
-      <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-        <Text style={styles.saveButtonText}>Save Assessment</Text>
-      </TouchableOpacity>
     </LinearGradient>
   );
 }
@@ -331,5 +390,66 @@ const customStyles = StyleSheet.create({
   dropdownHeader: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 50 },
   dropdownList: { marginTop: 5, borderWidth: 1, borderColor: '#eee', borderRadius: 8, backgroundColor: '#fff', position: 'absolute', top: 50, left: 0, right: 0, zIndex: 9999, elevation: 5 },
   dropdownItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  dropdownItemActive: { backgroundColor: '#e6fffa' }
+  dropdownItemActive: { backgroundColor: '#e6fffa' },
+
+  // ✅ สไตล์สำหรับ Custom Modal (Pop-up)
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)', // พื้นหลังดำโปร่งใส
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  modalContainer: {
+    width: '82%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 12
+  },
+  modalText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22
+  },
+  modalButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%'
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginHorizontal: 6
+  },
+  modalButtonCancel: {
+    backgroundColor: '#F0F0F0' // สีเทาอ่อนมากๆ ดูไม่เด่น
+  },
+  modalButtonConfirm: {
+    backgroundColor: '#1abc9c' // สีเขียวมิ้นต์ สีหลักแอปให้ดูเด่นน่ากด
+  },
+  modalButtonCancelText: {
+    color: '#7f8c8d', // อักษรสีเทาเข้ม
+    fontWeight: 'bold',
+    fontSize: 15
+  },
+  modalButtonConfirmText: {
+    color: '#fff', // อักษรสีขาว
+    fontWeight: 'bold',
+    fontSize: 15
+  }
 });
