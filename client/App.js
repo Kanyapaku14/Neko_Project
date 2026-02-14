@@ -16,6 +16,8 @@ import ResultScreen from './src/screens/ResultScreen';
 import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScreen
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
+import CameraScreen from './src/screens/CameraScreen';
+
 import { useFonts } from 'expo-font';
 import { 
   Inter_400Regular, 
@@ -187,6 +189,10 @@ export default function App() {
             session={session}
             onBack={() => setAuthScreen('Overview')} // Back to Dashboard
           />;
+      }
+
+      if (authScreen === 'Camera') {
+          return <CameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
       }
 
       // ✅ Default Home
