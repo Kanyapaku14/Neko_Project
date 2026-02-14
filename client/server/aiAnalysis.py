@@ -217,7 +217,7 @@ def get_assessment():
         prompt = build_assessment_prompt(cat_data, logs_text)
         
         response = client.models.generate_content(
-            model="gemini-1.5-flash", # ใช้ model ที่เร็วและเสถียร
+            model="gemini-3-flash-preview", # ใช้ model ที่เร็วและเสถียร
             contents=prompt,
             config=types.GenerateContentConfig(response_mime_type="application/json")
         )
