@@ -1,180 +1,335 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
+  Alert,
+  StyleSheet
 } from "react-native";
+// ✅ 1. Import LinearGradient
+import { LinearGradient } from "expo-linear-gradient";
 import styles from "../styles/resultStyles";
 
-// ===== Risk Helper =====
-const getRiskMeta = (score = 0) => {
-  if (score <= 20)
-    return { label: "Healthy", color: "#6FCF97", text: "No significant risk" };
-  if (score <= 40)
-    return { label: "Low Risk", color: "#F2C94C", text: "Minor changes" };
-  if (score <= 60)
-    return {
-      label: "Moderate Risk",
-      color: "#F2994A",
-      text: "Closer monitoring recommended",
-    };
-  if (score <= 80)
-    return {
-      label: "High Risk",
-      color: "#EB5757",
-      text: "Vet consultation advised",
-    };
-  return {
-    label: "Critical",
-    color: "#D32F2F",
-    text: "Immediate attention",
-  };
+// ===== รายชื่อโรค =====
+const DISEASE_OPTIONS = [
+  { label: "โรคนิ่ว", value: "Urolithiasis" },
+  { label: "โรคไต", value: "Kidney Disease" },
+  { label: "โรคตับและฟัน", value: "Gum Disease" },
+  { label: "โรคหัด", value: "Feline Panleukopenia" },
+  { label: "โรคเบาหวาน", value: "Diabetes" },
+];
+
+// ===== ค่าเริ่มต้น (Default Value = 0 / No Data) =====
+const INITIAL_RISK_DATA = [
+  { label: "Kidney Disease", value: "No Data", score: 0 },
+  { label: "Diabetes", value: "No Data", score: 0 },
+  { label: "Urolithiasis", value: "No Data", score: 0 },
+  { label: "Gum Disease", value: "No Data", score: 0 },
+  { label: "Feline Panleukopenia", value: "No Data", score: 0 },
+];
+
+// ===== Helper function: จัดรูปแบบ JSON =====
+const formatPreventionData = (data) => {
+  if (!data) return "";
+  let text = `${data.intro}\n\n`;
+  if (data.points && Array.isArray(data.points)) {
+    data.points.forEach((p) => {
+      text += `• ${p.title}:\n   ${p.desc}\n\n`;
+    });
+  }
+  return text.trim();
 };
 
-export default function ResultScreen({ onBack, onSave }) {
-  const [selectedCondition, setSelectedCondition] = useState(null);
+const formatCounselingData = (data) => {
+  if (!data) return "";
+  let text = `${data.intro}\n\n`;
+  if (data.red_flags && Array.isArray(data.red_flags)) {
+    data.red_flags.forEach((f) => {
+      text += `⚠️ ${f.symptom}:\n    ${f.meaning}\n\n`;
+    });
+  }
+  return text.trim();
+};
 
-  const riskData = [
-    { label: "Kidney Disease", score: 35 },
-    { label: "Diabetes", score: 20 },
-    { label: "Urolithiasis", score: 10 },
-    { label: "Gum Disease", score: 15 },
-    { label: "Feline Panleukopenia", score: 5 },
-  ];
+// ===== Factory Methods =====
+const ResultScreenFactory = {
+  async fetchAssessment(catId) {
+    try {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return {
+        success: true,
+        riskData: INITIAL_RISK_DATA,
+        overallRisk: "Waiting for analysis...",
+        summaryTitle: "Processing Data",
+        summaryDesc: "Please wait while we analyze the health data from the server.",
+      };
+    } catch (error) {
+      console.error("fetchAssessment error:", error);
+      return { success: false, error: error.message };
+    }
+  },
 
-  // ===== Overall Score =====
-  const overallScore =
-    riskData.length > 0
-      ? Math.round(
-          riskData.reduce((sum, r) => sum + (r.score || 0), 0) / riskData.length
-        )
-      : 0;
+  async fetchGuidance(condition, catId) {
+    try {
+      const API_URL = "http://10.0.2.2:3000/api/guidance";
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ condition, catId }),
+      });
 
-  const overallMeta = getRiskMeta(overallScore);
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      const data = await response.json();
 
-  const conditions = ["Vomiting", "Diarrhea", "Lethargy"];
+      return {
+        success: true,
+        preventionData: data.prevention,
+        counselingData: data.counseling
+      };
+    } catch (error) {
+      console.error("fetchGuidance error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
+  validateBeforeSave(selectedCondition, preventionText, counselingText) {
+    const errors = [];
+    if (!selectedCondition) errors.push("Please select a condition");
+    return { isValid: errors.length === 0, errors };
+  },
+
+  async saveAssessment(payload) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return { success: true, assessmentId: "mock-id-123" };
+  }
+};
+
+// ===== Main Component =====
+export default function ResultScreen({ onBack, onSave, route }) {
+  const [loadingData, setLoadingData] = useState(true);
+  const [loadingGuidance, setLoadingGuidance] = useState(false);
+  const [savingAssessment, setSavingAssessment] = useState(false);
+
+  // Dropdown State
+  const [selectedConditionValue, setSelectedConditionValue] = useState(null);
+  const [selectedConditionLabel, setSelectedConditionLabel] = useState("");
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  // Data State
+  const [preventionData, setPreventionData] = useState(null);
+  const [counselingData, setCounselingData] = useState(null);
+
+  // API Data
+  const [riskData, setRiskData] = useState(INITIAL_RISK_DATA);
+  const [overallRisk, setOverallRisk] = useState("Unknown");
+  const [summaryTitle, setSummaryTitle] = useState("");
+  const [summaryDesc, setSummaryDesc] = useState("");
+
+  const catId = route?.params?.catId;
+
+  // Load Initial Data
+  useEffect(() => {
+    const loadInitialData = async () => {
+      setLoadingData(true);
+      try {
+        const result = await ResultScreenFactory.fetchAssessment(catId);
+        if (result.success) {
+          setRiskData(result.riskData);
+          setOverallRisk(result.overallRisk);
+          setSummaryTitle(result.summaryTitle);
+          setSummaryDesc(result.summaryDesc);
+        }
+      } catch (error) { console.error(error); }
+      finally { setLoadingData(false); }
+    };
+    loadInitialData();
+  }, [catId]);
+
+  // Fetch Guidance
+  useEffect(() => {
+    if (!selectedConditionValue) {
+      setPreventionData(null);
+      setCounselingData(null);
+      return;
+    }
+    const loadGuidance = async () => {
+      setLoadingGuidance(true);
+      try {
+        const result = await ResultScreenFactory.fetchGuidance(selectedConditionValue, catId);
+        if (result.success) {
+          setPreventionData(result.preventionData);
+          setCounselingData(result.counselingData);
+        } else {
+          Alert.alert("Connection Error", "ไม่สามารถเชื่อมต่อ Server ได้");
+        }
+      } catch (error) { Alert.alert("Error", "Failed to load guidance"); }
+      finally { setLoadingGuidance(false); }
+    };
+    loadGuidance();
+  }, [selectedConditionValue, catId]);
+
+  const handleSave = async () => {
+    Alert.alert("Success", "บันทึกเรียบร้อย (Mock)");
+  };
+
+  if (loadingData) {
+    return (
+      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+        <ActivityIndicator size="large" color="#1abc9c" />
+        <Text style={{ marginTop: 10 }}>Loading assessment...</Text>
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      {/* ===== Header ===== */}
+    // ✅ 2. เปลี่ยน View เป็น LinearGradient และตั้งค่า สี/ตำแหน่ง
+    <LinearGradient
+      colors={['#FFFFFF', '#B2E1DB']}
+      locations={[0.42, 1]}
+      style={styles.container}
+    >
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack}>
-          <Text style={styles.backArrow}>‹</Text>
-        </TouchableOpacity>
+        <TouchableOpacity onPress={onBack}><Text style={styles.backArrow}>‹</Text></TouchableOpacity>
         <Text style={styles.headerTitle}>Assessment</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-     {/* ===== Risk Circle ===== */}
-<View style={styles.circleWrapper}>
-  <View style={styles.circleBg}>
-    <View
-      style={[
-        styles.circleProgress,
-        {
-          borderColor: overallMeta.color,
-          transform: [{ rotate: `${(overallScore / 100) * 360}deg` }],
-        },
-      ]}
-    />
-    <Text style={[styles.riskText, { color: overallMeta.color }]}>
-      {overallMeta.label}
-    </Text>
-  </View>
+      <ScrollView contentContainerStyle={{ paddingBottom: 150 }} nestedScrollEnabled={true}>
+        {/* Risk Circle */}
+        <View style={styles.circleWrapper}>
+          <View style={styles.circleBg}>
+            <View style={styles.circleProgress} /><Text style={styles.riskText}>{overallRisk}</Text>
+          </View>
+          <Text style={styles.recommendText}>Health Assessment Result</Text>
+          <Text style={styles.subText}>Overall Health Risk</Text>
+        </View>
 
-  <Text style={[styles.recommendText, { color: overallMeta.color }]}>
-    {overallMeta.text}
-  </Text>
-  <Text style={styles.subText}>Overall Health Risk ({overallScore}%)</Text>
-</View>
-
-
-        {/* ===== Summary ===== */}
+        {/* Summary */}
         <View style={styles.summary}>
-          <Text style={styles.summaryTitle}>
-            Moderate health risk detected
-          </Text>
-          <Text style={styles.summaryDesc}>
-            Some changes were observed, but no serious health risks are detected
-            at this time.
-          </Text>
+          <Text style={styles.summaryTitle}>{summaryTitle}</Text>
+          <Text style={styles.summaryDesc}>{summaryDesc}</Text>
         </View>
 
         {/* ===== Risk Breakdown ===== */}
-<Text style={styles.sectionTitle}>Risk Breakdown</Text>
+        <Text style={styles.sectionTitle}>Risk Breakdown</Text>
+        {riskData.map((item, index) => (
+          <View key={index} style={styles.riskItem}>
+            <View style={styles.riskRow}>
+              <Text style={styles.riskLabel}>{item.label}</Text>
+              <Text style={styles.riskValue}>{item.value}</Text>
+            </View>
+            <View style={styles.riskBarBg}>
+              <View
+                style={[
+                  styles.riskBarFill,
+                  { width: `${item.score}%` }
+                ]}
+              />
+            </View>
+          </View>
+        ))}
 
-{riskData.map((item, index) => {
-  const meta = getRiskMeta(item.score || 0);
-
-  return (
-    <View key={index} style={styles.riskItem}>
-      <View style={styles.riskRow}>
-        <Text style={styles.riskLabel}>{item.label}</Text>
-        <Text style={[styles.riskValue, { color: meta.color }]}>
-          {item.score}% · {meta.label}
-        </Text>
-      </View>
-
-      <View style={styles.riskBarBg}>
-        <View
-          style={[
-            styles.riskBarFill,
-            {
-              width: `${item.score || 0}%`,
-              backgroundColor: meta.color,
-            },
-          ]}
-        />
-      </View>
-    </View>
-  );
-})}
-
-
-
-        {/* ===== Recommended Approach ===== */}
         <Text style={styles.sectionTitle}>Recommended Approach</Text>
 
-        <View style={styles.card}>
+        {/* Card 1: Disease Prevention */}
+        <View style={[styles.card, { zIndex: 2000 }]}>
           <Text style={styles.cardTitle}>Disease Prevention</Text>
-
-          {/* ===== Selectable Condition ===== */}
-          {conditions.map((item) => (
+          <View style={{ marginBottom: 15, zIndex: 3000 }}>
             <TouchableOpacity
-              key={item}
-              style={[
-                styles.optionItem,
-                selectedCondition === item && styles.optionActive,
-              ]}
-              onPress={() => setSelectedCondition(item)}
+              activeOpacity={0.8}
+              onPress={() => setIsDropdownOpen(!isDropdownOpen)}
+              style={customStyles.dropdownHeader}
             >
-              <Text
-                style={[
-                  styles.optionText,
-                  selectedCondition === item && styles.optionTextActive,
-                ]}
-              >
-                {item}
+              <Text style={{ fontSize: 16, color: selectedConditionLabel ? '#000' : '#888' }}>
+                {selectedConditionLabel || "เลือกโรคเพื่อดูคำแนะนำ..."}
               </Text>
+              <Text style={{ fontSize: 14, color: '#666' }}>{isDropdownOpen ? "▲" : "▼"}</Text>
             </TouchableOpacity>
-          ))}
 
-          <Text style={styles.cardDesc}>
-            {selectedCondition
-              ? `Guidance for ${selectedCondition.toLowerCase()} will be shown here.`
-              : "Please select a condition to see preventive advice."}
-          </Text>
+            {isDropdownOpen && (
+              <View style={customStyles.dropdownList}>
+                {DISEASE_OPTIONS.map((item, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[customStyles.dropdownItem, selectedConditionValue === item.value && customStyles.dropdownItemActive]}
+                    onPress={() => {
+                      setSelectedConditionValue(item.value);
+                      setSelectedConditionLabel(item.label);
+                      setIsDropdownOpen(false);
+                    }}
+                  >
+                    <Text style={{ fontSize: 16, color: selectedConditionValue === item.value ? '#1abc9c' : '#333' }}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {loadingGuidance ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color="#1abc9c" />
+              <Text style={styles.loadingText}>กำลังขอคำแนะนำจาก AI...</Text>
+            </View>
+          ) : (
+            <View>
+              {preventionData ? (
+                <>
+                  <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8, color: '#333' }}>
+                    {preventionData.title}
+                  </Text>
+                  <Text style={styles.cardDesc}>
+                    {formatPreventionData(preventionData)}
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.cardDesc}>กรุณาเลือกโรคด้านบนเพื่อดูคำแนะนำ</Text>
+              )}
+            </View>
+          )}
         </View>
+
+        {/* Card 2: Counseling */}
+        <View style={[styles.card, { zIndex: 1000 }]}>
+          <Text style={styles.cardTitle}>Counseling</Text>
+          {loadingGuidance ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color="#1abc9c" />
+            </View>
+          ) : (
+            <View>
+              {counselingData ? (
+                <>
+                  <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8, color: '#D32F2F' }}>
+                    {counselingData.title}
+                  </Text>
+                  <Text style={styles.cardDesc}>
+                    {formatCounselingData(counselingData)}
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.cardDesc}>ข้อมูลจะแสดงหลังจากเลือกโรคแล้ว</Text>
+              )}
+            </View>
+          )}
+        </View>
+
       </ScrollView>
-{/* ===== Save Button ===== */}
-<TouchableOpacity
-  style={styles.saveButton}
-  onPress={() => onSave && onSave()}
->
-  <Text style={styles.saveButtonText}>Save Assessment</Text>
-</TouchableOpacity>
-    </View>
+
+      <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+        <Text style={styles.saveButtonText}>Save Assessment</Text>
+      </TouchableOpacity>
+    </LinearGradient>
   );
 }
+
+const customStyles = StyleSheet.create({
+  dropdownHeader: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 50 },
+  dropdownList: { marginTop: 5, borderWidth: 1, borderColor: '#eee', borderRadius: 8, backgroundColor: '#fff', position: 'absolute', top: 50, left: 0, right: 0, zIndex: 9999, elevation: 5 },
+  dropdownItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  dropdownItemActive: { backgroundColor: '#e6fffa' }
+});
