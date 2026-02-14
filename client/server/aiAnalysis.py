@@ -209,6 +209,26 @@ def get_assessment():
             .order('log_date', desc=True)\
             .limit(7)\
             .execute()
+            
+        # =========================================================================
+        # 🚨 [เพิ่มใหม่] เงื่อนไขตรวจสอบ: ถ้าไม่มีบันทึกเลย ให้ส่งค่า Default กลับไปทันที 🚨
+        # =========================================================================
+        if not logs_response.data:
+            print(f"⚠️ ไม่พบประวัติบันทึกของแมว ID: {cat_id} -> ส่งคืนค่า No Data")
+            return jsonify({
+                "success": True,
+                "riskData": [
+                    {"label": "Kidney Disease", "value": "No Data", "score": 0},
+                    {"label": "Diabetes", "value": "No Data", "score": 0},
+                    {"label": "Urolithiasis", "value": "No Data", "score": 0},
+                    {"label": "Gum Disease", "value": "No Data", "score": 0},
+                    {"label": "Feline Panleukopenia", "value": "No Data", "score": 0}
+                ],
+                "overallRisk": "No Data",
+                "summaryTitle": "ยังไม่มีข้อมูลสุขภาพ",
+                "summaryDesc": "กรุณาบันทึกข้อมูลสุขภาพประจำวัน (Daily Log) ก่อนเพื่อให้ระบบเริ่มวิเคราะห์ความเสี่ยงได้ค่ะ"
+            })
+        # =========================================================================
         
         # แปลงข้อมูล Log เป็น Text ให้ AI อ่าน
         logs_text = format_log_data(logs_response.data)
