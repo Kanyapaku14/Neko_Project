@@ -17,6 +17,8 @@ import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScr
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
+import PhotoCheck from './src/screens/PhotoCheck';
+import AnalysisResult from './src/screens/AnalysisResult';
 
 import { useFonts } from 'expo-font';
 import {
@@ -195,6 +197,14 @@ export default function App() {
 
     if (authScreen === 'Camera') {
       return <CameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
+    }
+
+    if (authScreen === 'PhotoCheck') {
+      return <PhotoCheck onNavigate={(screen) => setAuthScreen(screen)} />;
+    }
+
+    if (authScreen === 'AnalysisResult') {
+      return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} />;
     }
 
     // ✅ Default Home
