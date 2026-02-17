@@ -18,6 +18,8 @@ import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScr
 
 import CameraScreen from './src/screens/CameraScreen';
 import SetcameraScreen from './src/screens/SetcameraScreen';
+import PhotoCheck from './src/screens/PhotoCheck';
+import AnalysisResult from './src/screens/AnalysisResult';
 
 import { useFonts } from 'expo-font';
 import {
@@ -198,6 +200,15 @@ export default function App() {
 
     if (authScreen === 'Setcamera') {
       return <SetcameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
+      return <CameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
+    }
+
+    if (authScreen === 'PhotoCheck') {
+      return <PhotoCheck onNavigate={(screen) => setAuthScreen(screen)} />;
+    }
+
+    if (authScreen === 'AnalysisResult') {
+      return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} />;
     }
 
     // ✅ Default Home
@@ -238,8 +249,6 @@ export default function App() {
           initialDate={authScreen.params?.date} // Pass date if available
         />
       )}
-
-
 
     </>
   );

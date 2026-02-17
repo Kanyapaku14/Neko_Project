@@ -77,7 +77,10 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                     </View>
                     <Text style={styles.photoDesc}>Take a photo to screen your cat's health risk</Text>
                 </View>
-                <TouchableOpacity style={styles.photoBtn}>
+                <TouchableOpacity 
+                    style={styles.photoBtn}
+                    onPress={() => onNavigate('PhotoCheck')}
+                >
                     <Text style={styles.photoBtnText}>Start Assessment 🐾</Text>
                 </TouchableOpacity>
             </View>
