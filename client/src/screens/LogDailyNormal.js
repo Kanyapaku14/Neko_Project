@@ -88,7 +88,7 @@ export default function LogDailyNormal({ session, onBack, initialDate }) {
             notes: notes || null,
         };
 
-        console.log('SENDING TO SUPABASE (v1.8) 👉', JSON.stringify(payload, null, 2));
+        console.log('SENDING TO SUPABASE (v1.8) ', JSON.stringify(payload, null, 2));
 
         const { error } = await supabase
             .from('daily_logs')
