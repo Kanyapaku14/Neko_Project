@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, SafeAreaView, Alert } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
+import { Ionicons } from '@expo/vector-icons';
 import { styles } from './Style/authstyle';
 import supabase from './config/supabaseClient';
 import { StatusBar } from 'expo-status-bar';
 
-export default function CatProfile({ session, onNavigateToHome }) { // Receiving session and callback
+export default function CatProfile({ session, catId, onBack, onNavigateToHome }) { // Receiving session and callbacks
     const [catName, setCatName] = useState('');
     const [birthDate, setBirthDate] = useState('');
     const [gender, setGender] = useState('Male'); // Male, Female
@@ -14,9 +15,56 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
     const [currentWeight, setCurrentWeight] = useState('');
     const [baselineWeight, setBaselineWeight] = useState('');
     const [activityLevel, setActivityLevel] = useState('Normal'); // Low, Normal, High
+    const [loading, setLoading] = useState(false);
+
+    React.useEffect(() => {
+        if (catId) {
+            fetchCatData();
+        }
+    }, [catId]);
+
+    const fetchCatData = async () => {
+        try {
+            setLoading(true);
+            // 1. Fetch Cat Info
+            const { data: cat, error: catError } = await supabase
+                .from('cats')
+                .select('*')
+                .eq('id', catId)
+                .single();
+
+            if (catError) throw catError;
+
+            if (cat) {
+                setCatName(cat.name || '');
+                setBirthDate(cat.birthdate || '');
+                setGender(cat.gender || 'Male');
+                setBreed(cat.breed || '');
+            }
+
+            // 2. Fetch Latest Weight
+            const { data: weights, error: weightError } = await supabase
+                .from('cat_weights')
+                .select('weight_kg')
+                .eq('cat_id', catId)
+                .order('measured_at', { ascending: false })
+                .limit(1);
+
+            if (weightError) throw weightError;
+            if (weights && weights.length > 0) {
+                setCurrentWeight(weights[0].weight_kg.toString());
+                setBaselineWeight(weights[0].weight_kg.toString()); // Default baseline to current if just one entry
+            }
+
+        } catch (error) {
+            console.log("Error fetching cat data:", error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleSave = async () => {
-     
+
         if (!catName || !breed || !birthDate || !currentWeight || !baselineWeight || !gender || !isNeutered || !activityLevel) {
             Alert.alert('Error', 'Please fill in all required fields.');
             return;
@@ -25,22 +73,40 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
         try {
             if (!session?.user?.id) throw new Error("No user logged in");
 
-            // 1. Insert into cats table
-            const { data: catData, error: catError } = await supabase
-                .from('cats')
-                .insert([
-                    {
-                        owner_id: session.user.id,
+            let resultCatId = catId;
+
+            if (catId) {
+                // Update existing cat
+                const { error: catError } = await supabase
+                    .from('cats')
+                    .update({
                         name: catName,
                         breed: breed,
                         gender: gender,
                         birthdate: birthDate || null,
-                    }
-                ])
-                .select()
-                .single();
+                    })
+                    .eq('id', catId);
 
-            if (catError) throw catError;
+                if (catError) throw catError;
+            } else {
+                // 1. Insert into cats table
+                const { data: catData, error: catError } = await supabase
+                    .from('cats')
+                    .insert([
+                        {
+                            owner_id: session.user.id,
+                            name: catName,
+                            breed: breed,
+                            gender: gender,
+                            birthdate: birthDate || null,
+                        }
+                    ])
+                    .select()
+                    .single();
+
+                if (catError) throw catError;
+                resultCatId = catData.id;
+            }
 
             // 2. Insert into cat_weights table
             if (currentWeight) {
@@ -48,18 +114,18 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
                     .from('cat_weights')
                     .insert([
                         {
-                            cat_id: catData.id,
+                            cat_id: resultCatId,
                             weight_kg: parseFloat(currentWeight),
-                             measured_at: new Date(),
+                            measured_at: new Date(),
                         }
                     ]);
 
-                 if (weightError) throw weightError;
+                if (weightError) throw weightError;
             }
 
             // Success
             Alert.alert('Success', 'Cat Profile Saved!', [
-                { text: 'OK', onPress: () => onNavigateToHome && onNavigateToHome(catData.id) }
+                { text: 'OK', onPress: () => onNavigateToHome && onNavigateToHome(resultCatId) }
             ]);
 
         } catch (error) {
@@ -72,22 +138,28 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
             <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
                 <StatusBar style="auto" />
 
-                {/* Header */}
+                {/* Header with Back Button */}
+                <View style={styles.headerRow}>
+                    <TouchableOpacity onPress={() => onBack ? onBack() : onNavigateToHome && onNavigateToHome()} style={styles.backButton}>
+                        <Ionicons name="chevron-back" size={28} color="#2F6A62" />
+                    </TouchableOpacity>
+                </View>
+
                 <View style={styles.headerContainer}>
-                   {/* Back button could go here if needed */}
+                    {/* Centered logo or text if needed */}
                 </View>
 
                 {/* Profile Image */}
-                 <View style={{ alignItems: 'center', marginBottom: 24 }}>
+                <View style={{ alignItems: 'center', marginBottom: 24 }}>
                     <View style={styles.profileImageContainer}>
-                         <Image 
+                        <Image
                             source={require('../../assets/cioncat.jpg')} // distinct placeholder ideally
-                            style={[styles.profileImage, { opacity: 0.8 }]} 
-                         />
-                         <View style={{ position: 'absolute' }}>
-                             {/* Camera Icon Placeholder */}
-                             <Text style={{ fontSize: 30, color: '#fff', opacity: 0.8 }}>📷</Text>
-                         </View>
+                            style={[styles.profileImage, { opacity: 0.8 }]}
+                        />
+                        <View style={{ position: 'absolute' }}>
+                            {/* Camera Icon Placeholder */}
+                            <Text style={{ fontSize: 30, color: '#fff', opacity: 0.8 }}>📷</Text>
+                        </View>
                     </View>
                     <Text style={styles.title}>Upload Profile</Text>
                     <Text style={[styles.subtitle, { marginBottom: 10 }]}>Help us recognize your feline friend</Text>
@@ -109,10 +181,10 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
 
                     {/* Birthdate */}
                     <View style={styles.inputGroup}>
-                         <View style={{flexDirection: 'row', justifyContent: 'space-between', width: '80%', alignSelf:'center'}}>
-                            <Text style={[styles.label, {marginLeft: 0}]}>Birthdate (YYYY-MM-DD)</Text>
-                            <Text style={[styles.label, {color: '#2F6A62', fontWeight: 'bold'}]}></Text> 
-                         </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '80%', alignSelf: 'center' }}>
+                            <Text style={[styles.label, { marginLeft: 0 }]}>Birthdate (YYYY-MM-DD)</Text>
+                            <Text style={[styles.label, { color: '#2F6A62', fontWeight: 'bold' }]}></Text>
+                        </View>
                         <TextInput
                             style={styles.input}
                             value={birthDate}
@@ -147,13 +219,13 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
                         <View style={{ width: '48%' }}>
                             <Text style={[styles.label, { marginBottom: 5 }]}>Sterilization</Text>
                             <View style={[styles.toggleContainer, { width: '100%' }]}>
-                                <TouchableOpacity 
+                                <TouchableOpacity
                                     style={[styles.toggleButton, isNeutered === 'Yes' && styles.toggleButtonActive]}
                                     onPress={() => setIsNeutered('Yes')}
                                 >
                                     <Text style={[styles.toggleText, isNeutered === 'Yes' && styles.toggleTextActive]}>Yes</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity 
+                                <TouchableOpacity
                                     style={[styles.toggleButton, isNeutered === 'No' && styles.toggleButtonActive]}
                                     onPress={() => setIsNeutered('No')}
                                 >
@@ -163,8 +235,8 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
                         </View>
                     </View>
 
-                     {/* Breed */}
-                     <View style={styles.inputGroup}>
+                    {/* Breed */}
+                    <View style={styles.inputGroup}>
                         <Text style={styles.labelprofile}>Breed</Text>
                         <TextInput
                             style={styles.input}
@@ -177,10 +249,10 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
 
                 <Text style={styles.sectionTitle}>PHYSICAL METRICS</Text>
                 <View style={styles.rowContainer}>
-                     <View style={styles.weightContainer}>
-                        <Text style={[styles.label, {marginBottom: 5}]}>Current Weight</Text>
+                    <View style={styles.weightContainer}>
+                        <Text style={[styles.label, { marginBottom: 5 }]}>Current Weight</Text>
                         <View style={styles.weightInputContainer}>
-                            <TextInput 
+                            <TextInput
                                 style={styles.weightInput}
                                 value={currentWeight}
                                 onChangeText={setCurrentWeight}
@@ -189,12 +261,12 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
                             />
                             <Text style={styles.unitText}>Kg</Text>
                         </View>
-                     </View>
+                    </View>
 
-                     <View style={styles.weightContainer}>
-                        <Text style={[styles.label, {marginBottom: 5}]}>Baseline Weight</Text>
+                    <View style={styles.weightContainer}>
+                        <Text style={[styles.label, { marginBottom: 5 }]}>Baseline Weight</Text>
                         <View style={styles.weightInputContainer}>
-                            <TextInput 
+                            <TextInput
                                 style={styles.weightInput}
                                 value={baselineWeight}
                                 onChangeText={setBaselineWeight}
@@ -203,36 +275,36 @@ export default function CatProfile({ session, onNavigateToHome }) { // Receiving
                             />
                             <Text style={styles.unitText}>Kg</Text>
                         </View>
-                     </View>
+                    </View>
                 </View>
 
-                <Text style={[styles.sectionTitle, {marginTop: 10}]}>Daily Activity Level</Text>
+                <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Daily Activity Level</Text>
                 <View style={styles.activityContainer}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={[styles.activityButton, activityLevel === 'Low' && styles.activityButtonActive]}
                         onPress={() => setActivityLevel('Low')}
                     >
-                         <Text style={styles.iconPlaceholder}>aaa</Text> 
-                         {/* Replace with Icon */}
-                         <Text style={styles.activityText}>Low</Text>
+                        <Text style={styles.iconPlaceholder}>aaa</Text>
+                        {/* Replace with Icon */}
+                        <Text style={styles.activityText}>Low</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={[styles.activityButton, activityLevel === 'Normal' && styles.activityButtonActive]}
                         onPress={() => setActivityLevel('Normal')}
                     >
-                         <Text style={styles.iconPlaceholder}>🔥</Text>
-                         {/* Replace with Icon */}
-                         <Text style={styles.activityText}>Normal</Text>
+                        <Text style={styles.iconPlaceholder}>🔥</Text>
+                        {/* Replace with Icon */}
+                        <Text style={styles.activityText}>Normal</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={[styles.activityButton, activityLevel === 'High' && styles.activityButtonActive]}
                         onPress={() => setActivityLevel('High')}
                     >
-                         <Text style={styles.iconPlaceholder}>⚡</Text>
-                         {/* Replace with Icon */}
-                         <Text style={styles.activityText}>High</Text>
+                        <Text style={styles.iconPlaceholder}>⚡</Text>
+                        {/* Replace with Icon */}
+                        <Text style={styles.activityText}>High</Text>
                     </TouchableOpacity>
                 </View>
 

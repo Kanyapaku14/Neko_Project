@@ -4,20 +4,21 @@ import { styles } from './Style/authstyle';
 import supabase from './config/supabaseClient';
 import { View, Text, TextInput, TouchableOpacity, Image, Alert, SafeAreaView, ScrollView, ActivityIndicator } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
+import { Ionicons } from '@expo/vector-icons';
 // If you have icons, import them. For now using text placeholder or simple views for icons if needed.
-export default function ProfileScreen({ session, onNavigateToCatProfile }) {
+export default function ProfileScreen({ session, onBack, onNavigateToCatProfile }) {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [username, setUsername] = useState('');
     const [gender, setGender] = useState('');
     const [phone, setPhone] = useState('');
     const [birthDate, setBirthDate] = useState('');
-    const [email, setEmail] = useState(''); 
+    const [email, setEmail] = useState('');
 
     useEffect(() => {
         if (session) {
             setEmail(session.user.email);
-             getProfile();
+            getProfile();
         }
     }, [session]);
 
@@ -45,7 +46,7 @@ export default function ProfileScreen({ session, onNavigateToCatProfile }) {
         } catch (error) {
             if (error instanceof Error) {
                 // If table doesn't exist or other error, we might just ignore for new users
-                 console.log('Error downloading profile: ', error.message);
+                console.log('Error downloading profile: ', error.message);
             }
         } finally {
             setLoading(false);
@@ -91,12 +92,12 @@ export default function ProfileScreen({ session, onNavigateToCatProfile }) {
 
             // 5. ถ้าสำเร็จ ให้แจ้งเตือนและเปลี่ยนหน้า
             Alert.alert("Success", "Profile saved successfully!", [
-                { 
-                    text: "OK", 
+                {
+                    text: "OK",
                     onPress: () => {
                         // สั่งเปลี่ยนหน้า
                         if (onNavigateToCatProfile) {
-                            onNavigateToCatProfile(); 
+                            onNavigateToCatProfile();
                         }
                     }
                 }
@@ -110,12 +111,12 @@ export default function ProfileScreen({ session, onNavigateToCatProfile }) {
             setSaving(false);
         }
     };
-    
+
     // ฟังก์ชันจัดรูปแบบวันที่อัตโนมัติขณะพิมพ์
     const handleDateChange = (text) => {
         // 1. ลบทุกตัวอักษรที่ไม่ใช่ตัวเลขออกก่อน
         const cleaned = text.replace(/[^0-9]/g, '');
-        
+
         // 2. จัดรูปแบบ YYYY-MM-DD
         let formatted = cleaned;
         if (cleaned.length > 4) {
@@ -127,7 +128,7 @@ export default function ProfileScreen({ session, onNavigateToCatProfile }) {
 
         // 3. จำกัดความยาวไม่ให้เกิน 10 ตัวอักษร (YYYY-MM-DD)
         if (cleaned.length > 8) {
-            formatted = formatted.slice(0, 10); 
+            formatted = formatted.slice(0, 10);
         }
 
         setBirthDate(formatted);
@@ -135,20 +136,29 @@ export default function ProfileScreen({ session, onNavigateToCatProfile }) {
 
     return (
         <SafeAreaView style={styles.safeArea}>
-             <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+            <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
                 <StatusBar style="auto" />
+
+                {/* Header with Back Button */}
+                {onBack && (
+                    <View style={styles.headerRow}>
+                        <TouchableOpacity onPress={onBack} style={styles.backButton}>
+                            <Ionicons name="chevron-back" size={28} color="#2F6A62" />
+                        </TouchableOpacity>
+                    </View>
+                )}
 
                 {/* Profile Header */}
                 <View style={styles.profileHeader}>
                     <View style={styles.profileImageContainer}>
-                         {/* Placeholder for camera icon or user image */}
-                         <Image 
+                        {/* Placeholder for camera icon or user image */}
+                        <Image
                             source={require('../../assets/cioncat.jpg')} // Using existing asset as placeholder or separate image if user has one
-                            style={[styles.profileImage, { opacity: 0.8 }]} 
-                         />
+                            style={[styles.profileImage, { opacity: 0.8 }]}
+                        />
                     </View>
                     <Text style={styles.profileName}>{username || 'User Name'}</Text>
-                    
+
                     <View style={styles.caregiverBadge}>
                         <Text style={styles.caregiverText}>TOP CAREGIVER</Text>
                     </View>
@@ -157,7 +167,7 @@ export default function ProfileScreen({ session, onNavigateToCatProfile }) {
                 <Text style={styles.sectionTitle}>GENERAL INFO</Text>
 
                 <View style={styles.contentContainer}>
-                    
+
                     {/* Name Input */}
                     <View style={styles.inputGroup}>
                         <Text style={styles.labelprofile}>Name</Text>
@@ -197,10 +207,10 @@ export default function ProfileScreen({ session, onNavigateToCatProfile }) {
                         </View>
                     </View>
 
-                     {/* Phone Number */}
-                     <View style={styles.inputGroup}>
+                    {/* Phone Number */}
+                    <View style={styles.inputGroup}>
                         <Text style={styles.labelprofile}>Phone Number</Text>
-                         <TextInput
+                        <TextInput
                             style={styles.input}
                             value={phone}
                             onChangeText={setPhone}
@@ -212,7 +222,7 @@ export default function ProfileScreen({ session, onNavigateToCatProfile }) {
                     {/* Date of Birth */}
                     <View style={styles.inputGroup}>
                         <Text style={styles.labelprofile}>Date of birth (YYYY-MM-DD)</Text>
-                         <TextInput
+                        <TextInput
                             style={styles.input}
                             value={birthDate}
                             onChangeText={handleDateChange} // เปลี่ยนมาใช้ฟังก์ชันใหม่ที่นี่
@@ -224,24 +234,16 @@ export default function ProfileScreen({ session, onNavigateToCatProfile }) {
                     </View>
 
                     {/* Save Button */}
-                    <TouchableOpacity 
-                        style={styles.button} 
+                    <TouchableOpacity
+                        style={styles.button}
                         onPress={updateProfile}
                         disabled={saving}
                     >
                         {saving ? (
-                             <ActivityIndicator color="#fff" />
+                            <ActivityIndicator color="#fff" />
                         ) : (
                             <Text style={styles.buttonText}>Save Profile</Text>
                         )}
-                    </TouchableOpacity>
-
-                    {/* Sign Out Button (Optional but useful for testing) */}
-                    <TouchableOpacity 
-                        style={[styles.button, { backgroundColor: '#FF6B6B', marginTop: 10 }]} 
-                        onPress={() => supabase.auth.signOut()}
-                    >
-                        <Text style={styles.buttonText}>Sign Out</Text>
                     </TouchableOpacity>
 
                 </View>

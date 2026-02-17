@@ -14,11 +14,13 @@ import HomeScreen from './src/screens/HomeScreen'; // อย่าลืม Impo
 import CalendarScreen from './src/screens/CalendarScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScreen
+import SettingScreen from './src/screens/SettingScreen';
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
 import PhotoCheck from './src/screens/PhotoCheck';
 import AnalysisResult from './src/screens/AnalysisResult';
+import Phone from './src/screens/Phone';
 
 import { useFonts } from 'expo-font';
 import {
@@ -139,20 +141,38 @@ export default function App() {
 
   // ส่วนจัดการ Session (ถ้าล็อกอินแล้ว)
   if (session && !loading) {
-    if (authScreen === 'CatProfile') {
-      return <CatProfile session={session} onNavigateToHome={() => setAuthScreen('Home')} />;
+    const currentScreenName = typeof authScreen === 'object' ? authScreen.screen : authScreen;
+    const screenParams = typeof authScreen === 'object' ? authScreen.params : {};
+
+    if (currentScreenName === 'CatProfile') {
+      return (
+        <CatProfile
+          session={session}
+          catId={screenParams.catId}
+          onBack={() => setAuthScreen('Setting')}
+          onNavigateToHome={() => setAuthScreen('Home')}
+        />
+      );
     }
-    if (authScreen === 'Profile') {
+    if (currentScreenName === 'Profile') {
       return <ProfileScreen session={session} onNavigateToCatProfile={() => setAuthScreen('CatProfile')} />;
     }
-    if (authScreen === 'UserInfo') {
-      return <UserInfoScreen
+    if (currentScreenName === 'Setting') {
+      return <SettingScreen
         session={session}
-        catId={catId}
+        onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
         onLogout={() => supabase.auth.signOut()}
-        onMissingProfile={() => setAuthScreen('Profile')}
-        onBack={() => setAuthScreen('Home')} // ✅ Back button support
       />;
+    }
+
+    if (currentScreenName === 'EditProfile') {
+      return (
+        <ProfileScreen
+          session={session}
+          onBack={() => setAuthScreen('Setting')}
+          onNavigateToCatProfile={() => setAuthScreen('Setting')}
+        />
+      );
     }
 
     if (authScreen === 'LogDaily' || (typeof authScreen === 'object' && authScreen.screen === 'LogDaily')) {
@@ -179,11 +199,11 @@ export default function App() {
       />;
     }
 
-    if (authScreen === 'Overview') {
+    if (currentScreenName === 'Overview') {
       return <Dashboard
         session={session}
         onBack={() => setAuthScreen('Home')}
-        onNavigate={(screen) => setAuthScreen(screen)}
+        onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
       />;
     }
 
@@ -203,8 +223,18 @@ export default function App() {
       return <PhotoCheck onNavigate={(screen) => setAuthScreen(screen)} />;
     }
 
-    if (authScreen === 'AnalysisResult') {
-      return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} />;
+    if (currentScreenName === 'AnalysisResult') {
+      return <AnalysisResult onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} session={session} />;
+    }
+
+    if (currentScreenName === 'Phone') {
+      return (
+        <Phone
+          session={session}
+          onBack={() => setAuthScreen('Setting')}
+          onConfirm={() => setAuthScreen('Setting')}
+        />
+      );
     }
 
     // ✅ Default Home
@@ -212,8 +242,8 @@ export default function App() {
       onLogout={navigateToSignIn}
       onLogDaily={() => setAuthScreen('LogDaily')}
       onAssess={() => setAuthScreen('Result')}
-      onSetting={() => setAuthScreen('UserInfo')} // ✅ Go to Settings (UserInfo)
-      onNavigate={(screen) => setAuthScreen(screen)}
+      onSetting={() => setAuthScreen('Setting')} // ✅ Go to Settings (UserInfo)
+      onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
     />;
   }
 
