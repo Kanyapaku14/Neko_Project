@@ -18,6 +18,7 @@ import SettingScreen from './src/screens/SettingScreen';
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
+import SetcameraScreen from './src/screens/SetcameraScreen';
 import PhotoCheck from './src/screens/PhotoCheck';
 import AnalysisResult from './src/screens/AnalysisResult';
 import Phone from './src/screens/Phone';
@@ -194,8 +195,6 @@ export default function App() {
       return <ResultScreen
         onBack={() => setAuthScreen('Home')}
         onSave={() => setAuthScreen('Home')}
-        // ✅ เพิ่มบรรทัดนี้ เพื่อให้ ResultScreen สามารถสั่งเปลี่ยนหน้าไปที่อื่นได้
-        onNavigate={(screen) => setAuthScreen(screen)}
       />;
     }
 
@@ -216,6 +215,11 @@ export default function App() {
     }
 
     if (authScreen === 'Camera') {
+      return <CameraScreen session={session} onNavigate={(screen) => setAuthScreen(screen)} />;
+    }
+
+    if (authScreen === 'Setcamera') {
+      return <SetcameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
       return <CameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
     }
 
