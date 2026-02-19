@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { View, Text, TouchableOpacity, TextInput, ScrollView, Image, Alert, Platform } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from 'expo-linear-gradient';
-// เพิ่ม Library จัดการขอบจอ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import supabase from "./config/supabaseClient";
 import { styles } from './Style/LogDailyStyle';
@@ -114,7 +113,6 @@ const CustomDropdown = ({ value, onValueChange }) => {
                                 borderBottomColor: '#F0F0F0'
                             }}
                             onPress={() => {
-                                // เช็คว่าถ้ากดตัวเดิม ให้เคลียร์ค่า (เป็น null)
                                 if (value === item.value) {
                                     onValueChange(null);
                                 } else {
@@ -144,7 +142,6 @@ const NormalView = ({ props, setStatus }) => {
     const [consumeMeals, setConsumeMeals] = useState('');
     const [foodIntake, setFoodIntake] = useState('');
     const [waterIntake, setWaterIntake] = useState('');
-    // เปลี่ยนค่าเริ่มต้นเป็น null ทั้งหมด
     const [urineLevel, setUrineLevel] = useState(null);
     const [stoolLevel, setStoolLevel] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -262,7 +259,7 @@ const NormalView = ({ props, setStatus }) => {
                                     <TouchableOpacity
                                         key={`urine-${item.level}`}
                                         style={{ alignItems: 'center', width: 70 }}
-                                        onPress={() => setUrineLevel(urineLevel === item.level ? null : item.level)} // กดซ้ำเพื่อเคลียร์ค่า
+                                        onPress={() => setUrineLevel(urineLevel === item.level ? null : item.level)}
                                     >
                                         <View style={[
                                             { width: 60, height: 60, justifyContent: 'center', alignItems: 'center', borderRadius: 16 },
@@ -287,13 +284,11 @@ const NormalView = ({ props, setStatus }) => {
                                     <TouchableOpacity
                                         key={`stool-${item.level}`}
                                         style={{ alignItems: 'center', width: 60 }}
-                                        onPress={() => setStoolLevel(stoolLevel === item.level ? null : item.level)} // กดซ้ำเพื่อเคลียร์ค่า
+                                        onPress={() => setStoolLevel(stoolLevel === item.level ? null : item.level)}
                                     >
                                         <View style={[
                                             { width: 60, height: 60, justifyContent: 'center', alignItems: 'center', borderRadius: 16 },
-                                            isActive ? {
-                                            } : {
-                                            }
+                                            isActive ? {} : {}
                                         ]}>
                                             <Image source={require('../../assets/Stool.png')} style={{ width: 50, height: 50, opacity: isActive ? 1 : 0.35 }} resizeMode="contain" />
                                         </View>
@@ -316,17 +311,26 @@ const NormalView = ({ props, setStatus }) => {
 };
 
 // ==========================================
-// 2. หน้า SomethingOffView
+// 2. หน้า SomethingOffView (ดีไซน์ใหม่)
 // ==========================================
 const SomethingOffView = ({ props, setStatus }) => {
     const { session, onBack, initialDate } = props;
     const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
 
     const [catId, setCatId] = useState(null);
-    const [vomitLevel, setVomitLevel] = useState(null); // เปลี่ยนเป็น null
-    const [vomitColor, setVomitColor] = useState(null); // เปลี่ยนเป็น null
-    const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
+
+    // --- State สำหรับส่วนต่างๆ ตาม UI ใหม่ ---
+    const [isVomitChecked, setIsVomitChecked] = useState(false);
+    const [vomitColor, setVomitColor] = useState(null);
+
+    const [isDiarrheaChecked, setIsDiarrheaChecked] = useState(false);
+    const [diarrheaColor, setDiarrheaColor] = useState(null);
+
+    const [behaviorTags, setBehaviorTags] = useState([]);
+    const [respiratoryTags, setRespiratoryTags] = useState([]);
+
+    const [notes, setNotes] = useState('');
 
     useEffect(() => { if (session?.user) fetchCatId(); }, [session]);
 
@@ -335,30 +339,44 @@ const SomethingOffView = ({ props, setStatus }) => {
         if (data) setCatId(data.id);
     };
 
+    const handleToggleTag = (tag, state, setState) => {
+        if (state.includes(tag)) {
+            setState(state.filter(t => t !== tag));
+        } else {
+            setState([...state, tag]);
+        }
+    };
+
     const handleSave = async () => {
         setLoading(true);
         const logDate = initialDate ? new Date(initialDate) : new Date();
+
         const payload = {
             cat_id: catId,
             log_date: `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`,
-            vomit_level_enum: getLevelValue(vomitLevel),
-            vomit_color_enum: formatToEnum(vomitColor),
+            // ข้อมูลสำหรับ Something off
+            vomit_color_enum: isVomitChecked ? formatToEnum(vomitColor) : null,
+            // ใน Database ของคุณต้องเพิ่ม field มารองรับ diarrhea_color, behavior_tags, respiratory_tags ด้วยนะครับ
+            diarrhea_color_enum: isDiarrheaChecked ? formatToEnum(diarrheaColor) : null,
+            behavior_tags: behaviorTags.length > 0 ? behaviorTags : null,
+            respiratory_tags: respiratoryTags.length > 0 ? respiratoryTags : null,
             notes: notes || null,
         };
+
         const { error } = await supabase.from('daily_logs').upsert(payload, { onConflict: 'cat_id, log_date' });
         setLoading(false);
         if (error) Alert.alert('Error', error.message);
-        else Alert.alert('Success', 'Saved!', [{ text: 'OK', onPress: onBack }]);
+        else Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
     };
 
-    const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34' };
+    const theme = { cardBg: '#FFFDFB', borderColor: '#E8DED6', textDark: '#D46B13', textLabel: '#333' };
 
     return (
         <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
             <LinearGradient
-                colors={['#FFFFFF', '#B2E1DB']}
+                colors={['#FFFFFF', '#FFA869']} // ไล่สีส้มตามดีไซน์
                 locations={[0.42, 1]}
-                style={{ flex: 1, paddingTop: Math.max(insets.top, 20) }} // หลบขอบจอด้านบน
+                style={{ flex: 1, paddingTop: Math.max(insets.top, 20) }}
             >
                 <View style={[styles.header, { paddingHorizontal: 15 }]}>
                     <TouchableOpacity onPress={onBack} style={{ padding: 5 }}>
@@ -370,17 +388,18 @@ const SomethingOffView = ({ props, setStatus }) => {
 
                 <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingBottom: insets.bottom + 20 }]}>
                     <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#1A3B34', textAlign: 'center', marginBottom: 20 }}>
-                        How was <Text style={{ color: '#FF9800' }}>Luna</Text> today
+                        How was <Text style={{ color: '#FBC02D' }}>Luna</Text> today
                     </Text>
 
+                    {/* Status Toggle */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
-                        <TouchableOpacity style={{ backgroundColor: '#A5D6C9', borderRadius: 16, width: '48%', paddingVertical: 15, alignItems: 'center', opacity: 0.8 }} onPress={() => setStatus('Normal')}>
+                        <TouchableOpacity style={{ backgroundColor: '#FDE17A', borderRadius: 16, width: '48%', paddingVertical: 15, alignItems: 'center', opacity: 0.9 }} onPress={() => setStatus('Normal')}>
                             <View style={{ backgroundColor: '#fff', borderRadius: 30, width: 55, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
                                 <MaterialCommunityIcons name="cat" size={40} color="#000" />
                             </View>
                             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#000' }}>Normal</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={{ backgroundColor: '#82CDBB', borderRadius: 16, width: '48%', paddingVertical: 15, alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3 }}>
+                        <TouchableOpacity style={{ backgroundColor: '#FAD231', borderRadius: 16, width: '48%', paddingVertical: 15, alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 }}>
                             <View style={{ backgroundColor: '#fff', borderRadius: 30, width: 55, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
                                 <MaterialCommunityIcons name="emoticon-sad-outline" size={40} color="#000" />
                             </View>
@@ -388,32 +407,134 @@ const SomethingOffView = ({ props, setStatus }) => {
                         </TouchableOpacity>
                     </View>
 
-                    {/* --- Vomit Section --- */}
+                    {/* --- Digestive & Excretory Section --- */}
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
-                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Vomit Color</Text>
-                        <View style={styles.gridContainer}>
-                            {[{ label: 'Yellow Foam', value: 'yellow_foam' }, { label: 'White Mucus', value: 'white_mucus' }, { label: 'Red', value: 'red' }
-                            ].map((item, index) => {
-                                const isActive = vomitColor === item.value;
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Digestive & Excretory</Text>
+
+                        {/* Vomit Checkbox */}
+                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }} onPress={() => setIsVomitChecked(!isVomitChecked)}>
+                            <MaterialCommunityIcons name={isVomitChecked ? "checkbox-marked" : "checkbox-blank-outline"} size={24} color={isVomitChecked ? "#333" : "#999"} />
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', marginLeft: 10 }}>Vomit</Text>
+                        </TouchableOpacity>
+
+                        <Text style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>Color Chart :</Text>
+
+                        {/* Vomit Options */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25 }}>
+                            {[{ label: 'Undigested Food', value: 'undigested_food' }, { label: 'Hairball', value: 'hairball' }, { label: 'White Foam', value: 'white_foam' }, { label: 'Blood', value: 'blood' }, { label: 'Yellow', value: 'yellow' }
+                            ].map((item) => {
+                                const isActive = isVomitChecked && vomitColor === item.value;
                                 return (
                                     <TouchableOpacity
-                                        key={index}
-                                        style={styles.gridItem}
-                                        onPress={() => setVomitColor(vomitColor === item.value ? null : item.value)} // กดซ้ำเพื่อเคลียร์ค่า
+                                        key={item.value}
+                                        style={{ alignItems: 'center', width: 60 }}
+                                        onPress={() => isVomitChecked && setVomitColor(vomitColor === item.value ? null : item.value)}
+                                        disabled={!isVomitChecked} // ปิดการกดถ้าไม่ได้ติ๊ก Checkbox
                                     >
-                                        <View style={[styles.gridIconBtn, isActive && styles.gridIconBtnActiveOrange]}>
-                                            <Image source={require('../../assets/Stool_Color.png')} style={[styles.iconImg, { width: 45, height: 45 }, !isActive && { opacity: 0.4 }]} />
+                                        <View style={[
+                                            { width: 60, height: 60, justifyContent: 'center', alignItems: 'center', borderRadius: 16 },
+                                            isActive ? {} : {}
+                                        ]}>
+                                            <Image source={require('../../assets/Urine.png')} style={{ width: 50, height: 50, opacity: isActive ? 1 : 0.45 }} resizeMode="contain" />
                                         </View>
-                                        <Text style={styles.gridLabel}>{item.label}</Text>
+                                        <Text style={{ fontSize: 10, marginTop: 8, color: isVomitChecked ? (isActive ? '#333' : '#8E9E9B') : '#ccc', fontWeight: isActive ? 'bold' : '500', textAlign: 'center' }}>{item.label}</Text>
+                                    </TouchableOpacity>
+                                )
+                            })}
+                        </View>
+
+                        <View style={{ height: 1, backgroundColor: theme.borderColor, marginBottom: 20 }} />
+
+                        {/* Diarrhea Checkbox */}
+                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }} onPress={() => setIsDiarrheaChecked(!isDiarrheaChecked)}>
+                            <MaterialCommunityIcons name={isDiarrheaChecked ? "checkbox-marked" : "checkbox-blank-outline"} size={24} color={isDiarrheaChecked ? "#333" : "#999"} />
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', marginLeft: 10 }}>Diarrhea</Text>
+                        </TouchableOpacity>
+
+                        <Text style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>Color Chart :</Text>
+
+                        {/* Diarrhea Options */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            {[{ label: 'Watery', value: 'watery' }, { label: 'Mushy', value: 'mushy' }, { label: 'Mucus', value: 'mucus' }, { label: 'Black', value: 'black' }, { label: 'Fresh Blood', value: 'fresh_blood' }
+                            ].map((item) => {
+                                const isActive = isDiarrheaChecked && diarrheaColor === item.value;
+                                return (
+                                    <TouchableOpacity
+                                        key={item.value}
+                                        style={{ alignItems: 'center', width: 60 }}
+                                        onPress={() => isDiarrheaChecked && setDiarrheaColor(diarrheaColor === item.value ? null : item.value)}
+                                        disabled={!isDiarrheaChecked}
+                                    >
+                                        <View style={[
+                                            { width: 60, height: 60, justifyContent: 'center', alignItems: 'center', borderRadius: 16 },
+                                            isActive ? {} : {}
+                                        ]}>
+                                            <Image source={require('../../assets/Stool.png')} style={{ width: 50, height: 50, opacity: isActive ? 1 : 0.35 }} resizeMode="contain" />
+                                        </View>
+                                        <Text style={{ fontSize: 10, marginTop: 8, color: isDiarrheaChecked ? (isActive ? '#333' : '#8E9E9B') : '#ccc', fontWeight: isActive ? 'bold' : '500', textAlign: 'center' }}>{item.label}</Text>
                                     </TouchableOpacity>
                                 )
                             })}
                         </View>
                     </View>
 
-                    <TouchableOpacity style={{ backgroundColor: '#A5D6C9', borderRadius: 12, height: 55, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }} onPress={handleSave} disabled={loading}>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#fff', marginRight: 8 }}>{loading ? "Saving..." : "Save Event"}</Text>
-                        <Ionicons name="checkmark-circle-outline" size={24} color="#fff" />
+                    {/* --- Behavior & Energy Section --- */}
+                    <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Behavior & Energy</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                            {/* เพิ่มอาการ Behavior ที่ต้องการให้ผู้ใช้เลือกได้ที่นี่ */}
+                            {['ซึม', 'ซ่อนตัว', 'เลียขนมากเกินไป', 'ร้องผิดปกติ', 'เบื่ออาหาร', 'กินจุผิดปกติ', 'กระวนกระวาย', 'โก่งตัว', 'กินน้ำเยอะผิดปกติ', 'ไม่กินน้ำเลย', 'ไม่กินอาหารเลย', 'ไม่เลียขน', 'ก้าวร้าว'].map(tag => {
+                                const isSelected = behaviorTags.includes(tag);
+                                return (
+                                    <TouchableOpacity
+                                        key={tag}
+                                        onPress={() => handleToggleTag(tag, behaviorTags, setBehaviorTags)}
+                                        style={{ backgroundColor: isSelected ? '#FFA869' : '#F0F0F0', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 }}
+                                    >
+                                        <Text style={{ color: isSelected ? '#fff' : '#666', fontSize: 12, fontWeight: isSelected ? 'bold' : 'normal' }}>{tag}</Text>
+                                    </TouchableOpacity>
+                                )
+                            })}
+                        </View>
+
+                        <View style={{ height: 1, backgroundColor: theme.borderColor, marginVertical: 20 }} />
+
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Respiratory & Physical Appearance</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                            {['จาม', 'มีน้ำมูก', 'มีขี้ตาเยอะ', 'หายใจหอบ', 'พยายามขย้อน'].map(tag => {
+                                const isSelected = respiratoryTags.includes(tag);
+                                return (
+                                    <TouchableOpacity
+                                        key={tag}
+                                        onPress={() => handleToggleTag(tag, respiratoryTags, setRespiratoryTags)}
+                                        style={{ backgroundColor: isSelected ? '#FFA869' : '#E8E8E8', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 }}
+                                    >
+                                        <Text style={{ color: isSelected ? '#fff' : '#666', fontSize: 12, fontWeight: isSelected ? 'bold' : 'normal' }}>{tag}</Text>
+                                    </TouchableOpacity>
+                                )
+                            })}
+                        </View>
+                    </View>
+
+                    {/* --- Notes Section --- */}
+                    <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
+                            <MaterialCommunityIcons name="note-text-outline" size={20} color={theme.textDark} />
+                            <Text style={{ fontSize: 16, fontWeight: 'bold', color: theme.textDark, marginLeft: 8 }}>Notes</Text>
+                        </View>
+                        <TextInput
+                            style={{ backgroundColor: '#F9F9F9', borderRadius: 8, padding: 12, minHeight: 80, textAlignVertical: 'top', color: '#333' }}
+                            placeholder="Additional notes (e.g., vomit color, last meal)..."
+                            placeholderTextColor="#999"
+                            multiline={true}
+                            value={notes}
+                            onChangeText={setNotes}
+                        />
+                    </View>
+
+                    <TouchableOpacity style={{ backgroundColor: '#FAD231', borderRadius: 12, height: 55, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }} onPress={handleSave} disabled={loading}>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#000', marginRight: 8 }}>{loading ? "Saving..." : "Save Event"}</Text>
+                        <Ionicons name="checkmark-circle-outline" size={24} color="#000" />
                     </TouchableOpacity>
                 </ScrollView>
             </LinearGradient>
