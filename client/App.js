@@ -17,12 +17,17 @@ import HomeScreen from './src/screens/HomeScreen'; // อย่าลืม Impo
 import CalendarScreen from './src/screens/CalendarScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScreen
+import MainTabNavigator from './src/screens/MainTabNavigator'; // ✅ Import MainTabNavigator
+import CommunityScreen from './src/screens/CommunityScreen'; // ✅ Import CommunityScreen
+import RankingScreen from './src/screens/RankingScreen'; // ✅ Import RankingScreen
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
 import SetcameraScreen from './src/screens/SetcameraScreen';
 import PhotoCheck from './src/screens/PhotoCheck';
+// Removed duplicate PhotoCheck import
 import AnalysisResult from './src/screens/AnalysisResult';
+import CommunityProfile from './src/screens/CommunityProfile'; // ✅ Import CommunityProfile
 
 import { useFonts } from 'expo-font';
 import {
@@ -185,21 +190,45 @@ export default function App() {
         />;
       }
 
-      if (authScreen === 'Overview') {
-        return <Dashboard
-          session={session}
-          onBack={() => setAuthScreen('Home')}
-          onNavigate={(screen) => setAuthScreen(screen)}
-        />;
-      }
+    // ✅ MainTabNavigator Screen
+    if (authScreen === 'MainTabNavigator') {
+      return <MainTabNavigator
+        session={session}
+        onNavigate={(screen) => setAuthScreen(screen)}
+        onBack={() => setAuthScreen('Home')}
+      />;
+    }
 
-      // ✅ Timeline Screen
-      if (authScreen === 'Timeline') {
-        return <TimelineScreen
-          session={session}
-          onBack={() => setAuthScreen('Overview')} // Back to Dashboard
-        />;
-      }
+    // ✅ Community Profile Screen
+    if (authScreen === 'CommunityProfile') {
+      return <CommunityProfile
+        session={session}
+        onBack={() => setAuthScreen('MainTabNavigator')}
+        onNavigate={(screen) => setAuthScreen(screen)}
+      />;
+    }
+
+    if (authScreen === 'Community') {
+      return <CommunityScreen
+        session={session}
+        onBack={() => setAuthScreen('MainTabNavigator')}
+        onNavigate={(screen) => setAuthScreen(screen)}
+      />;
+    }
+
+    if (authScreen === 'Ranking') {
+      return <RankingScreen
+        onBack={() => setAuthScreen('MainTabNavigator')}
+      />;
+    }
+
+    if (authScreen === 'Camera') {
+      return <CameraScreen session={session} onNavigate={(screen) => setAuthScreen(screen)} />;
+    }
+
+    if (authScreen === 'Setcamera') {
+      return <SetcameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
+    }
 
       if (authScreen === 'Camera') {
         return <CameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
