@@ -46,7 +46,7 @@ export default function BottomNav({ current, onNavigate }) {
       {/* Community */}
       <TouchableOpacity
         style={styles.item}
-        onPress={() => onNavigate("Community")}
+        onPress={() => onNavigate("MainTabNavigator")}
       >
         <Ionicons name="people-outline" size={30} color="#484C52" />
         <Text style={styles.label}>Community</Text>
