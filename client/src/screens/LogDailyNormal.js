@@ -1,428 +1,430 @@
 import React, { useState, useEffect } from "react";
-import {
-    View,
-    Text,
-    TouchableOpacity,
-    TextInput,
-    ScrollView,
-    Image,
-    Alert
-} from "react-native";
+import { View, Text, TouchableOpacity, TextInput, ScrollView, Image, Alert, Platform } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { LinearGradient } from 'expo-linear-gradient';
+// เพิ่ม Library จัดการขอบจอ
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import supabase from "./config/supabaseClient";
 import { styles } from './Style/LogDailyStyle';
-import { Picker } from '@react-native-picker/picker';
 
-export default function LogDailyNormal({ session, onBack, initialDate }) {
+// --- Shared Utilities ---
+const getLevelValue = (level) => {
+    switch (level) {
+        case 5: return "very_high";
+        case 4: return "high";
+        case 3: return "normal";
+        case 2: return "low";
+        case 1: return "very_low";
+        default: return null;
+    }
+};
+
+const formatToEnum = (val) => val ? String(val).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : null;
+
+// --- Custom Component: กล่องกรอกตัวเลขพร้อมหน่วยข้างใน ---
+const UnitInput = ({ value, onChangeText, unit, width }) => (
+    <View style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#fff',
+        borderWidth: 1,
+        borderColor: '#C8DDD8',
+        borderRadius: 8,
+        height: 38,
+        width: width || 100,
+        paddingHorizontal: 8
+    }}>
+        <TextInput
+            style={{
+                fontSize: 14,
+                color: '#000',
+                padding: 0,
+                textAlign: 'right',
+                minWidth: 15,
+                height: '100%'
+            }}
+            placeholder="0"
+            placeholderTextColor="#999"
+            keyboardType="numeric"
+            value={value}
+            onChangeText={onChangeText}
+        />
+        <Text style={{ fontSize: 14, color: '#999', marginLeft: 4 }}>{unit}</Text>
+    </View>
+);
+
+// --- Custom Component: Semantic-UI Style Dropdown ---
+const CustomDropdown = ({ value, onValueChange }) => {
+    const [isOpen, setIsOpen] = useState(false);
+
+    const options = [
+        { label: 'Dry Food', value: 'dry' },
+        { label: 'Wet Food', value: 'wet' },
+        { label: 'BARF', value: 'barf' }
+    ];
+
+    const selectedLabel = options.find(opt => opt.value === value)?.label || "Select kind of food";
+
+    return (
+        <View style={{ flex: 1, position: 'relative', zIndex: 100 }}>
+            <TouchableOpacity
+                activeOpacity={0.8}
+                style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    backgroundColor: '#fff',
+                    borderWidth: 1,
+                    borderColor: isOpen ? '#85B7D9' : '#C8DDD8',
+                    borderRadius: 8,
+                    height: 38,
+                    paddingHorizontal: 12,
+                }}
+                onPress={() => setIsOpen(!isOpen)}
+            >
+                <Text style={{ fontSize: 14, color: value ? '#000' : '#999' }}>{selectedLabel}</Text>
+                <Ionicons name={isOpen ? "chevron-up" : "chevron-down"} size={16} color="#666" />
+            </TouchableOpacity>
+
+            {isOpen && (
+                <View style={{
+                    position: 'absolute',
+                    top: 42,
+                    left: 0,
+                    right: 0,
+                    backgroundColor: '#fff',
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: '#C8DDD8',
+                    elevation: 5,
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.1,
+                    shadowRadius: 4,
+                    zIndex: 1000,
+                }}>
+                    {options.map((item, index) => (
+                        <TouchableOpacity
+                            key={index}
+                            style={{
+                                paddingVertical: 12,
+                                paddingHorizontal: 12,
+                                borderBottomWidth: index === options.length - 1 ? 0 : 1,
+                                borderBottomColor: '#F0F0F0'
+                            }}
+                            onPress={() => {
+                                // เช็คว่าถ้ากดตัวเดิม ให้เคลียร์ค่า (เป็น null)
+                                if (value === item.value) {
+                                    onValueChange(null);
+                                } else {
+                                    onValueChange(item.value);
+                                }
+                                setIsOpen(false);
+                            }}
+                        >
+                            <Text style={{ fontSize: 14, color: '#333' }}>{item.label}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+            )}
+        </View>
+    );
+};
+
+// ==========================================
+// 1. หน้า NormalView
+// ==========================================
+const NormalView = ({ props, setStatus }) => {
+    const { session, onBack, initialDate } = props;
+    const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
+
     const [catId, setCatId] = useState(null);
-    const [status, setStatus] = useState('Normal'); // Normal, Something off
-    const [foodType, setFoodType] = useState(null); // 'dry', 'wet', 'homemade_barf'
-    const [foodIntake, setFoodIntake] = useState(''); // Restored amount input
+    const [foodType, setFoodType] = useState(null);
+    const [consumeMeals, setConsumeMeals] = useState('');
+    const [foodIntake, setFoodIntake] = useState('');
     const [waterIntake, setWaterIntake] = useState('');
-    const [urineLevel, setUrineLevel] = useState(3); // 1-5
-    const [stoolLevel, setStoolLevel] = useState(3); // 1-5
-
-    // Additional fields requested
-    const [urineColor, setUrineColor] = useState('');
-    const [stoolColor, setStoolColor] = useState('');
-    const [behavior, setBehavior] = useState('');
-    const [vomitLevel, setVomitLevel] = useState(3);
-    const [vomitColor, setVomitColor] = useState('');
-    const [notes, setNotes] = useState('');
-
+    // เปลี่ยนค่าเริ่มต้นเป็น null ทั้งหมด
+    const [urineLevel, setUrineLevel] = useState(null);
+    const [stoolLevel, setStoolLevel] = useState(null);
     const [loading, setLoading] = useState(false);
 
-    // Format date for display if needed, or use logic
-    const logDate = initialDate ? new Date(initialDate) : new Date();
-
-    useEffect(() => {
-        if (session?.user) {
-            fetchCatId();
-        }
-    }, [session]);
+    useEffect(() => { if (session?.user) fetchCatId(); }, [session]);
 
     const fetchCatId = async () => {
-        try {
-            const { data, error } = await supabase
-                .from('cats')
-                .select('id, name')
-                .eq('owner_id', session.user.id)
-                .limit(1)
-                .single();
-
-            if (error) throw error;
-            if (data) setCatId(data.id);
-        } catch (error) {
-            console.log("Error fetching cat:", error.message);
-        }
+        const { data } = await supabase.from('cats').select('id').eq('owner_id', session.user.id).single();
+        if (data) setCatId(data.id);
     };
 
     const handleSave = async () => {
-        if (!catId) {
-            Alert.alert("Error", "No cat profile found");
-            return;
-        }
-
+        if (!catId) return Alert.alert("Error", "No cat profile found");
         setLoading(true);
-
-        const formatToEnum = (val) => val ? String(val).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : null;
-
-        const year = logDate.getFullYear();
-        const month = String(logDate.getMonth() + 1).padStart(2, '0');
-        const day = String(logDate.getDate()).padStart(2, '0');
-        const localDateString = `${year}-${month}-${day}`;
+        const logDate = initialDate ? new Date(initialDate) : new Date();
 
         const payload = {
             cat_id: catId,
-            log_date: localDateString, // Use local date strictly
+            log_date: `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`,
             food_type_enum: foodType,
-            food_intake: foodIntake ? Number(foodIntake) : (foodType ? 100 : 0), // Use input amount if available, else default if type selected
-            water_level: waterIntake ? Number(waterIntake) : null,
-            urine_level_enum: String(getLevelValue(urineLevel)).toLowerCase(),
-            urine_color_enum: formatToEnum(urineColor),
-            behavior_enum: formatToEnum(behavior),
-            stool_level_enum: String(getLevelValue(stoolLevel)).toLowerCase(),
-            stool_color_enum: formatToEnum(stoolColor),
-            vomit_level_enum: status === 'Something off' ? String(getLevelValue(vomitLevel)).toLowerCase() : null,
-            vomit_color_enum: status === 'Something off' ? formatToEnum(vomitColor) : null,
-            notes: notes || null,
+            meals_per_day: Number(consumeMeals) || 0,
+            food_intake: Number(foodIntake) || 0,
+            water_level: Number(waterIntake) || 0,
+            urine_level_enum: getLevelValue(urineLevel),
+            stool_level_enum: getLevelValue(stoolLevel),
+            vomit_level_enum: null,
+            urine_color_enum: null,
+            stool_color_enum: null,
+            behavior_enum: null,
         };
 
-        console.log('SENDING TO SUPABASE (v1.8) 👉', JSON.stringify(payload, null, 2));
-
-        const { error } = await supabase
-            .from('daily_logs')
-            .upsert(payload, { onConflict: 'cat_id, log_date' });
-
+        const { error } = await supabase.from('daily_logs').upsert(payload, { onConflict: 'cat_id, log_date' });
         setLoading(false);
-
-        if (error) {
-            Alert.alert('Error (v1.8)', error.message);
-        } else {
-            Alert.alert('Success', 'Daily log saved!', [
-                { text: 'OK', onPress: onBack }
-            ]);
-        }
+        if (error) Alert.alert('Error', error.message);
+        else Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
     };
 
-
-    const LevelSelector = ({ label, value, onChange, iconSource }) => (
-        <View style={styles.section}>
-            <Text style={styles.label}>{label}</Text>
-            <View style={styles.selectorContainer}>
-                {[1, 2, 3, 4, 5].map((level) => (
-                    <TouchableOpacity
-                        key={level}
-                        style={styles.levelBtn}
-                        onPress={() => onChange(level)}
-                    >
-                        <View style={[
-                            styles.gridIconBtn,
-                            value === level && (status === 'Something off' ? styles.gridIconBtnActiveOrange : styles.gridIconBtnActive)
-                        ]}>
-                            {/* Use Image if provided, else generic icon */}
-                            {iconSource ? (
-                                <Image source={iconSource} style={[styles.iconImg, value !== level && { opacity: 0.6 }]} />
-                            ) : (
-                                <View style={[styles.circle, value === level && styles.circleActive]} />
-                            )}
-                        </View>
-                        <Text style={styles.levelText}>{getLevelLabel(level)}</Text>
-                    </TouchableOpacity>
-                ))}
-            </View>
-        </View>
-    );
-
-    const getLevelLabel = (level) => {
-        switch (level) {
-            case 1: return "Very Low";
-            case 2: return "Low";
-            case 3: return "Normal";
-            case 4: return "High";
-            case 5: return "Very High";
-            default: return "";
-        }
-    };
-
-    const getLevelValue = (level) => {
-        switch (level) {
-            case 1: return "very_low";
-            case 2: return "low";
-            case 3: return "normal";
-            case 4: return "high";
-            case 5: return "very_high";
-            default: return null;
-        }
-    };
-
-
-    // Data Arrays for Grids
-    const urineColors = [
-        { label: 'Pale Yellow', value: 'pale_yellow', icon: require('../../assets/Urine_Color.png') },
-        { label: 'Dark Orange', value: 'dark_orange', icon: require('../../assets/Urine_Color.png') },
-        { label: 'Deep Brown', value: 'deep_brown', icon: require('../../assets/Urine_Color.png') },
-        { label: 'Bloody', value: 'bloody', icon: require('../../assets/Urine_Color.png') },
-        { label: 'Clear', value: 'clear', icon: require('../../assets/Urine_Color.png') },
-    ];
-
-    const stoolColors = [
-        { label: 'Brown', value: 'brown', icon: require('../../assets/Stool_Color.png') },
-        { label: 'Red', value: 'red', icon: require('../../assets/Stool_Color.png') },
-        { label: 'Green', value: 'green', icon: require('../../assets/Stool_Color.png') },
-        { label: 'Yellow Foam', value: 'yellow_foam', icon: require('../../assets/Stool_Color.png') },
-        { label: 'White Mucus', value: 'white_mucus', icon: require('../../assets/Stool_Color.png') },
-        { label: 'Undigested Food', value: 'undigested_food', icon: require('../../assets/Stool_Color.png') },
-    ];
-
-    const behaviors = [
-        { label: 'Frequent trips', value: 'frequent_trips', icon: require('../../assets/Behavior.png') },
-        { label: 'Straining', value: 'straining', icon: require('../../assets/Behavior.png') },
-        { label: 'Painful vocal', value: 'painful_vocal', icon: require('../../assets/Behavior.png') },
-        { label: 'Inappropriate', value: 'inappropriate', icon: require('../../assets/Behavior.png') },
-        { label: 'Hunched', value: 'hunched', icon: require('../../assets/Behavior.png') },
-    ];
-
-    const foodTypes = [
-        { label: 'Dry Food', value: 'dry', icon: require('../../assets/Behavior.png') }, 
-        { label: 'Wet Food', value: 'wet', icon: require('../../assets/Behavior.png') },
-        { label: 'Homemade / BARF', value: 'homemade_barf', icon: require('../../assets/Behavior.png') },
-    ];
-
-    const vomitColors = [
-        { label: 'Yellow Foam', value: 'yellow_foam', icon: require('../../assets/Stool_Color.png') },
-        { label: 'White Mucus', value: 'white_mucus', icon: require('../../assets/Stool_Color.png') },
-        { label: 'Brown', value: 'brown', icon: require('../../assets/Stool_Color.png') },
-        { label: 'Red', value: 'red', icon: require('../../assets/Stool_Color.png') },
-        { label: 'Green', value: 'green', icon: require('../../assets/Stool_Color.png') },
-        { label: 'Undigested Food', value: 'undigested_food', icon: require('../../assets/Stool_Color.png') },
-    ];
-
-    const GridSelector = ({ label, data, selectedValue, onChange, isVomitColor }) => (
-        <View style={styles.section}>
-            <Text style={styles.label}>{label}</Text>
-            <View style={styles.gridContainer}>
-                {data.map((item, index) => (
-                    <TouchableOpacity
-                        key={index}
-                        style={[styles.gridItem, isVomitColor && styles.gridItemVomit]}
-                        onPress={() => onChange(item.value)}
-                    >
-                        <View style={[
-                            styles.gridIconBtn,
-                            isVomitColor && styles.gridIconBtnVomit,
-                            selectedValue === item.value && (status === 'Something off' ? styles.gridIconBtnActiveOrange : styles.gridIconBtnActive)
-                        ]}>
-                            <Image
-                                source={item.icon}
-                                style={[styles.iconImg, isVomitColor && { width: 52, height: 52 }, selectedValue !== item.value && { opacity: 0.4 }]}
-                            />
-                        </View>
-                        <Text style={[styles.gridLabel, isVomitColor && { fontSize: 12.5 }, selectedValue === item.value && { color: '#4d4b4bff' }]}>
-                            {item.label}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </View>
-        </View>
-    );
+    const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34', textLabel: '#333' };
 
     return (
-        <View style={[styles.safeArea, status === 'Something off' && styles.safeAreaOff]}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-                    <Ionicons name="chevron-back" size={24} color="#000000ff" />
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>
-                    daily log {initialDate ? `(${logDate.getDate()}/${logDate.getMonth() + 1})` : ''} 
-                    <Text style={{ fontSize: 10, color: '#999' }}> v1.8</Text>
-                </Text>
-                <View style={{ width: 24 }} />
-            </View>
-
-            <ScrollView contentContainerStyle={[
-                styles.content,
-                status === 'Something off' && styles.contentOff]}>
-
-                <Text style={styles.questionText}>
-                    How was <Text style={{ color: status === 'Something off' ? '#FF9800' : '#4CAF50' }}>Luna</Text> today
-                </Text>
-
-                {/* Status Toggle */}
-                <View style={styles.statusContainer}>
-                    <TouchableOpacity
-                        style={[styles.statusCard, status === 'Normal' && styles.statusCardActive]}
-                        onPress={() => setStatus('Normal')}
-                    >
-                        <View style={{ backgroundColor: '#ffffffff', borderRadius: 40, padding: 5, marginBottom: 5 }}>
-                            <MaterialCommunityIcons name="cat" size={60} color="#00695C" />
-                        </View>
-                        <Text style={styles.statusText}>Normal</Text>
+        <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+            <LinearGradient
+                colors={['#FFFFFF', '#B2E1DB']}
+                locations={[0.42, 1]}
+                style={{ flex: 1, paddingTop: Math.max(insets.top, 20) }} // หลบขอบจอด้านบน
+            >
+                <View style={[styles.header, { paddingHorizontal: 15 }]}>
+                    <TouchableOpacity onPress={onBack} style={{ padding: 5 }}>
+                        <Ionicons name="chevron-back" size={28} color="#000" />
                     </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={[
-                            styles.statusCard,
-                            status === 'Something off' && styles.statusCardActive,
-                            status === 'Something off' && styles.statusCardOff
-                        ]}
-                        onPress={() => setStatus('Something off')}
-                    >
-                        <View style={{ backgroundColor: '#fff', borderRadius: 40, padding: 5, marginBottom: 5 }}>
-                            <MaterialCommunityIcons name="emoticon-sick-outline" size={60} color="#FF9800" />
-                        </View>
-                        <Text style={styles.statusText}>Something off</Text>
-                    </TouchableOpacity>
+                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1A3B34' }}>daily log</Text>
+                    <View style={{ width: 38 }} />
                 </View>
 
-                {/* Food Intake Section - Combined Amount + Type */}
-                <View style={styles.section}>
-                    <Text style={styles.label}>Food Intake</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                        
-                        {/* Left: Amount Input */}
-                        <View style={[styles.inputContainer, { flex: 0.35, marginRight: 10 }]}>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="0"
-                                keyboardType="numeric"
-                                value={foodIntake}
-                                onChangeText={setFoodIntake}
-                            />
-                            <Text style={styles.unit}>g</Text>
-                        </View>
+                <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingBottom: insets.bottom + 20 }]}>
+                    <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#1A3B34', textAlign: 'center', marginBottom: 20 }}>
+                        How was <Text style={{ color: '#4CAF50' }}>Luna</Text> today
+                    </Text>
 
-                        {/* Right: Food Type Picker */}
-                        <View style={{ flex: 0.65 }}>
-                            <View style={{ 
-                                width: '100%', 
-                                height: 50, 
-                                borderRadius: 12, 
-                                backgroundColor: status === 'Something off' ? '#FFF3E0' : '#E0F2F1', // Light background matching theme
-                                justifyContent: 'center',
-                                borderWidth: 1,
-                                borderColor: status === 'Something off' ? '#FF9800' : '#4FD1C5'
-                            }}>
-                                <Picker
-                                    selectedValue={foodType}
-                                    onValueChange={(itemValue) => setFoodType(itemValue)}
-                                    style={{ width: '100%', height: 50 }}
-                                    dropdownIconColor={status === 'Something off' ? '#FF9800' : '#00695C'}
-                                >
-                                    <Picker.Item label="Select Type" value={null} enabled={false} color="#999" />
-                                    <Picker.Item label="Dry Food" value="dry" />
-                                    <Picker.Item label="Wet Food" value="wet" />
-                                    <Picker.Item label="Homemade / BARF" value="homemade_barf" />
-                                </Picker>
+                    {/* Status Toggle */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
+                        <TouchableOpacity style={{ backgroundColor: '#82CDBB', borderRadius: 16, width: '48%', paddingVertical: 15, alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3 }}>
+                            <View style={{ backgroundColor: '#fff', borderRadius: 30, width: 55, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+                                <MaterialCommunityIcons name="cat" size={40} color="#000" />
                             </View>
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#000' }}>Normal</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={{ backgroundColor: '#A5D6C9', borderRadius: 16, width: '48%', paddingVertical: 15, alignItems: 'center', opacity: 0.8 }} onPress={() => setStatus('Something off')}>
+                            <View style={{ backgroundColor: '#fff', borderRadius: 30, width: 55, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+                                <MaterialCommunityIcons name="emoticon-sad-outline" size={40} color="#000" />
+                            </View>
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#000' }}>Something off</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* --- Food Section --- */}
+                    <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: theme.borderColor, zIndex: 10 }}>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Food</Text>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, zIndex: 100 }}>
+                            <Text style={{ width: 60, fontSize: 14, color: theme.textLabel }}>Type :</Text>
+                            <CustomDropdown value={foodType} onValueChange={setFoodType} />
+                        </View>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
+                            <Text style={{ width: 85, fontSize: 14, color: theme.textLabel }}>Consume</Text>
+                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="meals" width={110} />
+                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}>per day.</Text>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
+                            <UnitInput value={foodIntake} onChangeText={setFoodIntake} unit="g" width={100} />
                         </View>
                     </View>
-                </View>
 
-                {/* Water Intake - Changed to Input */}
-                <View style={styles.section}>
-                    <Text style={styles.label}>Water Intake</Text>
-                    <View style={styles.row}>
-                        <View style={styles.inputContainer}>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="amount"
-                                keyboardType="numeric"
-                                value={waterIntake}
-                                onChangeText={setWaterIntake}
-                            />
-                            <Text style={styles.unit}>ml</Text>
+                    {/* --- Water Section --- */}
+                    <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: theme.borderColor }}>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Water</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
+                            <UnitInput value={waterIntake} onChangeText={setWaterIntake} unit="ml" width={110} />
+                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}>per day.</Text>
                         </View>
                     </View>
-                </View>
 
-                {/* Urine */}
-                <LevelSelector
-                    label="Urine"
-                    value={urineLevel}
-                    onChange={setUrineLevel}
-                    iconSource={require('../../assets/Urine.png')}
-                />
+                    {/* --- Urine & Stool Section --- */}
+                    <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Urine</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            {[{ level: 5, label: "Very High" }, { level: 4, label: "High" }, { level: 3, label: "Normal" }, { level: 2, label: "Low" }, { level: 1, label: "VeryLow" }
+                            ].map((item) => {
+                                const isActive = urineLevel === item.level;
+                                return (
+                                    <TouchableOpacity
+                                        key={`urine-${item.level}`}
+                                        style={{ alignItems: 'center', width: 70 }}
+                                        onPress={() => setUrineLevel(urineLevel === item.level ? null : item.level)} // กดซ้ำเพื่อเคลียร์ค่า
+                                    >
+                                        <View style={[
+                                            { width: 60, height: 60, justifyContent: 'center', alignItems: 'center', borderRadius: 16 },
+                                            isActive ? {} : {}
+                                        ]}>
+                                            <Image source={require('../../assets/Urine.png')} style={{ width: 50, height: 50, opacity: isActive ? 1 : 0.45 }} resizeMode="contain" />
+                                        </View>
+                                        <Text style={{ fontSize: 12, marginTop: 8, color: isActive ? theme.textDark : '#8E9E9B', fontWeight: isActive ? 'bold' : '500', textAlign: 'center' }}>{item.label}</Text>
+                                    </TouchableOpacity>
+                                )
+                            })}
+                        </View>
 
-                {/* Urine Color Grid */}
-                <GridSelector
-                    label="Urine Color"
-                    data={urineColors}
-                    selectedValue={urineColor}
-                    onChange={setUrineColor}
-                />
+                        <View style={{ height: 1, backgroundColor: theme.borderColor, marginVertical: 20 }} />
 
-                {/* Behavior Grid */}
-                <GridSelector
-                    label="Behavior"
-                    data={behaviors}
-                    selectedValue={behavior}
-                    onChange={setBehavior}
-                />
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Stool</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            {[{ level: 5, label: "Very High" }, { level: 4, label: "High" }, { level: 3, label: "Normal" }, { level: 2, label: "Low" }, { level: 1, label: "VeryLow" }
+                            ].map((item) => {
+                                const isActive = stoolLevel === item.level;
+                                return (
+                                    <TouchableOpacity
+                                        key={`stool-${item.level}`}
+                                        style={{ alignItems: 'center', width: 60 }}
+                                        onPress={() => setStoolLevel(stoolLevel === item.level ? null : item.level)} // กดซ้ำเพื่อเคลียร์ค่า
+                                    >
+                                        <View style={[
+                                            { width: 60, height: 60, justifyContent: 'center', alignItems: 'center', borderRadius: 16 },
+                                            isActive ? {
+                                            } : {
+                                            }
+                                        ]}>
+                                            <Image source={require('../../assets/Stool.png')} style={{ width: 50, height: 50, opacity: isActive ? 1 : 0.35 }} resizeMode="contain" />
+                                        </View>
+                                        <Text style={{ fontSize: 12, marginTop: 8, color: isActive ? theme.textDark : '#8E9E9B', fontWeight: isActive ? 'bold' : '500', textAlign: 'center' }}>{item.label}</Text>
+                                    </TouchableOpacity>
+                                )
+                            })}
+                        </View>
+                    </View>
 
-                {/* Stool */}
-                <LevelSelector
-                    label="Stool"
-                    value={stoolLevel}
-                    onChange={setStoolLevel}
-                    iconSource={require('../../assets/Stool.png')}
-                />
-
-                {/* Stool Color Grid */}
-                <GridSelector
-                    label="Stool Color"
-                    data={stoolColors}
-                    selectedValue={stoolColor}
-                    onChange={setStoolColor}
-                />
-
-                {status === 'Something off' && (
-                    <>
-                        {/* Vomit */}
-                        <LevelSelector
-                            label="vomit"
-                            value={vomitLevel}
-                            onChange={setVomitLevel}
-                            iconSource={require('../../assets/Stool_Color.png')}
-                        />
-
-                        {/* Vomit Color Grid */}
-                        <GridSelector
-                            label="vomit Color"
-                            isVomitColor={true}
-                            data={vomitColors}
-                            selectedValue={vomitColor}
-                            onChange={setVomitColor}
-                        />
-                    </>
-                )}
-
-
-
-                {/* Notes Section */}
-                <View style={styles.section}>
-                    <Text style={styles.label}>Notes</Text>
-                    <TextInput
-                        style={styles.notesInput}
-                        placeholder="Add some notes..."
-                        placeholderTextColor="#999"
-                        multiline
-                        numberOfLines={4}
-                        value={notes}
-                        onChangeText={setNotes}
-                    />
-                </View>
-
-                <TouchableOpacity
-                    style={[styles.saveButton, status === 'Something off' && styles.saveButtonOff]}
-                    onPress={handleSave}
-                    disabled={loading}
-                >
-                    <Text style={styles.saveButtonText}>{loading ? "Saving..." : "Save Event"}</Text>
-                    <Ionicons name="checkmark-circle-outline" size={24} color="#fff" style={{ marginLeft: 8 }} />
-                </TouchableOpacity>
-
-            </ScrollView>
+                    {/* --- Save Button --- */}
+                    <TouchableOpacity style={{ backgroundColor: '#A5D6C9', borderRadius: 12, height: 55, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }} onPress={handleSave} disabled={loading}>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#fff', marginRight: 8 }}>{loading ? "Saving..." : "Save Event"}</Text>
+                        <Ionicons name="checkmark-circle-outline" size={24} color="#fff" />
+                    </TouchableOpacity>
+                </ScrollView>
+            </LinearGradient>
         </View>
     );
+};
+
+// ==========================================
+// 2. หน้า SomethingOffView
+// ==========================================
+const SomethingOffView = ({ props, setStatus }) => {
+    const { session, onBack, initialDate } = props;
+    const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
+
+    const [catId, setCatId] = useState(null);
+    const [vomitLevel, setVomitLevel] = useState(null); // เปลี่ยนเป็น null
+    const [vomitColor, setVomitColor] = useState(null); // เปลี่ยนเป็น null
+    const [notes, setNotes] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => { if (session?.user) fetchCatId(); }, [session]);
+
+    const fetchCatId = async () => {
+        const { data } = await supabase.from('cats').select('id').eq('owner_id', session.user.id).single();
+        if (data) setCatId(data.id);
+    };
+
+    const handleSave = async () => {
+        setLoading(true);
+        const logDate = initialDate ? new Date(initialDate) : new Date();
+        const payload = {
+            cat_id: catId,
+            log_date: `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`,
+            vomit_level_enum: getLevelValue(vomitLevel),
+            vomit_color_enum: formatToEnum(vomitColor),
+            notes: notes || null,
+        };
+        const { error } = await supabase.from('daily_logs').upsert(payload, { onConflict: 'cat_id, log_date' });
+        setLoading(false);
+        if (error) Alert.alert('Error', error.message);
+        else Alert.alert('Success', 'Saved!', [{ text: 'OK', onPress: onBack }]);
+    };
+
+    const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34' };
+
+    return (
+        <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+            <LinearGradient
+                colors={['#FFFFFF', '#B2E1DB']}
+                locations={[0.42, 1]}
+                style={{ flex: 1, paddingTop: Math.max(insets.top, 20) }} // หลบขอบจอด้านบน
+            >
+                <View style={[styles.header, { paddingHorizontal: 15 }]}>
+                    <TouchableOpacity onPress={onBack} style={{ padding: 5 }}>
+                        <Ionicons name="chevron-back" size={28} color="#000" />
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1A3B34' }}>daily log</Text>
+                    <View style={{ width: 38 }} />
+                </View>
+
+                <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingBottom: insets.bottom + 20 }]}>
+                    <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#1A3B34', textAlign: 'center', marginBottom: 20 }}>
+                        How was <Text style={{ color: '#FF9800' }}>Luna</Text> today
+                    </Text>
+
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
+                        <TouchableOpacity style={{ backgroundColor: '#A5D6C9', borderRadius: 16, width: '48%', paddingVertical: 15, alignItems: 'center', opacity: 0.8 }} onPress={() => setStatus('Normal')}>
+                            <View style={{ backgroundColor: '#fff', borderRadius: 30, width: 55, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+                                <MaterialCommunityIcons name="cat" size={40} color="#000" />
+                            </View>
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#000' }}>Normal</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={{ backgroundColor: '#82CDBB', borderRadius: 16, width: '48%', paddingVertical: 15, alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3 }}>
+                            <View style={{ backgroundColor: '#fff', borderRadius: 30, width: 55, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+                                <MaterialCommunityIcons name="emoticon-sad-outline" size={40} color="#000" />
+                            </View>
+                            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#000' }}>Something off</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* --- Vomit Section --- */}
+                    <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Vomit Color</Text>
+                        <View style={styles.gridContainer}>
+                            {[{ label: 'Yellow Foam', value: 'yellow_foam' }, { label: 'White Mucus', value: 'white_mucus' }, { label: 'Red', value: 'red' }
+                            ].map((item, index) => {
+                                const isActive = vomitColor === item.value;
+                                return (
+                                    <TouchableOpacity
+                                        key={index}
+                                        style={styles.gridItem}
+                                        onPress={() => setVomitColor(vomitColor === item.value ? null : item.value)} // กดซ้ำเพื่อเคลียร์ค่า
+                                    >
+                                        <View style={[styles.gridIconBtn, isActive && styles.gridIconBtnActiveOrange]}>
+                                            <Image source={require('../../assets/Stool_Color.png')} style={[styles.iconImg, { width: 45, height: 45 }, !isActive && { opacity: 0.4 }]} />
+                                        </View>
+                                        <Text style={styles.gridLabel}>{item.label}</Text>
+                                    </TouchableOpacity>
+                                )
+                            })}
+                        </View>
+                    </View>
+
+                    <TouchableOpacity style={{ backgroundColor: '#A5D6C9', borderRadius: 12, height: 55, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }} onPress={handleSave} disabled={loading}>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#fff', marginRight: 8 }}>{loading ? "Saving..." : "Save Event"}</Text>
+                        <Ionicons name="checkmark-circle-outline" size={24} color="#fff" />
+                    </TouchableOpacity>
+                </ScrollView>
+            </LinearGradient>
+        </View>
+    );
+};
+
+// ==========================================
+// 3. Main Export
+// ==========================================
+export default function LogDaily(props) {
+    const [status, setStatus] = useState('Normal');
+    return status === 'Normal' ? <NormalView props={props} setStatus={setStatus} /> : <SomethingOffView props={props} setStatus={setStatus} />;
 }
