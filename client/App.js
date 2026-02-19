@@ -227,6 +227,7 @@ export default function App() {
 
     if (authScreen === 'Ranking') {
       return <RankingScreen
+        session={session}
         onBack={() => setAuthScreen('MainTabNavigator')}
       />;
     }
