@@ -20,6 +20,9 @@ import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScr
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
+import SetcameraScreen from './src/screens/SetcameraScreen';
+import PhotoCheck from './src/screens/PhotoCheck';
+import AnalysisResult from './src/screens/AnalysisResult';
 
 import { useFonts } from 'expo-font';
 import {
