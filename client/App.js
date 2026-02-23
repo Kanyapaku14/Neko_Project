@@ -219,8 +219,7 @@ export default function App() {
     }
 
     if (authScreen === 'Setcamera') {
-      return <SetcameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
-      return <CameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
+      return <SetcameraScreen onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
     }
 
     if (authScreen === 'PhotoCheck') {
@@ -235,8 +234,9 @@ export default function App() {
       return (
         <Phone
           session={session}
+          initialStep={screenParams.initialStep}
           onBack={() => setAuthScreen('Setting')}
-          onConfirm={() => setAuthScreen('Setting')}
+          onConfirm={() => setAuthScreen('Camera')}
         />
       );
     }

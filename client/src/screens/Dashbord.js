@@ -12,7 +12,7 @@ import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
 
 export default function Dashboard({ onBack, onNavigate, session }) {
   // สมมติคะแนนรวม (ในอนาคตอาจจะดึงมาจาก Database)
-  const [currentScore, setCurrentScore] = useState(null); 
+  const [currentScore, setCurrentScore] = useState(null);
   const status = getHealthStatus(currentScore || 100);
 
   // Chart data state
@@ -47,12 +47,16 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         return;
       }
 
-      // 2. ดึง Log ย้อนหลัง 7 วัน (เรียงจากล่าสุดไปเก่าสุด)
+      // 2. ดึง Log ย้อนหลัง 7 วัน พร้อมข้อมูลรายละเอียด
       const { data: logsData, error: logsError } = await supabase
         .from("daily_logs")
-        .select("*") 
+        .select(`
+          *,
+          normal_logs(*),
+          something_off_logs(*)
+        `)
         .eq("cat_id", catData.id)
-        .order("log_date", { ascending: false }) 
+        .order("log_date", { ascending: false })
         .limit(7);
 
       if (logsError) throw logsError;
@@ -60,39 +64,42 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       // ====================================================
       // 🎯 ส่วนคำนวณคะแนนเฉลี่ย 7 วัน (หัวใจสำคัญ)
       // ====================================================
-      if (logsData && logsData.length > 0) {
+      // Unified data for processing
+      const unifiedLogs = (logsData || []).map(log => {
+        const details = log.log_type === 'something_off'
+          ? (log.something_off_logs?.[0] || log.something_off_logs)
+          : (log.normal_logs?.[0] || log.normal_logs);
+
+        return {
+          ...log,
+          ...(details || {})
+        };
+      });
+
+      if (unifiedLogs.length > 0) {
         let totalScore = 0;
 
-        // วนลูปทุก Log ที่เจอในช่วง 7 วัน
-        logsData.forEach(log => {
-           // ส่ง Log ไปให้ healthLogic ตรวจร่างกายรายวัน
-           const analysis = analyzeHealthLog(log);
-           
-           // เอาคะแนนมารวมกัน (เช่น วันแรก 80 + วันสอง 100 + ...)
-           totalScore += analysis.score;
+        unifiedLogs.forEach(log => {
+          const analysis = analyzeHealthLog(log);
+          totalScore += analysis.score;
         });
-        
-        // สูตร: คะแนนรวม / จำนวนวันที่จดบันทึก = คะแนนเฉลี่ย (เต็ม 100)
-        const averageScore = Math.round(totalScore / logsData.length);
-        
-        // อัปเดตตัวเลขขึ้นหน้าจอ
+
+        const averageScore = Math.round(totalScore / unifiedLogs.length);
         setCurrentScore(averageScore);
       } else {
-        // ถ้า 7 วันที่ผ่านมาไม่ได้จดเลย ให้คะแนนเต็ม 100 (ถือว่าปกติ)
-        setCurrentScore(100); 
+        setCurrentScore(100);
       }
 
-      // 3. เตรียมข้อมูลกราฟ (ส่วนนี้เหมือนเดิม)
-      // กลับด้านข้อมูล (ให้กราฟโชว์จาก อดีต -> ปัจจุบัน)
-      const chartLogs = [...(logsData || [])].reverse(); 
-      
+      // 3. เตรียมข้อมูลกราฟ
+      const chartLogs = [...unifiedLogs].reverse();
+
       const labels = chartLogs.map((log) => {
         const date = new Date(log.log_date);
         return `${date.getDate()}/${date.getMonth() + 1}`;
       });
 
-      const foodData = chartLogs.map((log) => log.food_intake || 0);
-      const waterData = chartLogs.map((log) => log.water_level || 0); // หรือ water_intake ตาม DB คุณ
+      const foodData = chartLogs.map((log) => log.food_amount || 0);
+      const waterData = chartLogs.map((log) => log.water_amount || 0);
 
       setChartData({
         labels: labels,
@@ -112,32 +119,32 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
-        
+
         {/* Header */}
-        <HomeHeader 
-            onProfile={() => onNavigate && onNavigate('Profile')} 
-            onNotify={() => console.log("Notify")}
-            onSetting={() => onNavigate && onNavigate('UserInfo')} 
+        <HomeHeader
+          onProfile={() => onNavigate && onNavigate('Profile')}
+          onNotify={() => console.log("Notify")}
+          onSetting={() => onNavigate && onNavigate('UserInfo')}
         />
 
         {/* ===== ส่วนแสดงผลคะแนน (คล้าย AssessmentScreen) ===== */}
         {/* ===== ส่วนแสดงผลคะแนน (คล้าย AssessmentScreen) ===== */}
-       <View style={[styles.scoreContainer, { marginTop: 40 }]}>
-            {loading || currentScore === null ? (
-                <ActivityIndicator size="large" color="#4FD1C5" style={{ marginBottom: 20 }} />
-            ) : (
-                <>
-                    <View style={[styles.scoreCircleLarge, { borderColor: status.color }]}>
-                        <Text style={[styles.statusLabelLarge, { color: status.color }]}>{status.label}</Text>
-                        <Text style={{ fontSize: 40, fontWeight: 'bold', color: status.color }}>{currentScore}</Text>
-                    </View>
-                    <Text style={[styles.statusDescBelow, { color: status.color }]}>{status.text}</Text>
-                </>
-            )}
-            
+        <View style={[styles.scoreContainer, { marginTop: 40 }]}>
+          {loading || currentScore === null ? (
+            <ActivityIndicator size="large" color="#4FD1C5" style={{ marginBottom: 20 }} />
+          ) : (
+            <>
+              <View style={[styles.scoreCircleLarge, { borderColor: status.color }]}>
+                <Text style={[styles.statusLabelLarge, { color: status.color }]}>{status.label}</Text>
+                <Text style={{ fontSize: 40, fontWeight: 'bold', color: status.color }}>{currentScore}</Text>
+              </View>
+              <Text style={[styles.statusDescBelow, { color: status.color }]}>{status.text}</Text>
+            </>
+          )}
+
         </View>
 
-  {/* ===== Latest Health Assessment ===== */}
+        {/* ===== Latest Health Assessment ===== */}
         <View style={styles.assessmentCard}>
           <Text style={styles.assessmentTitle}>Latest Health Assessment</Text>
           <View style={styles.assessmentContent}>
@@ -145,13 +152,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
               <Text style={styles.assessmentDate}>Oct 22 • <Text style={styles.assessmentRisk}>Moderate Risk</Text></Text>
             </View>
             <View style={styles.assessmentButtons}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.viewResultButton}
                 onPress={() => onNavigate?.('Result')}
               >
                 <Text style={styles.viewResultButtonText}>View Result</Text>
               </TouchableOpacity>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.viewHistoryButton}
                 onPress={() => console.log('View History pressed')}
               >
@@ -169,7 +176,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
               <Text style={styles.viewDetailText}>View Detail</Text>
             </TouchableOpacity>
           </View>
-          
+
           <View style={styles.riskAnalysisCard}>
             {/* Activity Level */}
             <View style={styles.riskItem}>
@@ -248,14 +255,14 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
         {/* ===== Timeline & Export Buttons ===== */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 16, marginBottom: 24 }}>
-          <TouchableOpacity 
-            style={{ 
-              flex: 1, 
-              backgroundColor: '#B8D8D4', 
-              borderRadius: 24, 
-              paddingVertical: 14, 
-              flexDirection: 'row', 
-              alignItems: 'center', 
+          <TouchableOpacity
+            style={{
+              flex: 1,
+              backgroundColor: '#B8D8D4',
+              borderRadius: 24,
+              paddingVertical: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
               justifyContent: 'center',
               shadowColor: "#000",
               shadowOffset: { width: 0, height: 2 },
@@ -266,19 +273,19 @@ export default function Dashboard({ onBack, onNavigate, session }) {
             onPress={() => onNavigate && onNavigate('Timeline')}
           >
             <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#2D4A47', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
-               <MaterialCommunityIcons name="chart-timeline-variant" size={20} color="#fff" />
+              <MaterialCommunityIcons name="chart-timeline-variant" size={20} color="#fff" />
             </View>
             <Text style={{ fontSize: 16, fontWeight: '700', color: '#2D4A47' }}>Timeline</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={{ 
-              flex: 1, 
-              backgroundColor: '#B8D8D4', 
-              borderRadius: 24, 
-              paddingVertical: 14, 
-              flexDirection: 'row', 
-              alignItems: 'center', 
+          <TouchableOpacity
+            style={{
+              flex: 1,
+              backgroundColor: '#B8D8D4',
+              borderRadius: 24,
+              paddingVertical: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
               justifyContent: 'center',
               shadowColor: "#000",
               shadowOffset: { width: 0, height: 2 },
@@ -289,13 +296,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
             onPress={() => console.log('Export pressed')}
           >
             <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#2D4A47', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
-               <MaterialCommunityIcons name="export-variant" size={20} color="#fff" />
+              <MaterialCommunityIcons name="export-variant" size={20} color="#fff" />
             </View>
             <Text style={{ fontSize: 16, fontWeight: '700', color: '#2D4A47' }}>Export</Text>
           </TouchableOpacity>
         </View>
 
-      
+
 
       </ScrollView>
 
@@ -315,7 +322,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F7FA', // สีพื้นหลังเทาอ่อนๆ สบายตา
   },
   scrollContainer: {
-  
+
     padding: 20,
     paddingBottom: 100, // Increased for BottomNav
   },
@@ -350,7 +357,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textAlign: 'center',
   },
- 
+
   // Style หัวข้อ section
   sectionTitle: {
     fontSize: 18,

@@ -65,43 +65,70 @@ export default function LogDailyNormal({ session, onBack, initialDate }) {
 
         setLoading(true);
 
-        const formatToEnum = (val) => val ? String(val).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : null;
-
         const year = logDate.getFullYear();
         const month = String(logDate.getMonth() + 1).padStart(2, '0');
         const day = String(logDate.getDate()).padStart(2, '0');
         const localDateString = `${year}-${month}-${day}`;
 
-        const payload = {
-            cat_id: catId,
-            log_date: localDateString, // Use local date strictly
-            food_type_enum: foodType,
-            food_intake: foodIntake ? Number(foodIntake) : (foodType ? 100 : 0), // Use input amount if available, else default if type selected
-            water_level: waterIntake ? Number(waterIntake) : null,
-            urine_level_enum: String(getLevelValue(urineLevel)).toLowerCase(),
-            urine_color_enum: formatToEnum(urineColor),
-            behavior_enum: formatToEnum(behavior),
-            stool_level_enum: String(getLevelValue(stoolLevel)).toLowerCase(),
-            stool_color_enum: formatToEnum(stoolColor),
-            vomit_level_enum: status === 'Something off' ? String(getLevelValue(vomitLevel)).toLowerCase() : null,
-            vomit_color_enum: status === 'Something off' ? formatToEnum(vomitColor) : null,
-            notes: notes || null,
-        };
+        try {
+            // 1. Save to daily_logs first
+            const logType = status === 'Something off' ? 'something_off' : 'normal';
 
-        console.log('SENDING TO SUPABASE (v1.8) 👉', JSON.stringify(payload, null, 2));
+            const { data: dailyLog, error: dailyError } = await supabase
+                .from('daily_logs')
+                .upsert({
+                    cat_id: catId,
+                    log_date: localDateString,
+                    log_type: logType
+                }, { onConflict: 'cat_id, log_date' })
+                .select('id')
+                .single();
 
-        const { error } = await supabase
-            .from('daily_logs')
-            .upsert(payload, { onConflict: 'cat_id, log_date' });
+            if (dailyError) throw dailyError;
 
-        setLoading(false);
+            const dailyLogId = dailyLog.id;
 
-        if (error) {
-            Alert.alert('Error (v1.8)', error.message);
-        } else {
+            // 2. Clear out the "other" log type if it exists to maintain consistency
+            // (e.g., if they switch from Normal to Something off for the same day)
+            const otherTable = logType === 'normal' ? 'something_off_logs' : 'normal_logs';
+            await supabase.from(otherTable).delete().eq('daily_log_id', dailyLogId);
+
+            // 3. Save details to specific table
+            const targetTable = logType === 'normal' ? 'normal_logs' : 'something_off_logs';
+
+            const detailsPayload = {
+                daily_log_id: dailyLogId,
+                food_amount: foodIntake ? Number(foodIntake) : 0,
+                food_type: foodType || 'dry', // Default if not selected
+                water_amount: waterIntake ? Number(waterIntake) : 0,
+                urine_level: getLevelValue(urineLevel),
+                urine_color: urineColor || null,
+                stool_level: getLevelValue(stoolLevel),
+                stool_color: stoolColor || null,
+                behavior: behavior || null,
+                notes: notes || null,
+            };
+
+            if (logType === 'something_off') {
+                detailsPayload.vomit_level = getLevelValue(vomitLevel);
+                detailsPayload.vomit_color = vomitColor || null;
+            }
+
+            const { error: detailsError } = await supabase
+                .from(targetTable)
+                .upsert(detailsPayload, { onConflict: 'daily_log_id' });
+
+            if (detailsError) throw detailsError;
+
             Alert.alert('Success', 'Daily log saved!', [
                 { text: 'OK', onPress: onBack }
             ]);
+
+        } catch (error) {
+            console.error('Save error:', error);
+            Alert.alert('Error (v1.8)', error.message);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -184,7 +211,7 @@ export default function LogDailyNormal({ session, onBack, initialDate }) {
     ];
 
     const foodTypes = [
-        { label: 'Dry Food', value: 'dry', icon: require('../../assets/Behavior.png') }, 
+        { label: 'Dry Food', value: 'dry', icon: require('../../assets/Behavior.png') },
         { label: 'Wet Food', value: 'wet', icon: require('../../assets/Behavior.png') },
         { label: 'Homemade / BARF', value: 'homemade_barf', icon: require('../../assets/Behavior.png') },
     ];
@@ -234,7 +261,7 @@ export default function LogDailyNormal({ session, onBack, initialDate }) {
                     <Ionicons name="chevron-back" size={24} color="#000000ff" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>
-                    daily log {initialDate ? `(${logDate.getDate()}/${logDate.getMonth() + 1})` : ''} 
+                    daily log {initialDate ? `(${logDate.getDate()}/${logDate.getMonth() + 1})` : ''}
                     <Text style={{ fontSize: 10, color: '#999' }}> v1.8</Text>
                 </Text>
                 <View style={{ width: 24 }} />
@@ -279,7 +306,7 @@ export default function LogDailyNormal({ session, onBack, initialDate }) {
                 <View style={styles.section}>
                     <Text style={styles.label}>Food Intake</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                        
+
                         {/* Left: Amount Input */}
                         <View style={[styles.inputContainer, { flex: 0.35, marginRight: 10 }]}>
                             <TextInput
@@ -294,10 +321,10 @@ export default function LogDailyNormal({ session, onBack, initialDate }) {
 
                         {/* Right: Food Type Picker */}
                         <View style={{ flex: 0.65 }}>
-                            <View style={{ 
-                                width: '100%', 
-                                height: 50, 
-                                borderRadius: 12, 
+                            <View style={{
+                                width: '100%',
+                                height: 50,
+                                borderRadius: 12,
                                 backgroundColor: status === 'Something off' ? '#FFF3E0' : '#E0F2F1', // Light background matching theme
                                 justifyContent: 'center',
                                 borderWidth: 1,

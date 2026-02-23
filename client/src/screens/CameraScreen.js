@@ -85,7 +85,7 @@ export default function CameraScreen({ onNavigate, session }) {
                 <MaterialCommunityIcons name="food-apple" size={24} color="#008080" />
               </View>
               <Text style={styles.cardLabel}>Food</Text>
-              <Text style={styles.value}>{data.food} Times</Text>
+              <Text style={styles.value}>{data.food} Grams</Text>
             </View>
 
             <View style={styles.card}>
@@ -129,7 +129,10 @@ export default function CameraScreen({ onNavigate, session }) {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.btn}>
+          <TouchableOpacity
+            style={styles.btn}
+            onPress={() => onNavigate('Timeline')}
+          >
             <MaterialCommunityIcons name="timeline-text-outline" size={20} color="#00695C" />
             <Text style={styles.btnText}>View Timeline</Text>
             <Ionicons name="chevron-forward" size={20} color="#00695C" />

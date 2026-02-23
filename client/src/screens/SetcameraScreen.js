@@ -153,7 +153,10 @@ export default function SetcameraScreen({ onNavigate }) {
                                 </View>
                             )}
 
-                            <TouchableOpacity style={styles.overlayButton}>
+                            <TouchableOpacity
+                                style={styles.overlayButton}
+                                onPress={() => onNavigate('Phone', { initialStep: 'zone_setup' })}
+                            >
                                 <MaterialCommunityIcons name="crop-free" size={16} color="#fff" style={{ marginRight: 8 }} />
                                 <Text style={styles.overlayButtonText}>Detection Zone Set</Text>
                             </TouchableOpacity>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet, ScrollView, SafeAreaView, ActivityIndicator, TextInput, Alert, Dimensions } from 'react-native';
 import { Ionicons, Feather, MaterialIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import supabase from './config/supabaseClient';
 import { StatusBar } from 'expo-status-bar';
 
@@ -15,8 +16,8 @@ const STEPS = {
     SUCCESS: 'success',
 };
 
-export default function Phone({ session, onBack, onConfirm }) {
-    const [currentStep, setCurrentStep] = useState(STEPS.INTRO);
+export default function Phone({ session, onBack, onConfirm, initialStep }) {
+    const [currentStep, setCurrentStep] = useState(initialStep || STEPS.INTRO);
     const [loading, setLoading] = useState(false);
     const [cats, setCats] = useState([]);
 
@@ -100,10 +101,12 @@ export default function Phone({ session, onBack, onConfirm }) {
         <View style={styles.stepContainer}>
             {renderHeader('Camera')}
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-                <View style={[styles.heroImageContainer, { width: width * 0.7, height: width * 0.7 }]}>
-                    {/* Placeholder for Hero Image */}
-                    <Image source={{ uri: 'https://placekitten.com/300/300' }} style={styles.heroImage} />
-                    <View style={styles.heroOverlay} />
+                <View style={[styles.heroImageContainer, { width: width * 0.9, height: width * 0.7 }]}>
+                    <Image
+                        source={require('../../assets/ebo-air-2.jpg')}
+                        style={[styles.heroImage, { borderRadius: 32 }]}
+                        resizeMode="cover"
+                    />
                 </View>
 
                 <Text style={styles.mainTitle}>Unlock Behavioral Insights</Text>
@@ -144,8 +147,12 @@ export default function Phone({ session, onBack, onConfirm }) {
                     <Feather name="chevron-down" size={20} color="#666" style={styles.inputIcon} />
                 </View>
 
-                <View style={styles.cameraBanner}>
-                    <Image source={{ uri: 'https://placekitten.com/300/100' }} style={styles.cameraBannerImage} />
+                <View style={[styles.heroImageContainer, { width: width * 0.9, height: width * 0.4 }]}>
+                    <Image
+                        source={require('../../assets/cover-blog-3.jpg')}
+                        style={[styles.heroImage, { borderRadius: 1 }]}
+                        resizeMode="cover"
+                    />
                 </View>
 
                 <Text style={styles.sectionTitle}>Webhook Configuration</Text>
@@ -185,13 +192,17 @@ export default function Phone({ session, onBack, onConfirm }) {
                 <Text style={styles.mainTitle}>Connection successful!</Text>
                 <Text style={styles.subTitle}>Your camera is online and sending data. We can see your cat's area clearly.</Text>
 
-                <View style={styles.videoPlaceholder}>
+                <TouchableOpacity
+                    style={styles.videoPlaceholder}
+                    onPress={() => onConfirm && onConfirm()}
+                    activeOpacity={0.9}
+                >
                     <Image source={{ uri: 'https://placekitten.com/400/250' }} style={styles.videoImage} />
                     <View style={styles.liveBadge}>
                         <View style={styles.recordingDot} />
                         <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>Connected • 1080p</Text>
                     </View>
-                </View>
+                </TouchableOpacity>
 
                 <View style={styles.infoRow}>
                     <Feather name="camera" size={20} color="#666" />
@@ -199,10 +210,6 @@ export default function Phone({ session, onBack, onConfirm }) {
                 </View>
 
                 <View style={{ height: 40 }} />
-
-                <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
-                    <Text style={styles.primaryButtonText}>Zone Setup →</Text>
-                </TouchableOpacity>
                 <View style={{ height: 20 }} />
             </ScrollView>
         </View>
@@ -313,7 +320,7 @@ export default function Phone({ session, onBack, onConfirm }) {
                         </View>
                         <View>
                             <Text style={styles.optionTitle}>Multi cat camera</Text>
-                            <Text style={styles.optionSubtitle}>Uses AI ID to track specific cats. Appropriate for the whole family.</Text>
+                            <Text style={styles.optionSubtitle}>Ideal for shared spaces. Aggregates data for the whole family.</Text>
                         </View>
                     </TouchableOpacity>
                 </View>
@@ -384,16 +391,18 @@ export default function Phone({ session, onBack, onConfirm }) {
     );
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar style="dark" />
-            {currentStep === STEPS.INTRO && renderIntro()}
-            {currentStep === STEPS.CONNECT && renderConnect()}
-            {currentStep === STEPS.TEST_CONNECTION && renderTestConnection()}
-            {currentStep === STEPS.ZONE_INTRO && renderZoneIntro()}
-            {currentStep === STEPS.ZONE_SETUP && renderZoneSetup()}
-            {currentStep === STEPS.ASSIGN && renderAssign()}
-            {currentStep === STEPS.SUCCESS && renderSuccess()}
-        </SafeAreaView>
+        <LinearGradient colors={['#FFFFFF', '#95e4e4ff']} style={{ flex: 1 }}>
+            <SafeAreaView style={styles.container}>
+                <StatusBar style="dark" />
+                {currentStep === STEPS.INTRO && renderIntro()}
+                {currentStep === STEPS.CONNECT && renderConnect()}
+                {currentStep === STEPS.TEST_CONNECTION && renderTestConnection()}
+                {currentStep === STEPS.ZONE_INTRO && renderZoneIntro()}
+                {currentStep === STEPS.ZONE_SETUP && renderZoneSetup()}
+                {currentStep === STEPS.ASSIGN && renderAssign()}
+                {currentStep === STEPS.SUCCESS && renderSuccess()}
+            </SafeAreaView>
+        </LinearGradient>
     );
 }
 
@@ -401,7 +410,7 @@ export default function Phone({ session, onBack, onConfirm }) {
 const FeatureItem = ({ icon, title, subtitle }) => (
     <View style={styles.featureItem}>
         <View style={styles.featureIcon}>
-            <Feather name={icon} size={24} color="#2F6A62" />
+            <Feather name={icon} size={24} color="#0C5A58" />
         </View>
         <View style={{ flex: 1 }}>
             <Text style={styles.featureTitle}>{title}</Text>
@@ -421,7 +430,7 @@ const StepItem = ({ number, text }) => (
 
 const CheckItem = ({ text }) => (
     <View style={styles.checkItem}>
-        <Ionicons name="checkmark-circle" size={24} color="#2F6A62" />
+        <Ionicons name="checkmark-circle" size={24} color="#0C5A58" />
         <Text style={styles.checkItemText}>{text}</Text>
     </View>
 );
@@ -429,7 +438,7 @@ const CheckItem = ({ text }) => (
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#D1EFE9',
+        // Removed background color for gradient
     },
     stepContainer: {
         flex: 1,
@@ -446,48 +455,47 @@ const styles = StyleSheet.create({
     headerTitle: {
         fontSize: 18,
         fontWeight: 'bold',
-        color: '#2F6A62',
+        color: '#0C5A58',
     },
     backButton: {
         padding: 5,
-        backgroundColor: '#FFF',
+        backgroundColor: 'rgba(255,255,255,0.8)',
         borderRadius: 12,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
     },
     content: {
         flex: 1,
-        // justifyContent: 'space-between'
     },
     // Intro
     heroImageContainer: {
         alignSelf: 'center',
-        width: 250,
-        height: 250,
-        borderRadius: 20,
+        borderRadius: 32,
         overflow: 'hidden',
-        marginBottom: 20,
-        backgroundColor: '#A8D1CD'
+        marginBottom: 30,
+        backgroundColor: '#FFF',
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.15,
+        shadowRadius: 20,
     },
     heroImage: {
         width: '100%',
         height: '100%',
     },
     mainTitle: {
-        fontSize: 22,
+        fontSize: 24,
         fontWeight: 'bold',
-        color: '#2F6A62',
+        color: '#0C5A58',
         textAlign: 'center',
         marginBottom: 10,
     },
     subTitle: {
         fontSize: 14,
-        color: '#5F8883',
+        color: '#285855',
         textAlign: 'center',
-        marginBottom: 20,
+        marginBottom: 24,
         lineHeight: 20,
+        paddingHorizontal: 10,
     },
     featureList: {
         marginBottom: 30,
@@ -495,396 +503,300 @@ const styles = StyleSheet.create({
     featureItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#C5E6E1',
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 10,
+        backgroundColor: 'rgba(0, 0, 0, 0.05)',
+        borderWidth: 0.5,
+        borderColor: '#898989',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 12,
     },
     featureIcon: {
-        marginRight: 12,
+        marginRight: 16,
     },
     featureTitle: {
         fontWeight: 'bold',
-        color: '#2F6A62',
-        fontSize: 14,
+        color: '#0C5A58',
+        fontSize: 16,
     },
     featureSubtitle: {
-        color: '#5F8883',
+        color: '#333',
         fontSize: 12,
+        marginTop: 2,
     },
     stepperContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 20,
+        marginBottom: 30,
     },
     stepDot: {
-        width: 24,
-        height: 24,
-        borderRadius: 12,
+        width: 12,
+        height: 12,
+        borderRadius: 6,
         backgroundColor: '#FFF',
         borderWidth: 1,
-        borderColor: '#2F6A62',
-        marginHorizontal: 4,
+        borderColor: '#0C5A58',
+        marginHorizontal: 6,
     },
     activeStep: {
-        backgroundColor: '#2F6A62',
+        backgroundColor: '#0C5A58',
+        width: 20,
     },
     stepLine: {
-        width: 40,
-        height: 2,
-        backgroundColor: '#2F6A62',
+        width: 30,
+        height: 1,
+        backgroundColor: '#0C5A58',
+        opacity: 0.3,
     },
     // Buttons
     primaryButton: {
-        backgroundColor: '#2F6A62',
-        paddingVertical: 16,
-        borderRadius: 12,
+        backgroundColor: '#147C78',
+        paddingVertical: 18,
+        borderRadius: 16,
         alignItems: 'center',
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
-        shadowRadius: 4,
+        shadowRadius: 8,
+        elevation: 6,
     },
     primaryButtonText: {
         color: '#FFF',
-        fontSize: 16,
+        fontSize: 18,
         fontWeight: 'bold',
     },
     secondaryButton: {
-        backgroundColor: '#FFF',
-        paddingVertical: 16,
-        borderRadius: 12,
+        backgroundColor: 'rgba(255,255,255,0.6)',
+        paddingVertical: 18,
+        borderRadius: 16,
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#2F6A62',
+        borderColor: '#147C78',
         width: '48%',
     },
     secondaryButtonText: {
-        color: '#2F6A62',
-        fontSize: 16,
+        color: '#147C78',
+        fontSize: 18,
         fontWeight: 'bold',
     },
-    // Connect
+    // Steps UI
     sectionTitle: {
-        fontSize: 16,
+        fontSize: 18,
         fontWeight: 'bold',
-        color: '#2F6A62',
-        marginBottom: 10,
+        color: '#0C5A58',
+        marginBottom: 16,
+        marginTop: 10,
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FFF',
-        borderRadius: 12,
-        paddingHorizontal: 15,
-        height: 50,
+        backgroundColor: 'rgba(255,255,255,0.8)',
+        borderRadius: 16,
+        paddingHorizontal: 16,
+        height: 56,
         marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#E0F2F1',
     },
     input: {
         flex: 1,
         color: '#333',
+        fontSize: 16,
     },
     cameraBanner: {
-        height: 100,
-        borderRadius: 12,
+        height: 120,
+        borderRadius: 16,
         overflow: 'hidden',
-        marginBottom: 20,
-        backgroundColor: '#FFF'
+        marginBottom: 24,
+        backgroundColor: '#FFF',
+        elevation: 3,
     },
     cameraBannerImage: {
         width: '100%',
         height: '100%',
-        resizeMode: 'cover'
     },
     description: {
-        color: '#666',
-        marginBottom: 10,
+        color: '#285855',
+        marginBottom: 8,
         fontSize: 14,
     },
     webhookUrl: {
         flex: 1,
-        color: '#555',
+        color: '#0C5A58',
+        fontWeight: '600',
         marginRight: 10,
     },
     howToContainer: {
+        backgroundColor: 'rgba(0,0,0,0.03)',
+        padding: 20,
+        borderRadius: 20,
         marginBottom: 30,
     },
     howToTitle: {
         fontWeight: 'bold',
-        color: '#666',
-        marginBottom: 10,
+        color: '#0C5A58',
+        marginBottom: 16,
+        letterSpacing: 1,
     },
     stepItem: {
         flexDirection: 'row',
-        marginBottom: 12,
+        marginBottom: 16,
     },
     stepNumberContainer: {
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        backgroundColor: '#2F6A62',
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: '#147C78',
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 10,
-        marginTop: 2,
+        marginRight: 12,
+        marginTop: 0,
     },
     stepNumber: {
         color: '#FFF',
         fontWeight: 'bold',
-        fontSize: 12,
+        fontSize: 14,
     },
     stepText: {
         flex: 1,
-        color: '#555',
-        fontSize: 13,
-        lineHeight: 18,
+        color: '#333',
+        fontSize: 14,
+        lineHeight: 20,
     },
     // Test
     statusBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#2F6A62',
+        backgroundColor: '#4CAF50',
         alignSelf: 'center',
-        paddingHorizontal: 15,
-        paddingVertical: 5,
-        borderRadius: 20,
-        marginBottom: 20,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 24,
+        marginBottom: 24,
+        elevation: 4,
     },
     statusText: {
         color: '#FFF',
         fontWeight: 'bold',
-        marginLeft: 5,
+        marginLeft: 8,
+        letterSpacing: 1,
     },
     videoPlaceholder: {
         width: '100%',
         height: 220,
-        backgroundColor: '#000',
-        borderRadius: 12,
-        marginBottom: 15,
+        backgroundColor: '#333',
+        borderRadius: 20,
+        marginBottom: 16,
         justifyContent: 'center',
         alignItems: 'center',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
     },
     videoImage: {
         width: '100%',
         height: '100%',
-        opacity: 0.8
     },
     liveBadge: {
         position: 'absolute',
-        top: 10,
-        left: 10,
+        top: 16,
+        left: 16,
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: 'rgba(0,0,0,0.6)',
-        padding: 5,
-        borderRadius: 5,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 12,
     },
     recordingDot: {
         width: 8,
         height: 8,
         borderRadius: 4,
-        backgroundColor: 'red',
-        marginRight: 5,
+        backgroundColor: '#FF5252',
+        marginRight: 8,
     },
     infoRow: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 8,
     },
     infoText: {
         marginLeft: 8,
-        color: '#666',
-    },
-    // Zone Intro
-    zoneIntroImageContainer: {
-        width: 300,
-        height: 300,
-        alignSelf: 'center',
-        marginBottom: 20,
-    },
-    zoneIntroImage: {
-        width: '100%',
-        height: '100%',
-        resizeMode: 'contain'
+        color: '#285855',
+        fontSize: 14,
     },
     // Zone Setup
     zoneEditorContainer: {
         alignSelf: 'center',
-        width: 340,
-        height: 260,
-        borderRadius: 12,
+        width: '100%',
+        aspectRatio: 1.3,
+        borderRadius: 20,
         overflow: 'hidden',
-        marginBottom: 20,
-        backgroundColor: '#000',
-        position: 'relative'
+        marginBottom: 24,
+        backgroundColor: '#333',
+        elevation: 6,
     },
     zoneEditorImage: {
         width: '100%',
         height: '100%',
-        opacity: 0.8
     },
     zoneBox: {
         position: 'absolute',
         borderWidth: 2,
-        borderRadius: 4,
+        borderRadius: 8,
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: 'rgba(255,255,255,0.1)'
     },
     zoneLabel: {
-        backgroundColor: '#00E676',
+        backgroundColor: '#4CAF50',
         color: '#FFF',
         fontSize: 10,
         fontWeight: 'bold',
-        paddingHorizontal: 4,
-        borderRadius: 2,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+        position: 'absolute',
+        top: -10,
     },
     zoneButtonsRow: {
         flexDirection: 'row',
-        justifyContent: 'center',
-        marginBottom: 15,
+        marginBottom: 16,
     },
     zoneButton: {
-        backgroundColor: '#8d8d8d',
-        paddingVertical: 6,
-        paddingHorizontal: 12,
+        backgroundColor: 'rgba(0,0,0,0.05)',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
         borderRadius: 20,
-        marginHorizontal: 5,
+        marginRight: 10,
+        borderWidth: 1,
+        borderColor: '#898989',
     },
     zoneButtonText: {
-        color: '#FFF',
-        fontSize: 12,
+        color: '#0C5A58',
+        fontSize: 14,
+        fontWeight: '600',
     },
     addZoneButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#757575',
-        paddingVertical: 12,
-        borderRadius: 12,
-        marginBottom: 10,
+        backgroundColor: 'rgba(20, 124, 120, 0.1)',
+        paddingVertical: 14,
+        borderRadius: 16,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderStyle: 'dashed',
+        borderColor: '#147C78',
     },
     addZoneButtonText: {
-        color: '#FFF',
+        color: '#147C78',
         fontWeight: 'bold',
         marginLeft: 8,
-    },
-    // Assign Camera (from previous code)
-    questionText: {
-        fontSize: 16,
-        color: '#333',
-        marginBottom: 15,
-        textAlign: 'center'
-    },
-    cameraTypeContainer: {
-        marginBottom: 24,
-    },
-    cameraTypeOption: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#C5E6E1',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 12,
-        borderWidth: 1,
-        borderColor: 'transparent',
-    },
-    cameraTypeActive: {
-        backgroundColor: '#E0F2F1',
-        borderColor: '#2F6A62',
-    },
-    radioContainer: {
-        marginRight: 12,
-    },
-    radioOuter: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        borderWidth: 2,
-        borderColor: '#5F8883',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    radioOuterActive: {
-        borderColor: '#2F6A62',
-    },
-    radioInner: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        backgroundColor: '#2F6A62',
-    },
-    optionTitle: {
-        fontSize: 16,
-        fontWeight: 'bold',
-        color: '#2F6A62',
-        marginBottom: 4,
-    },
-    optionSubtitle: {
-        fontSize: 12,
-        color: '#5F8883',
-        flexShrink: 1,
-    },
-    catCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#FFF',
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 12,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-    },
-    catCardActive: {
-        borderColor: '#2F6A62',
-        borderWidth: 1,
-        backgroundColor: '#E0F2F1'
-    },
-    catAvatar: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
-        marginRight: 12,
-    },
-    catInfo: {
-        flex: 1,
-    },
-    catName: {
-        fontSize: 16,
-        fontWeight: 'bold',
-        color: '#333',
-    },
-    catDetails: {
-        fontSize: 12,
-        color: '#888',
-    },
-    checkbox: {
-        width: 24,
-        height: 24,
-        borderRadius: 6,
-        borderWidth: 2,
-        borderColor: '#DDD',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    checkboxChecked: {
-        backgroundColor: '#2F6A62',
-        borderColor: '#2F6A62',
-    },
-    confirmButton: {
-        backgroundColor: '#2F6A62',
-        paddingVertical: 16,
-        borderRadius: 12,
-        alignItems: 'center',
-        marginTop: 20,
-    },
-    confirmButtonText: {
-        color: '#FFF',
-        fontSize: 18,
-        fontWeight: 'bold',
     },
     // Success
     successContainer: {
@@ -901,19 +813,19 @@ const styles = StyleSheet.create({
         width: 140,
         height: 140,
         borderRadius: 70,
-        backgroundColor: 'rgba(47, 106, 98, 0.1)',
+        backgroundColor: 'rgba(20, 124, 120, 0.1)',
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 24,
+        marginBottom: 30,
     },
     successIconInner: {
         width: 100,
         height: 100,
         borderRadius: 50,
-        backgroundColor: '#2F6A62',
+        backgroundColor: '#147C78',
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: "#2F6A62",
+        shadowColor: "#147C78",
         shadowOffset: { width: 0, height: 10 },
         shadowOpacity: 0.3,
         shadowRadius: 15,
@@ -922,22 +834,23 @@ const styles = StyleSheet.create({
     successTitle: {
         fontSize: 28,
         fontWeight: 'bold',
-        color: '#2F6A62',
-        marginBottom: 8,
+        color: '#0C5A58',
+        marginBottom: 12,
         textAlign: 'center',
     },
     successSubtitle: {
         fontSize: 16,
-        color: '#5F8883',
+        color: '#285855',
         marginBottom: 40,
         textAlign: 'center',
+        lineHeight: 24,
     },
     premiumSuccessCard: {
-        backgroundColor: 'rgba(255, 255, 255, 0.5)',
+        backgroundColor: 'rgba(255, 255, 255, 0.4)',
         width: '100%',
-        borderRadius: 24,
+        borderRadius: 32,
         padding: 24,
-        marginBottom: 60,
+        marginBottom: 40,
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.8)',
     },
@@ -947,30 +860,31 @@ const styles = StyleSheet.create({
     },
     checkItemText: {
         fontSize: 17,
-        color: '#2F6A62',
-        marginLeft: 12,
+        color: '#0C5A58',
+        marginLeft: 16,
         fontWeight: '600'
     },
     premiumConnectorLine: {
         height: 16,
         width: 2,
-        backgroundColor: '#B2DFDB',
+        backgroundColor: '#147C78',
+        opacity: 0.3,
         marginLeft: 11,
         marginVertical: 4,
     },
     launchButton: {
-        backgroundColor: '#004D40',
+        backgroundColor: '#0C5A58',
         flexDirection: 'row',
         width: '100%',
-        paddingVertical: 18,
-        borderRadius: 16,
+        paddingVertical: 20,
+        borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        elevation: 6,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
+        elevation: 8,
     },
     launchButtonText: {
         color: '#FFF',
@@ -979,6 +893,126 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         paddingBottom: 40,
-    }
-
+    },
+    // Assign Camera specific styles
+    questionText: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#0C5A58',
+        marginBottom: 20,
+        marginTop: 10,
+    },
+    cameraTypeContainer: {
+        marginBottom: 30,
+    },
+    cameraTypeOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(20, 124, 120, 0.1)',
+        borderRadius: 20,
+        padding: 20,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.3)',
+    },
+    cameraTypeActive: {
+        backgroundColor: '#5F8883', // Matches the green in screenshot
+    },
+    radioContainer: {
+        marginRight: 16,
+    },
+    radioOuter: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: '#0C5A58',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    radioOuterActive: {
+        borderColor: '#FFF',
+    },
+    radioInner: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: '#FFF',
+    },
+    optionTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#0C5A58',
+    },
+    optionSubtitle: {
+        fontSize: 12,
+        color: '#285855',
+        marginTop: 4,
+        paddingRight: 40,
+    },
+    catCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(20, 124, 120, 0.1)',
+        borderRadius: 20,
+        padding: 16,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.3)',
+    },
+    catCardActive: {
+        backgroundColor: '#5F8883',
+    },
+    catAvatar: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        marginRight: 16,
+        borderWidth: 2,
+        borderColor: '#FFF',
+    },
+    catInfo: {
+        flex: 1,
+    },
+    catName: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#0C5A58',
+    },
+    catDetails: {
+        fontSize: 12,
+        color: '#285855',
+    },
+    checkbox: {
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        borderWidth: 2,
+        borderColor: '#0C5A58',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FFF',
+    },
+    checkboxChecked: {
+        backgroundColor: '#0C5A58',
+        borderColor: '#0C5A58',
+    },
+    confirmButton: {
+        backgroundColor: '#5F8883',
+        paddingVertical: 20,
+        borderRadius: 30,
+        alignItems: 'center',
+        marginTop: 10,
+        marginBottom: 20,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    confirmButtonText: {
+        color: '#FFF',
+        fontSize: 20,
+        fontWeight: 'bold',
+    },
 });
