@@ -5,6 +5,8 @@ import supabase from './config/supabaseClient';
 import { View, Text, TextInput, TouchableOpacity, Image, Alert, SafeAreaView, ScrollView, ActivityIndicator } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import { decode } from 'base64-arraybuffer';
 // If you have icons, import them. For now using text placeholder or simple views for icons if needed.
 export default function ProfileScreen({ session, onBack, onNavigateToCatProfile }) {
     const [loading, setLoading] = useState(true);
@@ -14,6 +16,8 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
     const [phone, setPhone] = useState('');
     const [birthDate, setBirthDate] = useState('');
     const [email, setEmail] = useState('');
+    const [avatarUrl, setAvatarUrl] = useState(null);
+    const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
     useEffect(() => {
         if (session) {
@@ -29,7 +33,7 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
 
             const { data, error, status } = await supabase
                 .from('profiles')
-                .select(`name, gender, phone_number, dob`)
+                .select(`name, gender, phone_number, dob, avatar_url`)
                 .eq('id', session.user.id)
                 .single();
 
@@ -42,6 +46,7 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
                 setGender(data.gender || '');
                 setPhone(data.phone_number || '');
                 setBirthDate(data.dob || ''); // Changed dob to date_of_birth
+                setAvatarUrl(data.avatar_url || null);
             }
         } catch (error) {
             if (error instanceof Error) {
@@ -95,9 +100,9 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
                 {
                     text: "OK",
                     onPress: () => {
-                        // สั่งเปลี่ยนหน้า
-                        if (onNavigateToCatProfile) {
-                            onNavigateToCatProfile();
+                        // สั่งเปลี่ยนหน้า (กลับหน้าเดิม)
+                        if (onBack) {
+                            onBack();
                         }
                     }
                 }
@@ -109,6 +114,72 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
         } finally {
             // 7. หยุดหมุน
             setSaving(false);
+        }
+    };
+
+    const pickAvatarImage = async () => {
+        try {
+            let result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.8,
+                base64: true,
+            });
+
+            if (!result.canceled) {
+                handleSaveImage(result.assets[0].uri, result.assets[0].base64);
+            }
+        } catch (e) {
+            console.log("Error picking avatar:", e);
+            Alert.alert("Error", "Could not access image library.");
+        }
+    };
+
+    const handleSaveImage = async (uri, base64) => {
+        if (!session?.user?.id) return;
+
+        setUploadingAvatar(true);
+
+        try {
+            let uploadedUrl = "";
+            const fileName = `avatars/${session.user.id}_${Date.now()}.jpg`;
+
+            if (base64) {
+                const arrayBuffer = decode(base64);
+
+                const { data, error: uploadError } = await supabase.storage
+                    .from('posts') // Reusing 'posts' bucket as observed in CommunityProfile.js
+                    .upload(fileName, arrayBuffer, {
+                        contentType: 'image/jpeg',
+                        upsert: true
+                    });
+
+                if (uploadError) throw uploadError;
+
+                const { data: urlData } = supabase.storage
+                    .from('posts')
+                    .getPublicUrl(fileName);
+
+                uploadedUrl = urlData.publicUrl;
+            }
+
+            const { error } = await supabase
+                .from('profiles')
+                .update({ avatar_url: uploadedUrl })
+                .eq('id', session.user.id);
+
+            if (error) {
+                throw error;
+            } else {
+                setAvatarUrl(uploadedUrl);
+                Alert.alert("Success", "Photo updated successfully! ✨");
+            }
+        } catch (e) {
+            console.log(`Detailed Save Error:`, e);
+            Alert.alert("Error", `Failed to save image. ${e.message}`);
+        } finally {
+            setUploadingAvatar(false);
         }
     };
 
@@ -150,13 +221,31 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
 
                 {/* Profile Header */}
                 <View style={styles.profileHeader}>
-                    <View style={styles.profileImageContainer}>
-                        {/* Placeholder for camera icon or user image */}
-                        <Image
-                            source={require('../../assets/cioncat.jpg')} // Using existing asset as placeholder or separate image if user has one
-                            style={[styles.profileImage, { opacity: 0.8 }]}
-                        />
-                    </View>
+                    <TouchableOpacity
+                        style={styles.profileImageContainer}
+                        onPress={pickAvatarImage}
+                        disabled={uploadingAvatar}
+                    >
+                        {avatarUrl ? (
+                            <Image
+                                source={{ uri: avatarUrl }}
+                                style={styles.profileImage}
+                            />
+                        ) : (
+                            <Image
+                                source={require('../../assets/cioncat.jpg')}
+                                style={[styles.profileImage, { opacity: 0.8 }]}
+                            />
+                        )}
+                        {uploadingAvatar && (
+                            <View style={[styles.profileImage, { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }]}>
+                                <ActivityIndicator color="#fff" />
+                            </View>
+                        )}
+                        <View style={{ position: 'absolute', bottom: 0, right: 0, backgroundColor: '#2F6A62', padding: 5, borderRadius: 15 }}>
+                            <Ionicons name="camera" size={16} color="#fff" />
+                        </View>
+                    </TouchableOpacity>
                     <Text style={styles.profileName}>{username || 'User Name'}</Text>
 
                     <View style={styles.caregiverBadge}>

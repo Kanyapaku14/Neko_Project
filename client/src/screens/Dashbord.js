@@ -19,6 +19,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState("7 DAY");
+  const [userProfile, setUserProfile] = useState(null);
 
   useEffect(() => {
     if (session?.user) {
@@ -31,6 +32,14 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const fetchLast7DaysLogs = async () => {
     try {
       setLoading(true);
+
+      // 0. Fetch User Profile
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+      setUserProfile(profile);
 
       // 1. หา ID แมวของ User
       const { data: catData, error: catError } = await supabase
@@ -125,6 +134,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
           onProfile={() => onNavigate && onNavigate('Profile')}
           onNotify={() => console.log("Notify")}
           onSetting={() => onNavigate && onNavigate('UserInfo')}
+          userProfile={userProfile}
         />
 
         {/* ===== ส่วนแสดงผลคะแนน (คล้าย AssessmentScreen) ===== */}

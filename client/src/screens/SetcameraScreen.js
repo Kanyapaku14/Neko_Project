@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { View, Text, SafeAreaView, TouchableOpacity, StyleSheet, ScrollView, Image, TextInput } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import supabase from './config/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
 import { Picker } from '@react-native-picker/picker';
 
@@ -19,18 +20,15 @@ const CAMERA_BRANDS = [
 // ==============================================
 // 2. Main Component (หน้าจอตั้งค่า)
 // ==============================================
-export default function SetcameraScreen({ onNavigate }) {
+export default function SetcameraScreen({ onNavigate, session }) {
     // State simulating connection status (Toggle for demo)
     const [isConnected, setIsConnected] = useState(true);
 
     // Monitoring Mode State
     const [monitoringMode, setMonitoringMode] = useState('multi'); // 'single' | 'multi'
     // Mock user cats
-    const myCats = [
-        { id: 1, name: 'Orange', image: require('../../assets/catone.png') },
-        { id: 2, name: 'Cara', image: require('../../assets/makky.jpg') },
-    ];
-    const [selectedCats, setSelectedCats] = useState([1, 2]); // Default all selected for multi
+    const [myCats, setMyCats] = useState([]);
+    const [selectedCats, setSelectedCats] = useState([]);
 
     // Hardware State
     const [selectedCameraPreset, setSelectedCameraPreset] = useState('tapo_c200');
@@ -38,20 +36,43 @@ export default function SetcameraScreen({ onNavigate }) {
     const selectedCameraMeta = CAMERA_BRANDS.find((item) => item.value === selectedCameraPreset);
     const selectedCameraApi = selectedCameraMeta?.api || 'Manual API setup required';
 
-    // Load initial settings
+    // Load initial settings and fetch cats
     React.useEffect(() => {
         const load = async () => {
             try {
-                const mode = await AsyncStorage.getItem('camera_monitoringMode');
-                const cats = await AsyncStorage.getItem('camera_selectedCats');
-                if (mode) setMonitoringMode(mode);
-                if (cats) setSelectedCats(JSON.parse(cats));
+                // Fetch real cats if session exists
+                if (session?.user?.id) {
+                    const { data: cats, error } = await supabase
+                        .from('cats')
+                        .select('*')
+                        .eq('owner_id', session.user.id);
+
+                    if (error) throw error;
+                    setMyCats(cats || []);
+
+                    // Load saved selection settings
+                    const mode = await AsyncStorage.getItem('camera_monitoringMode');
+                    const savedCatsJson = await AsyncStorage.getItem('camera_selectedCats');
+
+                    if (mode) setMonitoringMode(mode);
+
+                    if (savedCatsJson) {
+                        setSelectedCats(JSON.parse(savedCatsJson));
+                    } else if (cats && cats.length > 0) {
+                        // Default selection if none saved: first cat for single, all for multi
+                        if (mode === 'single') {
+                            setSelectedCats([cats[0].id]);
+                        } else {
+                            setSelectedCats(cats.map(c => c.id));
+                        }
+                    }
+                }
             } catch (e) {
-                console.error("Failed to load settings", e);
+                console.error("Failed to load settings or cats", e);
             }
         };
         load();
-    }, []);
+    }, [session]);
 
     const toggleConnection = () => {
         setIsConnected(!isConnected);
@@ -192,7 +213,11 @@ export default function SetcameraScreen({ onNavigate }) {
                                     onPress={() => toggleCatSelection(cat.id)}
                                 >
                                     <View style={[styles.catAvatar, selectedCats.includes(cat.id) && styles.catAvatarSelected]}>
-                                        <Image source={cat.image} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                                        {cat.image_url ? (
+                                            <Image source={{ uri: cat.image_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                                        ) : (
+                                            <Image source={require('../../assets/cioncat.jpg')} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                                        )}
                                     </View>
                                     <Text style={styles.catName}>{cat.name}</Text>
                                 </TouchableOpacity>

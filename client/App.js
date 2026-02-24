@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator, AppState } from 'react-native';
+// ✅ นำเข้า SafeAreaProvider ตรงนี้
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
 import SignInScreen from './src/screens/SignInScreen';
 import SignUpScreen from './src/screens/SignUpScreen';
 import ProfileScreen from './src/screens/profileScreen';
@@ -7,6 +10,7 @@ import CatProfile from './src/screens/catprofile';
 import UserInfoScreen from './src/screens/UserInfoScreen';
 import supabase from './src/screens/config/supabaseClient';
 import Dashboard from './src/screens/Dashbord';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ✅ 1. Import ไฟล์ LogDailyNormal เข้ามา
 import LogDailyNormal from './src/screens/LogDailyNormal';
@@ -14,7 +18,6 @@ import HomeScreen from './src/screens/HomeScreen'; // อย่าลืม Impo
 import CalendarScreen from './src/screens/CalendarScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScreen
-import SettingScreen from './src/screens/SettingScreen';
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
@@ -22,6 +25,11 @@ import SetcameraScreen from './src/screens/SetcameraScreen';
 import PhotoCheck from './src/screens/PhotoCheck';
 import AnalysisResult from './src/screens/AnalysisResult';
 import Phone from './src/screens/Phone';
+import SettingScreen from './src/screens/SettingScreen';
+import MainTabNavigator from './src/screens/MainTabNavigator';
+import CommunityScreen from './src/screens/CommunityScreen';
+import RankingScreen from './src/screens/RankingScreen';
+import CommunityProfile from './src/screens/CommunityProfile';
 
 import { useFonts } from 'expo-font';
 import {
@@ -49,6 +57,7 @@ export default function App() {
   const [authScreen, setAuthScreen] = useState('Home');
   const [catId, setCatId] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false); // ✅ Track if checking profile
+  const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null); // null until loaded
 
   // Fix Logout: Should actually sign out
   const handleSignOut = async () => {
@@ -91,6 +100,19 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    // Load camera intro status
+    const loadCameraStatus = async () => {
+      try {
+        const value = await AsyncStorage.getItem('hasSeenCameraIntro');
+        setHasSeenCameraIntro(value === 'true');
+      } catch (e) {
+        setHasSeenCameraIntro(false);
+      }
+    };
+    loadCameraStatus();
+  }, []);
+
   // Check if user has profile and cat
   const checkUserProfileStatus = async (session) => {
     if (!session?.user) return;
@@ -122,6 +144,8 @@ export default function App() {
         return;
       }
 
+      setCatId(cat.id); // ✅ Save catId
+
       // If all good, explicitly set to Home
       setAuthScreen('Home');
     } catch (err) {
@@ -132,7 +156,7 @@ export default function App() {
   };
 
 
-  if (!fontsLoaded || loading || (session && profileLoading)) { // ✅ Wait for profile check if session exists
+  if (!fontsLoaded || loading || (session && profileLoading)) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" color="#00695C" />
@@ -140,146 +164,155 @@ export default function App() {
     );
   }
 
-  // ส่วนจัดการ Session (ถ้าล็อกอินแล้ว)
-  if (session && !loading) {
-    const currentScreenName = typeof authScreen === 'object' ? authScreen.screen : authScreen;
-    const screenParams = typeof authScreen === 'object' ? authScreen.params : {};
+  // --- Helper function to render screens ---
+  const renderScreen = () => {
+    // 1. Session based (if logged in)
+    if (session) {
+      // screen can be string or object { screen, params }
+      const currentScreenName = typeof authScreen === 'object' ? authScreen.screen : authScreen;
+      const screenParams = typeof authScreen === 'object' ? authScreen.params : {};
 
-    if (currentScreenName === 'CatProfile') {
-      return (
-        <CatProfile
+      if (currentScreenName === 'CatProfile') {
+        return (
+          <CatProfile
+            session={session}
+            catId={screenParams?.catId || null}
+            onBack={() => setAuthScreen('Setting')}
+            onNavigateToHome={() => setAuthScreen('Home')}
+          />
+        );
+      }
+      if (currentScreenName === 'Profile' || currentScreenName === 'EditProfile') {
+        return (
+          <ProfileScreen
+            session={session}
+            onBack={() => setAuthScreen('Setting')}
+            onNavigateToCatProfile={() => setAuthScreen('CatProfile')}
+          />
+        );
+      }
+      if (currentScreenName === 'UserInfo') {
+        return <UserInfoScreen
           session={session}
-          catId={screenParams.catId}
-          onBack={() => setAuthScreen('Setting')}
-          onNavigateToHome={() => setAuthScreen('Home')}
-        />
-      );
-    }
-    if (currentScreenName === 'Profile') {
-      return <ProfileScreen session={session} onNavigateToCatProfile={() => setAuthScreen('CatProfile')} />;
-    }
-    if (currentScreenName === 'Setting') {
-      return <SettingScreen
-        session={session}
-        onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
-        onLogout={() => supabase.auth.signOut()}
-      />;
-    }
-
-    if (currentScreenName === 'EditProfile') {
-      return (
-        <ProfileScreen
+          catId={catId}
+          onLogout={handleSignOut}
+          onMissingProfile={() => setAuthScreen('Profile')}
+          onBack={() => setAuthScreen('Home')}
+        />;
+      }
+      if (currentScreenName === 'Setting') {
+        return <SettingScreen
           session={session}
-          onBack={() => setAuthScreen('Setting')}
-          onNavigateToCatProfile={() => setAuthScreen('Setting')}
-        />
-      );
-    }
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
+          onLogout={handleSignOut}
+          onBack={() => setAuthScreen('Home')}
+        />;
+      }
+      if (currentScreenName === 'LogDaily') {
+        return <LogDailyNormal
+          session={session}
+          onBack={() => setAuthScreen('Home')}
+          initialDate={screenParams?.date || null}
+        />;
+      }
+      if (currentScreenName === 'Calendar') {
+        return <CalendarScreen
+          session={session}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+      if (currentScreenName === 'Result') {
+        return <ResultScreen
+          onBack={() => setAuthScreen('Home')}
+          onSave={() => setAuthScreen('Home')}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+      if (currentScreenName === 'Overview') {
+        return <Dashboard
+          session={session}
+          onBack={() => setAuthScreen('Home')}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+      if (currentScreenName === 'MainTabNavigator') {
+        return <MainTabNavigator
+          session={session}
+          onBack={() => setAuthScreen('Home')}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+      if (currentScreenName === 'Community') {
+        return <CommunityScreen
+          session={session}
+          onBack={() => setAuthScreen('MainTabNavigator')}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+      if (currentScreenName === 'Ranking') {
+        return <RankingScreen
+          session={session}
+          onBack={() => setAuthScreen('MainTabNavigator')}
+        />;
+      }
+      if (currentScreenName === 'CommunityProfile') {
+        return <CommunityProfile
+          session={session}
+          onBack={() => setAuthScreen('MainTabNavigator')}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+      if (currentScreenName === 'Camera') {
+        return <CameraScreen session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+      }
+      if (currentScreenName === 'Setcamera') {
+        return <SetcameraScreen session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+      }
+      if (currentScreenName === 'PhotoCheck') {
+        return <PhotoCheck onNavigate={(screen) => setAuthScreen(screen)} />;
+      }
+      if (currentScreenName === 'AnalysisResult') {
+        return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} />;
+      }
+      if (currentScreenName === 'Phone') {
+        return (
+          <Phone
+            session={session}
+            initialStep={screenParams?.initialStep}
+            onBack={() => setAuthScreen('Setting')}
+            onConfirm={() => setAuthScreen('Camera')}
+          />
+        );
+      }
 
-    if (authScreen === 'LogDaily' || (typeof authScreen === 'object' && authScreen.screen === 'LogDaily')) {
-      return <LogDailyNormal
-        session={session}
-        onBack={() => setAuthScreen('Home')}
-        initialDate={typeof authScreen === 'object' ? authScreen.params?.date : null}
-      />;
-    }
-
-    if (authScreen === 'Calendar') {
-      return <CalendarScreen
-        session={session}
+      // Default Home for auth
+      return <HomeScreen
+        onLogout={handleSignOut}
+        onLogDaily={() => setAuthScreen('LogDaily')}
+        onAssess={() => setAuthScreen('Result')}
+        onSetting={() => setAuthScreen('Setting')}
         onNavigate={(screen) => setAuthScreen(screen)}
       />;
     }
 
-    if (authScreen === 'Result') {
-      return <ResultScreen
-        onBack={() => setAuthScreen('Home')}
-        onSave={() => setAuthScreen('Home')}
-      />;
-    }
+    // 2. Guest/SignIn flow
+    return (
+      <>
+        {currentScreen === 'SignIn' && (
+          <SignInScreen onNavigate={navigateToSignUp} />
+        )}
+        {currentScreen === 'SignUp' && (
+          <SignUpScreen onNavigate={navigateToSignIn} />
+        )}
+      </>
+    );
+  };
 
-    if (currentScreenName === 'Overview') {
-      return <Dashboard
-        session={session}
-        onBack={() => setAuthScreen('Home')}
-        onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
-      />;
-    }
 
-    // ✅ Timeline Screen
-    if (authScreen === 'Timeline') {
-      return <TimelineScreen
-        session={session}
-        onBack={() => setAuthScreen('Overview')} // Back to Dashboard
-      />;
-    }
-
-    if (authScreen === 'Camera') {
-      return <CameraScreen session={session} onNavigate={(screen) => setAuthScreen(screen)} />;
-    }
-
-    if (authScreen === 'Setcamera') {
-      return <SetcameraScreen onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
-    }
-
-    if (authScreen === 'PhotoCheck') {
-      return <PhotoCheck onNavigate={(screen) => setAuthScreen(screen)} />;
-    }
-
-    if (currentScreenName === 'AnalysisResult') {
-      return <AnalysisResult onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} session={session} />;
-    }
-
-    if (currentScreenName === 'Phone') {
-      return (
-        <Phone
-          session={session}
-          initialStep={screenParams.initialStep}
-          onBack={() => setAuthScreen('Setting')}
-          onConfirm={() => setAuthScreen('Camera')}
-        />
-      );
-    }
-
-    // ✅ Default Home
-    return <HomeScreen
-      onLogout={navigateToSignIn}
-      onLogDaily={() => setAuthScreen('LogDaily')}
-      onAssess={() => setAuthScreen('Result')}
-      onSetting={() => setAuthScreen('Setting')} // ✅ Go to Settings (UserInfo)
-      onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
-    />;
-  }
-
-  // ส่วนจัดการหน้าจอ (ถ้ายังไม่ล็อกอิน หรือ flow ปกติ)
+  // ✅ ครอบทั้งหมดด้วย SafeAreaProvider ที่นี่ครับ
   return (
-    <>
-      {currentScreen === 'SignIn' && (
-        <SignInScreen onNavigate={navigateToSignUp} />
-      )}
-
-      {currentScreen === 'SignUp' && (
-        <SignUpScreen onNavigate={navigateToSignIn} />
-      )}
-
-      {/* ===== หน้า Home ===== */}
-      {currentScreen === 'Home' && (
-        <HomeScreen
-          onLogout={navigateToSignIn}
-          // ต้องส่ง props ไปให้กดแล้วไปหน้า LogDaily ได้
-          onLogDaily={navigateToLogDaily}
-        />
-      )}
-
-      {/* ===== ✅ 3. เพิ่มหน้า LogDaily ตรงนี้ ===== */}
-      {currentScreen === 'LogDaily' && (
-        <LogDailyNormal
-          session={session}
-          onBack={navigateToHome}
-          initialDate={authScreen.params?.date} // Pass date if available
-        />
-      )}
-
-    </>
+    <SafeAreaProvider>
+      {renderScreen()}
+    </SafeAreaProvider>
   );
 }

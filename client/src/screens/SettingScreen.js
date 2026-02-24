@@ -40,6 +40,37 @@ export default function SettingScreen({ session, onNavigate, onLogout }) {
         }
     };
 
+    const handleDeleteCat = async (cat) => {
+        Alert.alert(
+            "Delete Cat",
+            `Are you sure you want to remove ${cat.name}? This action cannot be undone.`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            const { error } = await supabase
+                                .from('cats')
+                                .delete()
+                                .eq('id', cat.id);
+
+                            if (error) throw error;
+
+                            // Update local state
+                            setUserCats(prev => prev.filter(c => c.id !== cat.id));
+                            Alert.alert("Success", `${cat.name} has been removed.`);
+                        } catch (e) {
+                            console.error("Error deleting cat:", e.message);
+                            Alert.alert("Error", "Could not delete cat. Please try again.");
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
@@ -55,7 +86,7 @@ export default function SettingScreen({ session, onNavigate, onLogout }) {
                 <View style={styles.profileSection}>
                     <View style={styles.avatarWrapper}>
                         <Image
-                            source={{ uri: 'https://placekitten.com/200/200' }}
+                            source={userData?.avatar_url ? { uri: userData.avatar_url } : require('../../assets/cioncat.jpg')}
                             style={styles.avatar}
                         />
                     </View>
@@ -81,6 +112,8 @@ export default function SettingScreen({ session, onNavigate, onLogout }) {
                                 key={cat.id || index}
                                 style={styles.catItem}
                                 onPress={() => onNavigate('CatProfile', { catId: cat.id })}
+                                onLongPress={() => handleDeleteCat(cat)}
+                                delayLongPress={800}
                             >
                                 <Image
                                     source={{ uri: cat.image_url || 'https://placekitten.com/100/100' }}

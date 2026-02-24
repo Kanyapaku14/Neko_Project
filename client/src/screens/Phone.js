@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet, ScrollView, SafeAreaView, ActivityIndicator, TextInput, Alert, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, ScrollView, SafeAreaView, ActivityIndicator, TextInput, Alert, Dimensions, Modal, Pressable } from 'react-native';
 import { Ionicons, Feather, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import supabase from './config/supabaseClient';
 import { StatusBar } from 'expo-status-bar';
 
+const { width } = Dimensions.get('window');
+
 // Steps enum
 const STEPS = {
-    INTRO: 'intro',
     CONNECT: 'connect',
     TEST_CONNECTION: 'test_connection',
     ZONE_INTRO: 'zone_intro',
@@ -16,13 +17,31 @@ const STEPS = {
     SUCCESS: 'success',
 };
 
+const CAMERA_BRANDS_DATA = [
+    'TP-Link Tapo C200',
+    'Reolink E1 Pro',
+    'Hikvision DS-2CD',
+    'Neko Cam Gen 1',
+    'Other (Type manually)'
+];
+
 export default function Phone({ session, onBack, onConfirm, initialStep }) {
-    const [currentStep, setCurrentStep] = useState(initialStep || STEPS.INTRO);
+    const [currentStep, setCurrentStep] = useState(initialStep || STEPS.CONNECT);
     const [loading, setLoading] = useState(false);
     const [cats, setCats] = useState([]);
 
     // Step Data
-    const [cameraBrand, setCameraBrand] = useState('Xiaomi Home Security 360');
+    const [cameraBrand, setCameraBrand] = useState('TP-Link Tapo C200');
+    const [isPickerVisible, setIsPickerVisible] = useState(false);
+
+    const showCameraPicker = () => {
+        setIsPickerVisible(true);
+    };
+
+    const handleSelectBrand = (brand) => {
+        setCameraBrand(brand);
+        setIsPickerVisible(false);
+    };
     const [webhookUrl, setWebhookUrl] = useState('https://ap/70ac-222-123-456-789.ngrok-free.app');
     const [cameraType, setCameraType] = useState('single'); // 'single' or 'multi'
     const [selectedCats, setSelectedCats] = useState([]);
@@ -49,10 +68,8 @@ export default function Phone({ session, onBack, onConfirm, initialStep }) {
 
     const handleNext = () => {
         switch (currentStep) {
-            case STEPS.INTRO: setCurrentStep(STEPS.CONNECT); break;
             case STEPS.CONNECT: setCurrentStep(STEPS.TEST_CONNECTION); break;
-            case STEPS.TEST_CONNECTION: setCurrentStep(STEPS.ZONE_INTRO); break;
-            case STEPS.ZONE_INTRO: setCurrentStep(STEPS.ZONE_SETUP); break;
+            case STEPS.TEST_CONNECTION: setCurrentStep(STEPS.ZONE_SETUP); break;
             case STEPS.ZONE_SETUP: setCurrentStep(STEPS.ASSIGN); break;
             case STEPS.ASSIGN:
                 // Save logic here if needed, for now just move to success
@@ -68,13 +85,39 @@ export default function Phone({ session, onBack, onConfirm, initialStep }) {
         }
     };
 
+    const renderPickerModal = () => (
+        <Modal
+            visible={isPickerVisible}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => setIsPickerVisible(false)}
+        >
+            <Pressable
+                style={styles.modalOverlay}
+                onPress={() => setIsPickerVisible(false)}
+            >
+                <View style={styles.pickerContent}>
+                    <ScrollView bounces={false}>
+                        {CAMERA_BRANDS_DATA.map((brand, index) => (
+                            <TouchableOpacity
+                                key={index}
+                                style={styles.pickerItem}
+                                onPress={() => handleSelectBrand(brand)}
+                            >
+                                <Text style={styles.pickerItemText}>{brand}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                </View>
+            </Pressable>
+        </Modal>
+    );
+
     const handleBackStep = () => {
         switch (currentStep) {
-            case STEPS.INTRO: if (onBack) onBack(); break;
-            case STEPS.CONNECT: setCurrentStep(STEPS.INTRO); break;
+            case STEPS.CONNECT: if (onBack) onBack(); break;
             case STEPS.TEST_CONNECTION: setCurrentStep(STEPS.CONNECT); break;
-            case STEPS.ZONE_INTRO: setCurrentStep(STEPS.TEST_CONNECTION); break;
-            case STEPS.ZONE_SETUP: setCurrentStep(STEPS.ZONE_INTRO); break;
+            case STEPS.ZONE_SETUP: setCurrentStep(STEPS.TEST_CONNECTION); break;
             case STEPS.ASSIGN: setCurrentStep(STEPS.ZONE_SETUP); break;
             case STEPS.SUCCESS: setCurrentStep(STEPS.ASSIGN); break; // Or go home
         }
@@ -82,7 +125,7 @@ export default function Phone({ session, onBack, onConfirm, initialStep }) {
 
     // --- Render Functions for Each Step ---
 
-    const { width, height } = Dimensions.get('window');
+    const height = Dimensions.get('window').height;
 
     // Responsive helper
     const rs = (size) => (size / 375) * width; // based on iPhone design width
@@ -97,55 +140,21 @@ export default function Phone({ session, onBack, onConfirm, initialStep }) {
         </View>
     );
 
-    const renderIntro = () => (
-        <View style={styles.stepContainer}>
-            {renderHeader('Camera')}
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-                <View style={[styles.heroImageContainer, { width: width * 0.9, height: width * 0.7 }]}>
-                    <Image
-                        source={require('../../assets/ebo-air-2.jpg')}
-                        style={[styles.heroImage, { borderRadius: 32 }]}
-                        resizeMode="cover"
-                    />
-                </View>
-
-                <Text style={styles.mainTitle}>Unlock Behavioral Insights</Text>
-                <Text style={styles.subTitle}>Connect a camera to track your cat's health through intelligent behavior analysis.</Text>
-
-                <View style={styles.featureList}>
-                    <FeatureItem icon="activity" title="Activity Trends" subtitle="Know exactly when they run, sleep, or play." />
-                    <FeatureItem icon="grid" title="Zone Insights" subtitle="Know where they spend their time." />
-                    <FeatureItem icon="wifi" title="Posture Signals" subtitle="Detect early indications of pain." />
-                </View>
-
-                {/* Stepper Indicator */}
-                <View style={styles.stepperContainer}>
-                    <View style={[styles.stepDot, styles.activeStep]} /><View style={styles.stepLine} />
-                    <View style={styles.stepDot} /><View style={styles.stepLine} />
-                    <View style={styles.stepDot} />
-                </View>
-
-                <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
-                    <Text style={styles.primaryButtonText}>Connect Camera</Text>
-                </TouchableOpacity>
-                <View style={{ height: 20 }} />
-            </ScrollView>
-        </View>
-    );
 
     const renderConnect = () => (
         <View style={styles.stepContainer}>
             {renderHeader('Connect Camera')}
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
                 <Text style={styles.sectionTitle}>Select your camera brand</Text>
-                <View style={styles.inputContainer}>
+                <TouchableOpacity style={styles.inputContainer} onPress={showCameraPicker}>
                     <TextInput
                         style={styles.input}
                         value={cameraBrand}
-                        onChangeText={setCameraBrand}
+                        editable={false}
+                        pointerEvents="none"
                     />
                     <Feather name="chevron-down" size={20} color="#666" style={styles.inputIcon} />
-                </View>
+                </TouchableOpacity>
 
                 <View style={[styles.heroImageContainer, { width: width * 0.9, height: width * 0.4 }]}>
                     <Image
@@ -160,9 +169,9 @@ export default function Phone({ session, onBack, onConfirm, initialStep }) {
 
                 <View style={[styles.inputContainer, { backgroundColor: '#E0F2F1' }]}>
                     <Text numberOfLines={1} style={styles.webhookUrl}>{webhookUrl}</Text>
-                    <TouchableOpacity onPress={() => Alert.alert('Copied', 'Webhook URL copied to clipboard')}>
+                    <View>
                         <Feather name="link" size={20} color="#2F6A62" />
-                    </TouchableOpacity>
+                    </View>
                 </View>
 
                 <View style={styles.howToContainer}>
@@ -173,7 +182,7 @@ export default function Phone({ session, onBack, onConfirm, initialStep }) {
                 </View>
 
                 <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
-                    <Text style={styles.primaryButtonText}>Test Connection</Text>
+                    <Text style={styles.primaryButtonText}>Next</Text>
                 </TouchableOpacity>
                 <View style={{ height: 20 }} />
             </ScrollView>
@@ -184,13 +193,15 @@ export default function Phone({ session, onBack, onConfirm, initialStep }) {
         <View style={styles.stepContainer}>
             {renderHeader('Test Camera Connection')}
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-                <View style={styles.statusBadge}>
-                    <Ionicons name="checkmark-circle" size={20} color="#FFF" />
-                    <Text style={styles.statusText}>CONNECTED</Text>
-                </View>
+                <View style={{ alignItems: 'center', marginTop: 10 }}>
+                    <View style={styles.statusBadge}>
+                        <Ionicons name="checkmark-circle" size={20} color="#FFF" />
+                        <Text style={styles.statusText}>CONNECTED</Text>
+                    </View>
 
-                <Text style={styles.mainTitle}>Connection successful!</Text>
-                <Text style={styles.subTitle}>Your camera is online and sending data. We can see your cat's area clearly.</Text>
+                    <Text style={styles.mainTitle}>Connection successful!</Text>
+                    <Text style={styles.subTitle}>Your camera is online and sending data. We can see your cat's area clearly.</Text>
+                </View>
 
                 <TouchableOpacity
                     style={styles.videoPlaceholder}
@@ -209,8 +220,49 @@ export default function Phone({ session, onBack, onConfirm, initialStep }) {
                     <Text style={styles.infoText}>Snapshot captured 10s ago</Text>
                 </View>
 
+                {/* Duplicated Camera Hardware Card - Moved to bottom */}
+                <View style={[styles.hardwareCard, { marginTop: 30 }]}>
+                    <Text style={styles.cardTitle}>Camera Hardware Settings</Text>
+                    <Text style={styles.hardwareLabel}>Camera brand (API compatible)</Text>
+                    <TouchableOpacity style={styles.hardwareInputRow} onPress={showCameraPicker}>
+                        <TextInput
+                            style={styles.hardwareInput}
+                            value={cameraBrand}
+                            editable={false}
+                            pointerEvents="none"
+                        />
+                        <Feather name="chevron-down" size={20} color="#666" style={{ marginRight: 8 }} />
+                    </TouchableOpacity>
+
+                    <View style={styles.hardwareInfoRow}>
+                        <Ionicons name="link-outline" size={14} color="#555" />
+                        <Text style={styles.hardwareInfoText}>API profile: Tapo Cloud API</Text>
+                    </View>
+
+                    <Text style={styles.hardwareLabel}>Webhook Configuration</Text>
+                    <View style={styles.hardwareInputRow}>
+                        <Ionicons name="lock-closed-outline" size={16} color="#aaa" style={{ marginRight: 8 }} />
+                        <TextInput
+                            style={styles.hardwareInput}
+                            value={webhookUrl}
+                            editable={false}
+                        />
+                        <TouchableOpacity style={styles.hardwareCopyButton}>
+                            <Text style={styles.hardwareCopyText}>COPY</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    <TouchableOpacity style={styles.hardwareActionButton}>
+                        <Text style={styles.hardwareActionButtonText}>Update & Reconnect</Text>
+                    </TouchableOpacity>
+
+                    <View style={styles.hardwareInfoRow}>
+                        <Ionicons name="information-circle" size={14} color="#555" />
+                        <Text style={styles.hardwareInfoText}>Used for receiving camera events and AI detection signals</Text>
+                    </View>
+                </View>
+
                 <View style={{ height: 40 }} />
-                <View style={{ height: 20 }} />
             </ScrollView>
         </View>
     );
@@ -394,13 +446,14 @@ export default function Phone({ session, onBack, onConfirm, initialStep }) {
         <LinearGradient colors={['#FFFFFF', '#95e4e4ff']} style={{ flex: 1 }}>
             <SafeAreaView style={styles.container}>
                 <StatusBar style="dark" />
-                {currentStep === STEPS.INTRO && renderIntro()}
                 {currentStep === STEPS.CONNECT && renderConnect()}
                 {currentStep === STEPS.TEST_CONNECTION && renderTestConnection()}
                 {currentStep === STEPS.ZONE_INTRO && renderZoneIntro()}
                 {currentStep === STEPS.ZONE_SETUP && renderZoneSetup()}
                 {currentStep === STEPS.ASSIGN && renderAssign()}
                 {currentStep === STEPS.SUCCESS && renderSuccess()}
+
+                {renderPickerModal()}
             </SafeAreaView>
         </LinearGradient>
     );
@@ -1014,5 +1067,107 @@ const styles = StyleSheet.create({
         color: '#FFF',
         fontSize: 20,
         fontWeight: 'bold',
+    },
+    // Duplicated Hardware Card Styles
+    hardwareCard: {
+        backgroundColor: 'rgba(0, 0, 0, 0.25)',
+        borderWidth: 0.5,
+        borderColor: '#898989',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 20,
+        overflow: 'hidden',
+    },
+    cardTitle: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 12,
+    },
+    hardwareLabel: {
+        color: '#333',
+        fontSize: 12,
+        marginTop: 8,
+        marginBottom: 4,
+        fontWeight: '600'
+    },
+    hardwareInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        borderRadius: 8,
+        paddingHorizontal: 8,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#CFD8DC'
+    },
+    hardwareInput: {
+        flex: 1,
+        height: 40,
+        color: '#333',
+        fontSize: 12,
+    },
+    hardwareCopyButton: {
+        backgroundColor: '#00695C',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 4,
+    },
+    hardwareCopyText: {
+        color: '#fff',
+        fontSize: 10,
+        fontWeight: 'bold',
+    },
+    hardwareInfoRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+        marginBottom: 8,
+    },
+    hardwareInfoText: {
+        color: '#555',
+        fontSize: 10,
+        marginLeft: 6,
+    },
+    hardwareActionButton: {
+        backgroundColor: 'rgba(0,0,0,0.1)',
+        paddingVertical: 12,
+        borderRadius: 20,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#ddd',
+        marginTop: 8,
+        marginBottom: 8,
+    },
+    hardwareActionButtonText: {
+        color: '#333',
+        fontWeight: '600',
+    },
+    // Picker Modal Styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    pickerContent: {
+        width: width * 0.85,
+        backgroundColor: '#FFF',
+        borderRadius: 4,
+        paddingVertical: 8,
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 5,
+    },
+    pickerItem: {
+        paddingVertical: 18,
+        paddingHorizontal: 20,
+    },
+    pickerItemText: {
+        fontSize: 16,
+        color: '#000',
+        fontWeight: '500',
     },
 });

@@ -3,13 +3,17 @@ import { View, Text, Image, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import styles from "../styles/homeStyles";
 
-export default function HomeHeader({ onProfile, onNotify, onSetting }) {
+export default function HomeHeader({ onProfile, onNotify, onSetting, userProfile }) {
   return (
     <View style={styles.headerBg}>
       {/* ซ้าย: โปรไฟล์ */}
       <TouchableOpacity onPress={onProfile}>
-        <View style={[styles.avatar, { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' }]}>
+        <View style={[styles.avatar, { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }]}>
+          {userProfile?.avatar_url ? (
+            <Image source={{ uri: userProfile.avatar_url }} style={{ width: '100%', height: '100%' }} />
+          ) : (
             <Ionicons name="person" size={20} color="#718096" />
+          )}
         </View>
       </TouchableOpacity>
 

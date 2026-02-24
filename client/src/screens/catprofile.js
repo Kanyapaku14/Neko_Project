@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, SafeAreaView, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from './Style/authstyle';
 import supabase from './config/supabaseClient';
 import { StatusBar } from 'expo-status-bar';
+import * as ImagePicker from 'expo-image-picker';
 
 export default function CatProfile({ session, catId, onBack, onNavigateToHome }) { // Receiving session and callbacks
     const [catName, setCatName] = useState('');
@@ -16,6 +17,8 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
     const [baselineWeight, setBaselineWeight] = useState('');
     const [activityLevel, setActivityLevel] = useState('Normal'); // Low, Normal, High
     const [loading, setLoading] = useState(false);
+    const [imageUri, setImageUri] = useState(null);
+    const [uploading, setUploading] = useState(false);
 
     React.useEffect(() => {
         if (catId) {
@@ -40,6 +43,9 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
                 setBirthDate(cat.birthdate || '');
                 setGender(cat.gender || 'Male');
                 setBreed(cat.breed || '');
+                if (cat.image_url) {
+                    setImageUri(cat.image_url);
+                }
             }
 
             // 2. Fetch Latest Weight
@@ -60,6 +66,60 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
             console.log("Error fetching cat data:", error.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const pickImage = async () => {
+        try {
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission Denied', 'Sorry, we need camera roll permissions to make this work!');
+                return;
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.7,
+            });
+
+            if (!result.canceled) {
+                setImageUri(result.assets[0].uri);
+            }
+        } catch (error) {
+            console.log("Error picking image:", error);
+        }
+    };
+
+    const uploadImage = async (uri) => {
+        if (!uri || uri.startsWith('http')) return uri;
+
+        try {
+            setUploading(true);
+            const fileName = `${session.user.id}_cat_${Date.now()}.jpg`;
+            const response = await fetch(uri);
+            const arrayBuffer = await response.arrayBuffer();
+
+            const { data, error: uploadError } = await supabase.storage
+                .from('posts')
+                .upload(fileName, arrayBuffer, {
+                    contentType: 'image/jpeg',
+                    upsert: true
+                });
+
+            if (uploadError) throw uploadError;
+
+            const { data: urlData } = supabase.storage
+                .from('posts')
+                .getPublicUrl(fileName);
+
+            return urlData.publicUrl;
+        } catch (error) {
+            console.log("Upload error:", error);
+            throw error;
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -108,6 +168,20 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
                 resultCatId = catData.id;
             }
 
+            // 1.5 Upload Image if picked
+            let finalImageUrl = imageUri;
+            if (imageUri && !imageUri.startsWith('http')) {
+                finalImageUrl = await uploadImage(imageUri);
+
+                // Update cat with image url
+                const { error: imgUpdateError } = await supabase
+                    .from('cats')
+                    .update({ image_url: finalImageUrl })
+                    .eq('id', resultCatId);
+
+                if (imgUpdateError) throw imgUpdateError;
+            }
+
             // 2. Insert into cat_weights table
             if (currentWeight) {
                 const { error: weightError } = await supabase
@@ -125,7 +199,7 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
 
             // Success
             Alert.alert('Success', 'Cat Profile Saved!', [
-                { text: 'OK', onPress: () => onNavigateToHome && onNavigateToHome(resultCatId) }
+                { text: 'OK', onPress: () => (onBack ? onBack() : onNavigateToHome && onNavigateToHome(resultCatId)) }
             ]);
 
         } catch (error) {
@@ -151,16 +225,25 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
 
                 {/* Profile Image */}
                 <View style={{ alignItems: 'center', marginBottom: 24 }}>
-                    <View style={styles.profileImageContainer}>
-                        <Image
-                            source={require('../../assets/cioncat.jpg')} // distinct placeholder ideally
-                            style={[styles.profileImage, { opacity: 0.8 }]}
-                        />
-                        <View style={{ position: 'absolute' }}>
-                            {/* Camera Icon Placeholder */}
+                    <TouchableOpacity onPress={pickImage} style={styles.profileImageContainer}>
+                        {imageUri ? (
+                            <Image
+                                source={{ uri: imageUri }}
+                                style={styles.profileImage}
+                            />
+                        ) : (
+                            <Image
+                                source={require('../../assets/cioncat.jpg')}
+                                style={[styles.profileImage, { opacity: 0.8 }]}
+                            />
+                        )}
+                        <View style={{ position: 'absolute', backgroundColor: 'rgba(0,0,0,0.3)', width: '100%', height: '100%', borderRadius: 100, justifyContent: 'center', alignItems: 'center' }}>
                             <Text style={{ fontSize: 30, color: '#fff', opacity: 0.8 }}>📷</Text>
                         </View>
-                    </View>
+                        {uploading && (
+                            <ActivityIndicator size="large" color="#fff" style={{ position: 'absolute' }} />
+                        )}
+                    </TouchableOpacity>
                     <Text style={styles.title}>Upload Profile</Text>
                     <Text style={[styles.subtitle, { marginBottom: 10 }]}>Help us recognize your feline friend</Text>
                 </View>
