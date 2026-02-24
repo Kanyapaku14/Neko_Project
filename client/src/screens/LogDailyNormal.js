@@ -25,7 +25,7 @@ const UnitInput = ({ value, onChangeText, unit, width }) => (
     <View style={{
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
+
         backgroundColor: '#fff',
         borderWidth: 1,
         borderColor: '#C8DDD8',
@@ -36,11 +36,11 @@ const UnitInput = ({ value, onChangeText, unit, width }) => (
     }}>
         <TextInput
             style={{
+                flex: 1, // ✨ เพิ่ม flex: 1 เพื่อให้ TextInput กินพื้นที่ฝั่งซ้ายทั้งหมด
                 fontSize: 14,
                 color: '#000',
                 padding: 0,
-                textAlign: 'right',
-                minWidth: 15,
+                textAlign: 'right', // ตัวเลขจะชิดขวาไปหาหน่วยพอดี
                 height: '100%'
             }}
             placeholder="0"
@@ -49,7 +49,9 @@ const UnitInput = ({ value, onChangeText, unit, width }) => (
             value={value !== null && value !== undefined ? String(value) : ""}
             onChangeText={onChangeText}
         />
-        <Text style={{ fontSize: 14, color: '#999', marginLeft: 4 }}>{unit}</Text>
+        <Text style={{ fontSize: 14, color: '#999', marginLeft: 10 }}>
+            {unit}
+        </Text>
     </View>
 );
 
@@ -189,13 +191,14 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
 
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
                             <Text style={{ width: 85, fontSize: 14, color: theme.textLabel }}>Consume</Text>
-                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="meals" width={110} />
-                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}>per day.</Text>
+                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="ml" width={70} />
+                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
 
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
-                            <UnitInput value={foodIntake} onChangeText={setFoodIntake} unit="g" width={100} />
+                            <UnitInput value={foodIntake} onChangeText={setFoodIntake} unit="g" width={60} />
+                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
 
@@ -204,8 +207,8 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Water</Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
-                            <UnitInput value={waterIntake} onChangeText={setWaterIntake} unit="ml" width={110} />
-                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}>per day.</Text>
+                            <UnitInput value={waterIntake} onChangeText={setWaterIntake} unit="ml" width={70} />
+                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
 
@@ -506,8 +509,45 @@ export default function LogDaily(props) {
         if (data) setCatId(data.id);
     };
 
-    const handleSave = async () => {
+    const handleSaveNormal = async () => {
         if (!catId) return Alert.alert("Error", "No cat profile found");
+
+        const isNormalDataComplete =
+            foodType !== null &&
+            (consumeMeals !== null && consumeMeals !== '') &&
+            (foodIntake !== null && foodIntake !== '') &&
+            (waterIntake !== null && waterIntake !== '') &&
+            urineLevel !== null &&
+            stoolLevel !== null;
+
+        if (!isNormalDataComplete) {
+            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก (Please complete all data missing)");
+        }
+
+        await saveData();
+    };
+
+    const handleSaveSomethingOff = async () => {
+        if (!catId) return Alert.alert("Error", "No cat profile found");
+
+        const hasSomethingOffData = isVomitChecked || isDiarrheaChecked || (behaviorTags && behaviorTags.length > 0) || (respiratoryTags && respiratoryTags.length > 0) || (notes && notes.trim() !== '');
+
+        const isNormalDataComplete =
+            foodType !== null &&
+            (consumeMeals !== null && consumeMeals !== '') &&
+            (foodIntake !== null && foodIntake !== '') &&
+            (waterIntake !== null && waterIntake !== '') &&
+            urineLevel !== null &&
+            stoolLevel !== null;
+
+        if (hasSomethingOffData && !isNormalDataComplete) {
+            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลในหน้า Normal ให้ครบด้วย (Please complete all Normal data)");
+        }
+
+        await saveData();
+    };
+
+    const saveData = async () => {
         setLoading(true);
         const logDate = initialDate ? new Date(initialDate) : new Date();
 
@@ -523,11 +563,6 @@ export default function LogDaily(props) {
             urine_level_enum: getLevelValue(urineLevel),
             stool_level_enum: getLevelValue(stoolLevel),
 
-            // Older enums just in case to override DB defaults to null
-            vomit_level_enum: null,
-            urine_color_enum: null,
-            stool_color_enum: null,
-            behavior_enum: null,
 
             // From Something off
             vomit_color_enum: isVomitChecked ? formatToEnum(vomitColor) : null,
@@ -556,8 +591,8 @@ export default function LogDaily(props) {
     };
 
     return status === 'Normal' ? (
-        <NormalView props={props} setStatus={setStatus} state={state} setters={setters} handleSave={handleSave} loading={loading} />
+        <NormalView props={props} setStatus={setStatus} state={state} setters={setters} handleSave={handleSaveNormal} loading={loading} />
     ) : (
-        <SomethingOffView props={props} setStatus={setStatus} state={state} setters={setters} handleSave={handleSave} loading={loading} />
+        <SomethingOffView props={props} setStatus={setStatus} state={state} setters={setters} handleSave={handleSaveSomethingOff} loading={loading} />
     );
 }
