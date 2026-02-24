@@ -35,6 +35,10 @@ export default function RankingScreen({ session, onBack }) {
   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
   const [checkinHistory, setCheckinHistory] = useState([]); // List of dates checked in this week
 
+  // Mission State
+  const [myLogStreak, setMyLogStreak] = useState(0);
+  const [myLogCycleDays, setMyLogCycleDays] = useState(0);
+
   // Global Ranking State
   const [viewMode, setViewMode] = useState("friends"); // 'friends' | 'global'
   const [globalRankings, setGlobalRankings] = useState([]);
@@ -342,6 +346,7 @@ export default function RankingScreen({ session, onBack }) {
   // Log Daily = 1pt, Assessment = 2pt, Upload Photo = 3pt
   const calcScore = async (userId) => {
     let score = 0;
+    let streakData = { streak: 0, isDouble: false, cycleDays: 0 };
     try {
       // 1) Get cats owned by this user
       let catIds = [];
@@ -354,15 +359,52 @@ export default function RankingScreen({ session, onBack }) {
         if (catError) throw catError;
         catIds = cats ? cats.map((c) => c.id) : [];
 
-        // 2) Count daily_logs (1pt each)
+        // 2) Count daily_logs and compute streak
         if (catIds.length > 0) {
-          const { count: logCount, error: logError } = await supabase
+          const { data: logs, error: logError } = await supabase
             .from("daily_logs")
-            .select("id", { count: "exact", head: true })
+            .select("log_date")
             .in("cat_id", catIds);
 
           if (logError) throw logError;
-          score += (logCount || 0) * 1;
+
+          score += (logs ? logs.length : 0) * 1;
+
+          if (logs && logs.length > 0) {
+            const uniqueDates = [...new Set(logs.map(l => l.log_date))].sort((a, b) => new Date(b) - new Date(a));
+            const todayStr = new Date().toISOString().split('T')[0];
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+            let streak = 0;
+            if (uniqueDates[0] === todayStr || uniqueDates[0] === yesterdayStr) {
+              streak = 1;
+              let checkDate = new Date(uniqueDates[0]);
+              for (let i = 1; i < uniqueDates.length; i++) {
+                checkDate.setDate(checkDate.getDate() - 1);
+                if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+                  streak++;
+                } else {
+                  break;
+                }
+              }
+            }
+
+            let bonus = 0;
+            let fullCycles = Math.floor(streak / 7);
+            let remainderDays = streak % 7;
+
+            bonus += fullCycles * 28; // 1+2+3+4+5+6+7 = 28
+            for (let i = 1; i <= remainderDays; i++) {
+              bonus += i;
+            }
+            score += bonus;
+
+            streakData.streak = streak;
+            streakData.isDouble = streak >= 7;
+            streakData.cycleDays = remainderDays === 0 && streak > 0 ? 7 : remainderDays;
+          }
         }
       } catch (catLogEx) {
         console.log("CalcScore (Cats/Logs) Error:", catLogEx);
@@ -399,6 +441,15 @@ export default function RankingScreen({ session, onBack }) {
       score += (checkinCount || 0) * 1;
     } catch (e) {
       console.log("Checkin score error (table might not exist yet):", e);
+    }
+
+    if (streakData.isDouble) {
+      score *= 2;
+    }
+
+    if (userId === session?.user?.id) {
+      setMyLogStreak(streakData.streak);
+      setMyLogCycleDays(streakData.cycleDays);
     }
 
     return score;
@@ -757,6 +808,55 @@ export default function RankingScreen({ session, onBack }) {
                 >
                   <Text style={[styles.toggleText, viewMode === 'global' && styles.toggleTextActive]}>Global</Text>
                 </TouchableOpacity>
+              </View>
+
+              {/* Mission Box: Log Streak */}
+              <View style={[styles.checkInCard, { backgroundColor: "#FFF8E1", borderColor: "#FFE082", borderWidth: 1, paddingBottom: 15 }]}>
+                <View style={styles.checkInHeader}>
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text style={[styles.checkInTitle, { color: "#FF8F00", fontSize: 16 }]}>Mission</Text>
+                    <Text style={[styles.checkInSub, { color: "#FFA000" }]}>Log daily for 7 days to double points!</Text>
+                  </View>
+                  <Ionicons name="flame" size={32} color="#FF8F00" />
+                </View>
+
+                <View style={{ marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 13, fontFamily: "Inter-SemiBold", color: "#FF8F00" }}>
+                    Current Streak: {myLogStreak} {myLogStreak <= 1 ? "day" : "days"}
+                  </Text>
+                  {myLogStreak >= 7 && (
+                    <View style={{ backgroundColor: '#FF8F00', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 }}>
+                      <Text style={{ fontSize: 10, color: '#FFF', fontFamily: "Inter-Bold" }}>x2 MULTIPLIER ACTIVE!</Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={[styles.daysGrid, { marginBottom: 10 }]}>
+                  {[...Array(7)].map((_, i) => {
+                    const dayNum = i + 1;
+                    const isDone = myLogCycleDays >= dayNum || (myLogStreak >= 7 && myLogCycleDays === 0);
+                    const isDay7 = dayNum === 7;
+                    return (
+                      <View key={i} style={styles.dayItem}>
+                        <View style={[
+                          styles.dayCircle,
+                          { width: 32, height: 32, borderRadius: 16, backgroundColor: "#FFFDE7", borderColor: "#FFE082" },
+                          isDone && { backgroundColor: "#FFB300", borderColor: "#FFB300" },
+                          isDay7 && !isDone && { borderColor: "#FF8F00", borderWidth: 2 }
+                        ]}>
+                          {isDone ? (
+                            <Ionicons name="checkmark-sharp" size={14} color="#FFF" />
+                          ) : (
+                            <Text style={[styles.dayPoint, { color: isDay7 ? "#FF8F00" : "#FFCA28" }]}>
+                              {isDay7 ? "x2" : `+${dayNum}`}
+                            </Text>
+                          )}
+                        </View>
+                        <Text style={[styles.dayLabel, { color: dayNum <= myLogCycleDays ? "#FF8F00" : "#B0BEC5" }]}>Day {dayNum}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
               </View>
 
               {/* Daily Check-in Card (Shopee Style) */}
