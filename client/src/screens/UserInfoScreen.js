@@ -27,9 +27,9 @@ export default function UserInfoScreen({ session, catId, onLogout, onMissingProf
                 .single();
 
             if (userError) {
-                 console.log('User profile fetch error', userError);
-                 if (onMissingProfile) onMissingProfile(); // Trigger if totally missing
-                 return;
+                console.log('User profile fetch error', userError);
+                if (onMissingProfile) onMissingProfile(); // Trigger if totally missing
+                return;
             } else {
                 // Check if profile is 'incomplete' (e.g. no name)
                 if (!userProfile.name) {
@@ -44,13 +44,13 @@ export default function UserInfoScreen({ session, catId, onLogout, onMissingProf
 
             // If no catId provided, try to find the first cat for this user
             if (!targetCatId) {
-                 const { data: firstCat, error: firstCatError } = await supabase
+                const { data: firstCat, error: firstCatError } = await supabase
                     .from('cats')
                     .select('id')
                     .eq('owner_id', session.user.id)
                     .limit(1)
                     .single();
-                
+
                 if (firstCat) {
                     targetCatId = firstCat.id;
                 }
@@ -62,7 +62,7 @@ export default function UserInfoScreen({ session, catId, onLogout, onMissingProf
                     .select('*')
                     .eq('id', targetCatId)
                     .single();
-                
+
                 if (catError) throw catError;
                 setCatData(cat);
 
@@ -76,7 +76,7 @@ export default function UserInfoScreen({ session, catId, onLogout, onMissingProf
                     .single();
 
                 if (!weightError) {
-                   setCatWeight(weight);
+                    setCatWeight(weight);
                 }
             }
 
@@ -98,7 +98,7 @@ export default function UserInfoScreen({ session, catId, onLogout, onMissingProf
     return (
         <SafeAreaView style={styles.container}>
             <StatusBar style="auto" />
-             {/* Header with Back Button */}
+            {/* Header with Back Button */}
             <View style={styles.header}>
                 {onBack && (
                     <TouchableOpacity onPress={onBack} style={styles.backButton}>
@@ -106,13 +106,22 @@ export default function UserInfoScreen({ session, catId, onLogout, onMissingProf
                     </TouchableOpacity>
                 )}
                 <Text style={styles.headerTitle}>{onBack ? "Profile Settings" : "Details Summary"}</Text>
-                <View style={{width: 28}} /> 
+                <View style={{ width: 28 }} />
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 {/* User Section */}
                 <View style={styles.card}>
-                    <Text style={styles.cardTitle}>User Information</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#EEE', paddingBottom: 10 }}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center', marginRight: 15, overflow: 'hidden' }}>
+                            {userData?.avatar_url ? (
+                                <Image source={{ uri: userData.avatar_url }} style={{ width: '100%', height: '100%' }} />
+                            ) : (
+                                <Ionicons name="person" size={30} color="#718096" />
+                            )}
+                        </View>
+                        <Text style={[styles.cardTitle, { marginBottom: 0, borderBottomWidth: 0, paddingBottom: 0 }]}>User Information</Text>
+                    </View>
                     <View style={styles.infoRow}>
                         <Text style={styles.label}>Name:</Text>
                         <Text style={styles.value}>{userData?.name || 'N/A'}</Text>
@@ -131,7 +140,7 @@ export default function UserInfoScreen({ session, catId, onLogout, onMissingProf
                 {catData && (
                     <View style={styles.card}>
                         <Text style={styles.cardTitle}>Cat Information</Text>
-                         <View style={styles.infoRow}>
+                        <View style={styles.infoRow}>
                             <Text style={styles.label}>Name:</Text>
                             <Text style={styles.value}>{catData.name}</Text>
                         </View>
@@ -147,7 +156,7 @@ export default function UserInfoScreen({ session, catId, onLogout, onMissingProf
                             <Text style={styles.label}>Birthdate:</Text>
                             <Text style={styles.value}>{catData.birthdate}</Text>
                         </View>
-                         {catWeight && (
+                        {catWeight && (
                             <View style={styles.infoRow}>
                                 <Text style={styles.label}>Weight:</Text>
                                 <Text style={styles.value}>{catWeight.weight_kg} kg</Text>

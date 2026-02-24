@@ -15,6 +15,19 @@ export const styles = StyleSheet.create({
         marginTop: 60,
         marginBottom: 40,
     },
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        position: 'absolute',
+        top: 40,
+        left: 0,
+        right: 0,
+        zIndex: 10,
+    },
+    backButton: {
+        padding: 8,
+    },
     logoimage: {
         width: 120,
         height: 120,
@@ -57,16 +70,16 @@ export const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '500',
         color: '#333',
-      
-        
+
+
     },
-     labelprofile: {
+    labelprofile: {
         fontSize: 14,
         fontWeight: '500',
         color: '#333',
         marginLeft: '10%',
-        margin : 10,
-        
+        margin: 10,
+
     },
     required: {
         color: '#ff0000',
@@ -161,7 +174,7 @@ export const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 10,
         borderWidth: 5,
-        borderColor: '#7DAFA8', 
+        borderColor: '#7DAFA8',
     },
     profileImage: {
         width: 120,
@@ -267,7 +280,7 @@ export const styles = StyleSheet.create({
         padding: 5,
         height: 80,
     },
-     activityButton: {
+    activityButton: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
@@ -275,9 +288,9 @@ export const styles = StyleSheet.create({
         marginHorizontal: 2,
     },
     activityButtonActive: {
-         backgroundColor: '#95C1BB',
-         borderWidth: 1,
-         borderColor: '#1C5D55'
+        backgroundColor: '#95C1BB',
+        borderWidth: 1,
+        borderColor: '#1C5D55'
     },
     activityText: {
         marginTop: 4,

@@ -121,23 +121,36 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
             .order('created_at', { ascending: false });
 
         if (data) {
-            const formatted = data.map(post => ({
-                ...post,
-                image: post.image_url,
-                createdAt: post.created_at,
-                user: {
-                    id: post.user?.id || post.user_id,
-                    name: post.user?.name || userProfile?.name || 'Neko Lover',
-                    avatar: post.user?.avatar_url || userProfile?.avatar_url || "https://placekitten.com/100/100"
-                },
-                likes: Array.isArray(post.likes) ? post.likes.map(l => l.user_id) : [],
-                comments: (post.comments || []).map(comment => ({
-                    ...comment,
-                    createdAt: comment.created_at,
-                    user: comment.user?.name || 'User',
-                    avatar: comment.user?.avatar_url || "https://placekitten.com/40/40"
-                })).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-            }));
+            console.log("Fetched User Posts:", data.length);
+            if (data.length > 0) {
+                console.log("Sample User Post Raw:", data[0]);
+            }
+
+            const formatted = data.map(post => {
+                const map = {
+                    ...post,
+                    image: post.image_url,
+                    createdAt: post.created_at,
+                    user: {
+                        id: post.user?.id || post.user_id,
+                        name: post.user?.name || userProfile?.name || 'Neko Lover',
+                        avatar: post.user?.avatar_url || userProfile?.avatar_url || "https://placekitten.com/100/100"
+                    },
+                    likes: Array.isArray(post.likes) ? post.likes.map(l => l.user_id) : [],
+                    comments: (post.comments || []).map(comment => ({
+                        ...comment,
+                        text: comment.content, // Ensure text mapping here too
+                        createdAt: comment.created_at,
+                        user: comment.user?.name || 'User',
+                        avatar: comment.user?.avatar_url || "https://placekitten.com/40/40"
+                    })).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+                };
+
+                // Debug image mapping
+                // if (post.image_url) console.log("Mapped Image:", map.image);
+
+                return map;
+            });
             setUserPosts(formatted);
         }
     };
@@ -345,16 +358,10 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                             onLoad={() => console.log("UI: Cover Image loaded successfully")}
                             onError={(e) => {
                                 console.log("UI: Cover Load Error for URL:", userProfile.cover_url);
-                                Alert.alert(
-                                    "Image Load Error",
-                                    "รูปโหลดไม่ขึ้นครับ! อาจเป็นเพราะ Bucket ไม่เป็น Public หรือ RLS บล็อกอยู่ครับ"
-                                );
+                                // Alert removed to prevent spamming
                             }}
                         />
-                        {/* 🛠 Diagnostic Label */}
-                        <View style={styles.debugLabel}>
-                            <Text style={styles.debugText}>URL Status: {userProfile.cover_url.includes('supabase') ? '✅ URL Link OK' : '❌ Wrong URL'}</Text>
-                        </View>
+                        {/* Debug Label Removed */}
                     </>
                 ) : (
                     <LinearGradient
@@ -373,8 +380,8 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
             </TouchableOpacity>
 
             <View style={styles.profileInfoContainer}>
-                {/* Avatar & Stats Row */}
-                <View style={styles.avatarStatsRow}>
+                {/* 1. Top Row: Avatar (Left) & Edit Button (Right) */}
+                <View style={styles.topRow}>
                     <TouchableOpacity
                         style={[styles.avatarWrapper, { zIndex: 5 }]}
                         onPress={pickAvatarImage}
@@ -383,7 +390,7 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                         <Image
                             source={{ uri: userProfile?.avatar_url || "https://placekitten.com/100/100" }}
                             style={styles.profileAvatar}
-                            key={`avatar-${userProfile?.avatar_url}`} // Force re-render
+                            key={`avatar-${userProfile?.avatar_url}`}
                         />
                         <View style={styles.avatarEditOverlay}>
                             {uploadingAvatar ? (
@@ -394,52 +401,53 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                         </View>
                     </TouchableOpacity>
 
-                    <View style={styles.statsContainer}>
-                        <View style={styles.statItem}>
-                            <Text style={styles.statNumber}>{userPosts.length}</Text>
-                            <Text style={styles.statLabel}>Posts</Text>
-                        </View>
-                        <View style={styles.statItem}>
-                            <Text style={styles.statNumber}>{friendsCount}</Text>
-                            <Text style={styles.statLabel}>Friends</Text>
-                        </View>
-                        <View style={styles.statItem}>
-                            <Text style={styles.statNumber}>{userProfile?.score || 0}</Text>
-                            <Text style={styles.statLabel}>Score</Text>
-                        </View>
-                    </View>
-                </View>
-
-                {/* Name & Bio Area */}
-                <View style={styles.nameContainer}>
-                    <Text style={styles.profileName}>{userProfile?.name || "Neko User"}</Text>
-                    <Text style={styles.profileHandle}>@{session?.user?.email?.split('@')[0] || "neko_lover"}</Text>
-
                     <TouchableOpacity
-                        style={styles.bioContainer}
-                        onPress={() => setIsEditingBio(true)}
-                        activeOpacity={0.7}
+                        style={styles.editBtnPill}
+                        onPress={() => onNavigate && onNavigate("Profile")}
                     >
-                        <Text style={styles.profileBio}>
-                            {userProfile?.bio || "Tap to add a bio... 🐾"}
-                        </Text>
-                        <Ionicons name="pencil-outline" size={14} color="#26A69A" style={styles.bioIcon} />
+                        <Text style={styles.editBtnText}>Edit profile</Text>
                     </TouchableOpacity>
                 </View>
 
-                {/* Full Width Edit Button */}
+                {/* 2. Name & Handle */}
+                <View style={styles.nameContainer}>
+                    <Text style={styles.profileName}>{userProfile?.name || "Neko User"}</Text>
+                    <Text style={styles.profileHandle}>@{session?.user?.email?.split('@')[0] || "neko_lover"}</Text>
+                </View>
+
+                {/* 3. Bio */}
                 <TouchableOpacity
-                    style={styles.editBtnFull}
-                    onPress={() => onNavigate && onNavigate("Profile")}
+                    style={styles.bioContainer}
+                    onPress={() => setIsEditingBio(true)}
+                    activeOpacity={0.7}
                 >
-                    <Text style={styles.editBtnText}>Edit Profile</Text>
+                    <Text style={styles.profileBio}>
+                        {userProfile?.bio || "Tap to add a bio... 🐾"}
+                    </Text>
+                    <Ionicons name="pencil-outline" size={14} color="#CFD8DC" style={styles.bioIcon} />
                 </TouchableOpacity>
+
+                {/* 4. Stats Row (X Style: Number + Label) */}
+                <View style={styles.xStatsContainer}>
+                    <View style={styles.xStatItem}>
+                        <Text style={styles.xStatNumber}>{userPosts.length}</Text>
+                        <Text style={styles.xStatLabel}>Posts</Text>
+                    </View>
+                    <View style={styles.xStatItem}>
+                        <Text style={styles.xStatNumber}>{friendsCount}</Text>
+                        <Text style={styles.xStatLabel}>Friends</Text>
+                    </View>
+                    <View style={styles.xStatItem}>
+                        <Text style={styles.xStatNumber}>{userProfile?.score || 0}</Text>
+                        <Text style={styles.xStatLabel}>Score</Text>
+                    </View>
+                </View>
             </View>
 
             <View style={styles.feedDivider}>
                 <View style={styles.feedTitleRow}>
-                    <Ionicons name="grid-outline" size={20} color="#26A69A" />
-                    <Text style={styles.feedTitle}>My Collection</Text>
+                    <Ionicons name="list-outline" size={20} color="#26A69A" />
+                    <Text style={styles.feedTitle}>Posts</Text>
                 </View>
             </View>
         </View>
@@ -479,6 +487,8 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                         <PostCard
                             post={item}
                             currentUserId={session?.user?.id}
+                            onLike={() => console.log("Like feature pending in Profile")}
+                            onOpen={() => onNavigate && onNavigate("PostDetail", { post: item })}
                         />
                     )}
                     contentContainerStyle={{ paddingBottom: 40 }}
@@ -608,118 +618,106 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "flex-end",
         marginTop: -45,
+        paddingBottom: 10, // Add padding
     },
     avatarWrapper: {
-        width: 90,
-        height: 90,
-        borderRadius: 45,
+        width: 80,
+        height: 80,
+        borderRadius: 40,
         borderWidth: 4,
         borderColor: "#FFF",
-        backgroundColor: "#F1F8F7",
-        elevation: 5,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 5,
+        backgroundColor: "#FFF",
+        marginTop: -40, // Pull up to overlap cover
     },
-    profileAvatar: {
-        width: "100%",
-        height: "100%",
-        borderRadius: 41,
+    topRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-end',
+        marginBottom: 10,
     },
-    avatarEditOverlay: {
-        position: 'absolute',
-        bottom: 0,
-        right: 0,
-        backgroundColor: '#26A69A',
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 3,
-        borderColor: '#FFF',
+    editBtnPill: {
+        marginTop: 10,
+        borderWidth: 1,
+        borderColor: '#CFD8DC',
+        borderRadius: 20,
+        paddingHorizontal: 16,
+        paddingVertical: 6,
+        backgroundColor: '#FFF',
     },
-    debugLabel: {
-        position: 'absolute',
-        top: 10,
-        left: 10,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        padding: 4,
-        borderRadius: 4,
-        zIndex: 100,
-    },
-    debugText: {
-        color: '#FFF',
-        fontSize: 10,
-        fontFamily: 'Inter-Regular'
-    },
-    statsContainer: {
-        flex: 1,
-        flexDirection: "row",
-        justifyContent: "space-around",
-        paddingBottom: 5,
-        marginLeft: 10,
-    },
-    statItem: {
-        alignItems: "center",
-    },
-    statNumber: {
-        fontSize: 18,
-        fontFamily: "Inter-Bold",
+    editBtnText: {
+        fontSize: 14,
+        fontFamily: "Inter-SemiBold",
         color: "#263238",
-    },
-    statLabel: {
-        fontSize: 12,
-        fontFamily: "Inter-Medium",
-        color: "#90A4AE",
-        marginTop: 2,
     },
     nameContainer: {
-        marginTop: 15,
+        marginTop: 0,
     },
     profileName: {
-        fontSize: 22,
+        fontSize: 19, // Reduced from 22
         fontFamily: "Inter-Bold",
         color: "#263238",
+        lineHeight: 26,
     },
     profileHandle: {
-        fontSize: 14,
-        fontFamily: "Inter-Medium",
-        color: "#26A69A",
-        marginTop: 2,
-        opacity: 0.8,
+        fontSize: 15,
+        fontFamily: "Inter-Regular",
+        color: "#546E7A",
+        marginTop: 0,
     },
     bioContainer: {
         flexDirection: "row",
         alignItems: "center",
         marginTop: 12,
         paddingRight: 10,
+        marginBottom: 16,
     },
-    profileBio: {
-        fontSize: 14,
+    xStatsContainer: {
+        flexDirection: 'row',
+        gap: 20,
+    },
+    xStatItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    xStatNumber: {
+        fontSize: 15,
+        fontFamily: "Inter-Bold",
+        color: "#263238",
+    },
+    xStatLabel: {
+        fontSize: 15,
         fontFamily: "Inter-Regular",
         color: "#546E7A",
+    },
+    profileAvatar: {
+        width: "100%",
+        height: "100%",
+        borderRadius: 40,
+    },
+    avatarEditOverlay: {
+        position: 'absolute',
+        bottom: 0,
+        right: 0,
+        backgroundColor: '#26A69A',
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 3,
+        borderColor: '#FFF',
+    },
+    profileBio: {
+        fontSize: 15,
+        fontFamily: "Inter-Regular",
+        color: "#263238",
         lineHeight: 20,
         flex: 1,
     },
     bioIcon: {
         marginLeft: 5,
         opacity: 0.5,
-    },
-    editBtnFull: {
-        marginTop: 20,
-        backgroundColor: "#F1F8F7",
-        borderRadius: 10,
-        paddingVertical: 10,
-        alignItems: "center",
-        borderWidth: 1,
-        borderColor: "#B2DFDB",
-    },
-    editBtnText: {
-        fontSize: 14,
-        fontFamily: "Inter-SemiBold",
-        color: "#26A69A",
     },
     feedDivider: {
         paddingHorizontal: 20,

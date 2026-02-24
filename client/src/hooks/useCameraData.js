@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../screens/config/supabaseClient';
+import { analyzeHealthLog } from '../utils/healthLogic';
 
 export default function useCameraData(session) {
   const [data, setData] = useState(null);
@@ -14,8 +15,8 @@ export default function useCameraData(session) {
       litter: 0,
       activity: [20, 45, 10, 80], // Mock graph data (DB lacks hourly activity)
       posture: {
-        abnormal: { percent: 2, name: 'None' },
-        normal: { percent: 98, name: 'Sleep' }
+        abnormal: { percent: 0, name: 'None' },
+        normal: { percent: 100, name: 'Normal' }
       },
       settings: { monitoringMode: 'multi', selectedCats: [] }
     };
@@ -32,54 +33,84 @@ export default function useCameraData(session) {
 
       // 2. Fetch Real Data if Session Exists
       if (session?.user) {
-
         // A. Get Cat Count
-        const { count, error: countError } = await supabase
-          .from('cats')
-          .select('*', { count: 'exact', head: true })
-          .eq('owner_id', session.user.id);
-
-        if (!countError) {
-          newData.cats = count || 0;
-        }
-
-        // B. Get Latest Daily Log (Food & Behavior)
-        // Find cats first
-        const { data: catsData } = await supabase
+        const { data: catsData, error: catError } = await supabase
           .from('cats')
           .select('id')
           .eq('owner_id', session.user.id);
 
-        if (catsData && catsData.length > 0) {
+        if (!catError && catsData) {
+          newData.cats = catsData.length;
           const catIds = catsData.map(c => c.id);
 
-          // Query logs for these cats
-          const { data: logs } = await supabase
+          // Get today's logs (local date string YYYY-MM-DD)
+          const now = new Date();
+          const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+          const { data: logs, error: logsError } = await supabase
             .from('daily_logs')
-            .select('*')
+            .select(`
+              *,
+              normal_logs(*),
+              something_off_logs(*)
+            `)
             .in('cat_id', catIds)
-            .order('log_date', { ascending: false }) // Latest first
-            .limit(1);
+            .eq('log_date', today);
 
-          if (logs && logs.length > 0) {
-            const log = logs[0];
+          if (!logsError && logs && logs.length > 0) {
+            let totalFood = 0;
+            let totalLitter = 0;
+            let worstAnalysis = null;
+            let latestLogForPosture = null;
 
-            // Map Food (Grams)
-            newData.food = log.food_intake || 0;
+            logs.forEach(log => {
+              const details = log.log_type === 'something_off'
+                ? (log.something_off_logs?.[0] || log.something_off_logs)
+                : (log.normal_logs?.[0] || log.normal_logs);
 
-            // Map Behavior -> Posture
-            // 'lethargic', 'hiding', 'hunched', 'aggressive', 'painful_vocal' -> Abnormal
-            const badBehaviors = ['lethargic', 'hiding', 'hunched', 'aggressive', 'painful_vocal'];
+              const unifiedLog = { ...log, ...(details || {}) };
+              totalFood += unifiedLog.food_amount || 0;
 
-            if (log.behavior_enum && badBehaviors.includes(log.behavior_enum)) {
-              // Risk detected
-              newData.posture.abnormal = { percent: 85, name: log.behavior_enum };
-              newData.posture.normal = { percent: 15, name: 'Low Activity' };
-            } else if (log.behavior_enum) {
-              // Normal behavior
-              newData.posture.normal = { percent: 95, name: log.behavior_enum };
-              newData.posture.abnormal = { percent: 5, name: 'None' };
+              // Count as "visited" if there's any urine or stool level recorded
+              if (unifiedLog.urine_level || unifiedLog.stool_level) {
+                totalLitter += 1;
+              }
+
+              const analysis = analyzeHealthLog(unifiedLog);
+              if (!worstAnalysis || analysis.redFlags > worstAnalysis.redFlags || analysis.score < worstAnalysis.score) {
+                worstAnalysis = analysis;
+                latestLogForPosture = unifiedLog;
+              }
+            });
+
+            newData.food = totalFood;
+            newData.litter = totalLitter;
+
+            // Map Posture based on the most concerning or recent log
+            if (worstAnalysis && latestLogForPosture) {
+              if (worstAnalysis.redFlags > 0) {
+                newData.posture.abnormal = {
+                  percent: worstAnalysis.score < 50 ? 80 : 40,
+                  name: latestLogForPosture.behavior || worstAnalysis.alerts[0] || 'At Risk'
+                };
+                newData.posture.normal = {
+                  percent: 100 - newData.posture.abnormal.percent,
+                  name: 'Low Activity'
+                };
+              } else {
+                newData.posture.normal = {
+                  percent: worstAnalysis.score,
+                  name: latestLogForPosture.behavior === 'normal' ? 'Active' : (latestLogForPosture.behavior || 'Normal')
+                };
+                newData.posture.abnormal = {
+                  percent: 100 - worstAnalysis.score,
+                  name: 'None'
+                };
+              }
             }
+          } else if (!logsError && logs?.length === 0) {
+            // If no logs today, maybe check latest for posture context but keep counters at 0
+            // For simplicity, we stick to today's insights as labeled
           }
         }
       }
@@ -88,7 +119,6 @@ export default function useCameraData(session) {
 
     } catch (e) {
       console.error("Error fetching camera data:", e);
-      // Fallback to basic data on error
       setData(prev => prev || newData);
     }
   }, [session]);
@@ -97,6 +127,5 @@ export default function useCameraData(session) {
     fetchData();
   }, [fetchData]);
 
-  // Expose refetch if needed
   return { data, refetch: fetchData };
 }

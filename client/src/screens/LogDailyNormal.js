@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import supabase from "./config/supabaseClient";
 import { styles } from './Style/LogDailyStyle';
-
+ 
 // --- Shared Utilities ---
 const getLevelValue = (level) => {
     switch (level) {
@@ -17,9 +17,9 @@ const getLevelValue = (level) => {
         default: return null;
     }
 };
-
+ 
 const formatToEnum = (val) => val ? String(val).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : null;
-
+ 
 // --- Custom Component: กล่องกรอกตัวเลขพร้อมหน่วยข้างใน ---
 const UnitInput = ({ value, onChangeText, unit, width }) => (
     <View style={{
@@ -54,19 +54,19 @@ const UnitInput = ({ value, onChangeText, unit, width }) => (
         </Text>
     </View>
 );
-
+ 
 // --- Custom Component: Semantic-UI Style Dropdown ---
 const CustomDropdown = ({ value, onValueChange }) => {
     const [isOpen, setIsOpen] = useState(false);
-
+ 
     const options = [
         { label: 'Dry Food', value: 'dry' },
         { label: 'Wet Food', value: 'wet' },
         { label: 'BARF', value: 'barf' }
     ];
-
+ 
     const selectedLabel = options.find(opt => opt.value === value)?.label || "Select kind of food";
-
+ 
     return (
         <View style={{ flex: 1, position: 'relative', zIndex: 100 }}>
             <TouchableOpacity
@@ -87,7 +87,7 @@ const CustomDropdown = ({ value, onValueChange }) => {
                 <Text style={{ fontSize: 14, color: value ? '#000' : '#999' }}>{selectedLabel}</Text>
                 <Ionicons name={isOpen ? "chevron-up" : "chevron-down"} size={16} color="#666" />
             </TouchableOpacity>
-
+ 
             {isOpen && (
                 <View style={{
                     position: 'absolute',
@@ -143,7 +143,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
     const { setFoodType, setConsumeMeals, setFoodIntake, setWaterIntake, setUrineLevel, setStoolLevel } = setters;
 
     const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34', textLabel: '#333' };
-
+ 
     return (
         <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
             <LinearGradient
@@ -158,12 +158,12 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                     <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1A3B34' }}>daily log</Text>
                     <View style={{ width: 38 }} />
                 </View>
-
+ 
                 <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingBottom: insets.bottom + 20 }]}>
                     <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#1A3B34', textAlign: 'center', marginBottom: 20 }}>
                         How was <Text style={{ color: '#4CAF50' }}>Luna</Text> today
                     </Text>
-
+ 
                     {/* Status Toggle */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
                         <TouchableOpacity style={{ backgroundColor: '#82CDBB', borderRadius: 16, width: '48%', paddingVertical: 15, alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3 }}>
@@ -179,29 +179,29 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#000' }}>Something off</Text>
                         </TouchableOpacity>
                     </View>
-
+ 
                     {/* --- Food Section --- */}
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: theme.borderColor, zIndex: 10 }}>
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Food</Text>
-
+ 
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, zIndex: 100 }}>
                             <Text style={{ width: 60, fontSize: 14, color: theme.textLabel }}>Type :</Text>
                             <CustomDropdown value={foodType} onValueChange={setFoodType} />
                         </View>
-
+ 
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
                             <Text style={{ width: 85, fontSize: 14, color: theme.textLabel }}>Consume</Text>
                             <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="ml" width={70} />
                             <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
-
+ 
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
                             <UnitInput value={foodIntake} onChangeText={setFoodIntake} unit="g" width={60} />
                             <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
-
+ 
                     {/* --- Water Section --- */}
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: theme.borderColor }}>
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Water</Text>
@@ -211,7 +211,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                             <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
-
+ 
                     {/* --- Urine & Stool Section --- */}
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Urine</Text>
@@ -236,9 +236,9 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                                 )
                             })}
                         </View>
-
+ 
                         <View style={{ height: 1, backgroundColor: theme.borderColor, marginVertical: 20 }} />
-
+ 
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Stool</Text>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                             {[{ level: 5, label: "Very High" }, { level: 4, label: "High" }, { level: 3, label: "Normal" }, { level: 2, label: "Low" }, { level: 1, label: "VeryLow" }
@@ -262,7 +262,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                             })}
                         </View>
                     </View>
-
+ 
                     {/* --- Save Button --- */}
                     <TouchableOpacity style={{ backgroundColor: '#A5D6C9', borderRadius: 12, height: 55, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }} onPress={handleSave} disabled={loading}>
                         <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#fff', marginRight: 8 }}>{loading ? "Saving..." : "Save Event"}</Text>
@@ -304,7 +304,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
     };
 
     const theme = { cardBg: '#FFFDFB', borderColor: '#E8DED6', textDark: '#D46B13', textLabel: '#333' };
-
+ 
     return (
         <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
             <LinearGradient
@@ -319,12 +319,12 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                     <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1A3B34' }}>daily log</Text>
                     <View style={{ width: 38 }} />
                 </View>
-
+ 
                 <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingBottom: insets.bottom + 20 }]}>
                     <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#1A3B34', textAlign: 'center', marginBottom: 20 }}>
                         How was <Text style={{ color: '#FBC02D' }}>Luna</Text> today
                     </Text>
-
+ 
                     {/* Status Toggle */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
                         <TouchableOpacity style={{ backgroundColor: '#FDE17A', borderRadius: 16, width: '48%', paddingVertical: 15, alignItems: 'center', opacity: 0.9 }} onPress={() => setStatus('Normal')}>
@@ -340,19 +340,19 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#000' }}>Something off</Text>
                         </TouchableOpacity>
                     </View>
-
+ 
                     {/* --- Digestive & Excretory Section --- */}
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Digestive & Excretory</Text>
-
+ 
                         {/* Vomit Checkbox */}
                         <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }} onPress={() => setIsVomitChecked(!isVomitChecked)}>
                             <MaterialCommunityIcons name={isVomitChecked ? "checkbox-marked" : "checkbox-blank-outline"} size={24} color={isVomitChecked ? "#333" : "#999"} />
                             <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', marginLeft: 10 }}>Vomit</Text>
                         </TouchableOpacity>
-
+ 
                         <Text style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>Color Chart :</Text>
-
+ 
                         {/* Vomit Options */}
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25 }}>
                             {[{ label: 'Undigested Food', value: 'undigested_food' }, { label: 'Hairball', value: 'hairball' }, { label: 'White Foam', value: 'white_foam' }, { label: 'Blood', value: 'blood' }, { label: 'Yellow', value: 'yellow' }
@@ -376,17 +376,17 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                                 )
                             })}
                         </View>
-
+ 
                         <View style={{ height: 1, backgroundColor: theme.borderColor, marginBottom: 20 }} />
-
+ 
                         {/* Diarrhea Checkbox */}
                         <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }} onPress={() => setIsDiarrheaChecked(!isDiarrheaChecked)}>
                             <MaterialCommunityIcons name={isDiarrheaChecked ? "checkbox-marked" : "checkbox-blank-outline"} size={24} color={isDiarrheaChecked ? "#333" : "#999"} />
                             <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#333', marginLeft: 10 }}>Diarrhea</Text>
                         </TouchableOpacity>
-
+ 
                         <Text style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>Color Chart :</Text>
-
+ 
                         {/* Diarrhea Options */}
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                             {[{ label: 'Watery', value: 'watery' }, { label: 'Mushy', value: 'mushy' }, { label: 'Mucus', value: 'mucus' }, { label: 'Black', value: 'black' }, { label: 'Fresh Blood', value: 'fresh_blood' }
@@ -411,7 +411,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                             })}
                         </View>
                     </View>
-
+ 
                     {/* --- Behavior & Energy Section --- */}
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Behavior & Energy</Text>
@@ -429,9 +429,9 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                                 )
                             })}
                         </View>
-
+ 
                         <View style={{ height: 1, backgroundColor: theme.borderColor, marginVertical: 20 }} />
-
+ 
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Respiratory & Physical Appearance</Text>
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                             {['จาม', 'มีน้ำมูก', 'มีขี้ตาเยอะ', 'หายใจหอบ', 'พยายามขย้อน'].map(tag => {
@@ -448,7 +448,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                             })}
                         </View>
                     </View>
-
+ 
                     {/* --- Notes Section --- */}
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
@@ -464,7 +464,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                             onChangeText={setNotes}
                         />
                     </View>
-
+ 
                     <TouchableOpacity style={{ backgroundColor: '#FAD231', borderRadius: 12, height: 55, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }} onPress={handleSave} disabled={loading}>
                         <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#000', marginRight: 8 }}>{loading ? "Saving..." : "Save Event"}</Text>
                         <Ionicons name="checkmark-circle-outline" size={24} color="#000" />
@@ -474,10 +474,8 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
         </View>
     );
 };
-
-// ==========================================
-// 3. Main Export
-// ==========================================
+ 
+ 
 export default function LogDaily(props) {
     const { session, onBack, initialDate } = props;
     const [status, setStatus] = useState('Normal');
