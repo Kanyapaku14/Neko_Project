@@ -367,6 +367,7 @@ export default function CommunityScreen({ onBack, session, onNavigate }) {
         onBack={onBack}
         onProfile={() => onNavigate && onNavigate("CommunityProfile")}
         onSettings={() => onNavigate && onNavigate("UserInfo")}
+        avatarUrl={userProfile?.avatar_url}
       />
 
       {/* 🔀 Pill Tab Bar */}
