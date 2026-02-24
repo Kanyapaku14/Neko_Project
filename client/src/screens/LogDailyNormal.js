@@ -25,7 +25,7 @@ const UnitInput = ({ value, onChangeText, unit, width }) => (
     <View style={{
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
+
         backgroundColor: '#fff',
         borderWidth: 1,
         borderColor: '#C8DDD8',
@@ -36,20 +36,22 @@ const UnitInput = ({ value, onChangeText, unit, width }) => (
     }}>
         <TextInput
             style={{
+                flex: 1, // ✨ เพิ่ม flex: 1 เพื่อให้ TextInput กินพื้นที่ฝั่งซ้ายทั้งหมด
                 fontSize: 14,
                 color: '#000',
                 padding: 0,
-                textAlign: 'right',
-                minWidth: 15,
+                textAlign: 'right', // ตัวเลขจะชิดขวาไปหาหน่วยพอดี
                 height: '100%'
             }}
             placeholder="0"
             placeholderTextColor="#999"
             keyboardType="numeric"
-            value={value}
+            value={value !== null && value !== undefined ? String(value) : ""}
             onChangeText={onChangeText}
         />
-        <Text style={{ fontSize: 14, color: '#999', marginLeft: 4 }}>{unit}</Text>
+        <Text style={{ fontSize: 14, color: '#999', marginLeft: 10 }}>
+            {unit}
+        </Text>
     </View>
 );
  
@@ -129,55 +131,17 @@ const CustomDropdown = ({ value, onValueChange }) => {
         </View>
     );
 };
- 
-const NormalView = ({ props, setStatus }) => {
-    const { session, onBack, initialDate } = props;
-    const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
- 
-    const [catId, setCatId] = useState(null);
-    const [foodType, setFoodType] = useState(null);
-    const [consumeMeals, setConsumeMeals] = useState('');
-    const [foodIntake, setFoodIntake] = useState('');
-    const [waterIntake, setWaterIntake] = useState('');
-    const [urineLevel, setUrineLevel] = useState(null);
-    const [stoolLevel, setStoolLevel] = useState(null);
-    const [loading, setLoading] = useState(false);
- 
-    useEffect(() => { if (session?.user) fetchCatId(); }, [session]);
- 
-    const fetchCatId = async () => {
-        const { data } = await supabase.from('cats').select('id').eq('owner_id', session.user.id).single();
-        if (data) setCatId(data.id);
-    };
- 
-    const handleSave = async () => {
-        if (!catId) return Alert.alert("Error", "No cat profile found");
-        setLoading(true);
-        const logDate = initialDate ? new Date(initialDate) : new Date();
- 
-        const payload = {
-            cat_id: catId,
-            log_date: `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`,
-            food_type_enum: foodType,
-            meals_per_day: Number(consumeMeals) || 0,
-            food_intake: Number(foodIntake) || 0,
-            water_level: Number(waterIntake) || 0,
-            urine_level_enum: getLevelValue(urineLevel),
-            stool_level_enum: getLevelValue(stoolLevel),
-            vomit_level_enum: null,
-            urine_color_enum: null,
-            stool_color_enum: null,
-            behavior_enum: null,
-        };
- 
-        console.log('SENDING TO SUPABASE (v1.8) 👉', JSON.stringify(payload, null, 2));
- 
-        const { error } = await supabase.from('daily_logs').upsert(payload, { onConflict: 'cat_id, log_date' });
-        setLoading(false);
-        if (error) Alert.alert('Error', error.message);
-        else Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
-    };
- 
+
+// ==========================================
+// 1. หน้า NormalView
+// ==========================================
+const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) => {
+    const { onBack } = props;
+    const insets = useSafeAreaInsets();
+
+    const { foodType, consumeMeals, foodIntake, waterIntake, urineLevel, stoolLevel } = state;
+    const { setFoodType, setConsumeMeals, setFoodIntake, setWaterIntake, setUrineLevel, setStoolLevel } = setters;
+
     const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34', textLabel: '#333' };
  
     return (
@@ -185,7 +149,7 @@ const NormalView = ({ props, setStatus }) => {
             <LinearGradient
                 colors={['#FFFFFF', '#B2E1DB']}
                 locations={[0.42, 1]}
-                style={{ flex: 1, paddingTop: Math.max(insets.top, 20) }} // หลบขอบจอด้านบน
+                style={{ flex: 1, paddingTop: Math.max(insets.top, 20) }}
             >
                 <View style={[styles.header, { paddingHorizontal: 15 }]}>
                     <TouchableOpacity onPress={onBack} style={{ padding: 5 }}>
@@ -227,13 +191,14 @@ const NormalView = ({ props, setStatus }) => {
  
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
                             <Text style={{ width: 85, fontSize: 14, color: theme.textLabel }}>Consume</Text>
-                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="meals" width={110} />
-                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}>per day.</Text>
+                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="ml" width={70} />
+                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
  
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
-                            <UnitInput value={foodIntake} onChangeText={setFoodIntake} unit="g" width={100} />
+                            <UnitInput value={foodIntake} onChangeText={setFoodIntake} unit="g" width={60} />
+                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
  
@@ -242,8 +207,8 @@ const NormalView = ({ props, setStatus }) => {
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Water</Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
-                            <UnitInput value={waterIntake} onChangeText={setWaterIntake} unit="ml" width={110} />
-                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}>per day.</Text>
+                            <UnitInput value={waterIntake} onChangeText={setWaterIntake} unit="ml" width={70} />
+                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
  
@@ -308,64 +273,36 @@ const NormalView = ({ props, setStatus }) => {
         </View>
     );
 };
- 
- 
-const SomethingOffView = ({ props, setStatus }) => {
-    const { session, onBack, initialDate } = props;
-    const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
- 
-    const [catId, setCatId] = useState(null);
-    const [loading, setLoading] = useState(false);
- 
-    // --- State สำหรับส่วนต่างๆ ตาม UI ใหม่ ---
-    const [isVomitChecked, setIsVomitChecked] = useState(false);
-    const [vomitColor, setVomitColor] = useState(null);
- 
-    const [isDiarrheaChecked, setIsDiarrheaChecked] = useState(false);
-    const [diarrheaColor, setDiarrheaColor] = useState(null);
- 
-    const [behaviorTags, setBehaviorTags] = useState([]);
-    const [respiratoryTags, setRespiratoryTags] = useState([]);
- 
-    const [notes, setNotes] = useState('');
- 
-    useEffect(() => { if (session?.user) fetchCatId(); }, [session]);
- 
-    const fetchCatId = async () => {
-        const { data } = await supabase.from('cats').select('id').eq('owner_id', session.user.id).single();
-        if (data) setCatId(data.id);
-    };
- 
-    const handleToggleTag = (tag, state, setState) => {
-        if (state.includes(tag)) {
-            setState(state.filter(t => t !== tag));
+
+// ==========================================
+// 2. หน้า SomethingOffView
+// ==========================================
+const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loading }) => {
+    const { onBack } = props;
+    const insets = useSafeAreaInsets();
+
+    const {
+        isVomitChecked, vomitColor,
+        isDiarrheaChecked, diarrheaColor,
+        behaviorTags, respiratoryTags,
+        notes
+    } = state;
+
+    const {
+        setIsVomitChecked, setVomitColor,
+        setIsDiarrheaChecked, setDiarrheaColor,
+        setBehaviorTags, setRespiratoryTags,
+        setNotes
+    } = setters;
+
+    const handleToggleTag = (tag, currentTags, setTargetTags) => {
+        if (currentTags.includes(tag)) {
+            setTargetTags(currentTags.filter(t => t !== tag));
         } else {
-            setState([...state, tag]);
+            setTargetTags([...currentTags, tag]);
         }
     };
- 
-    const handleSave = async () => {
-        setLoading(true);
-        const logDate = initialDate ? new Date(initialDate) : new Date();
- 
-        const payload = {
-            cat_id: catId,
-            log_date: `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`,
-            // ข้อมูลสำหรับ Something off
-            vomit_color_enum: isVomitChecked ? formatToEnum(vomitColor) : null,
-            // ใน Database ของคุณต้องเพิ่ม field มารองรับ diarrhea_color, behavior_tags, respiratory_tags ด้วยนะครับ
-            diarrhea_color_enum: isDiarrheaChecked ? formatToEnum(diarrheaColor) : null,
-            behavior_tags: behaviorTags.length > 0 ? behaviorTags : null,
-            respiratory_tags: respiratoryTags.length > 0 ? respiratoryTags : null,
-            notes: notes || null,
-        };
- 
-        const { error } = await supabase.from('daily_logs').upsert(payload, { onConflict: 'cat_id, log_date' });
-        setLoading(false);
-        if (error) Alert.alert('Error', error.message);
-        else Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
-    };
- 
+
     const theme = { cardBg: '#FFFDFB', borderColor: '#E8DED6', textDark: '#D46B13', textLabel: '#333' };
  
     return (
@@ -426,7 +363,7 @@ const SomethingOffView = ({ props, setStatus }) => {
                                         key={item.value}
                                         style={{ alignItems: 'center', width: 60 }}
                                         onPress={() => isVomitChecked && setVomitColor(vomitColor === item.value ? null : item.value)}
-                                        disabled={!isVomitChecked} // ปิดการกดถ้าไม่ได้ติ๊ก Checkbox
+                                        disabled={!isVomitChecked}
                                     >
                                         <View style={[
                                             { width: 60, height: 60, justifyContent: 'center', alignItems: 'center', borderRadius: 16 },
@@ -479,7 +416,6 @@ const SomethingOffView = ({ props, setStatus }) => {
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Behavior & Energy</Text>
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                            {/* เพิ่มอาการ Behavior ที่ต้องการให้ผู้ใช้เลือกได้ที่นี่ */}
                             {['ซึม', 'ซ่อนตัว', 'เลียขนมากเกินไป', 'ร้องผิดปกติ', 'เบื่ออาหาร', 'กินจุผิดปกติ', 'กระวนกระวาย', 'โก่งตัว', 'กินน้ำเยอะผิดปกติ', 'ไม่กินน้ำเลย', 'ไม่กินอาหารเลย', 'ไม่เลียขน', 'ก้าวร้าว'].map(tag => {
                                 const isSelected = behaviorTags.includes(tag);
                                 return (
@@ -524,7 +460,7 @@ const SomethingOffView = ({ props, setStatus }) => {
                             placeholder="Additional notes (e.g., vomit color, last meal)..."
                             placeholderTextColor="#999"
                             multiline={true}
-                            value={notes}
+                            value={notes !== null && notes !== undefined ? String(notes) : ""}
                             onChangeText={setNotes}
                         />
                     </View>
@@ -541,7 +477,120 @@ const SomethingOffView = ({ props, setStatus }) => {
  
  
 export default function LogDaily(props) {
+    const { session, onBack, initialDate } = props;
     const [status, setStatus] = useState('Normal');
-    return status === 'Normal' ? <NormalView props={props} setStatus={setStatus} /> : <SomethingOffView props={props} setStatus={setStatus} />;
+
+    const [catId, setCatId] = useState(null);
+    const [loading, setLoading] = useState(false);
+
+    // --- Normal State ---
+    const [foodType, setFoodType] = useState(null);
+    const [consumeMeals, setConsumeMeals] = useState(null);
+    const [foodIntake, setFoodIntake] = useState(null);
+    const [waterIntake, setWaterIntake] = useState(null);
+    const [urineLevel, setUrineLevel] = useState(null);
+    const [stoolLevel, setStoolLevel] = useState(null);
+
+    // --- Something Off State ---
+    const [isVomitChecked, setIsVomitChecked] = useState(false);
+    const [vomitColor, setVomitColor] = useState(null);
+    const [isDiarrheaChecked, setIsDiarrheaChecked] = useState(false);
+    const [diarrheaColor, setDiarrheaColor] = useState(null);
+    const [behaviorTags, setBehaviorTags] = useState([]);
+    const [respiratoryTags, setRespiratoryTags] = useState([]);
+    const [notes, setNotes] = useState(null);
+
+    useEffect(() => { if (session?.user) fetchCatId(); }, [session]);
+
+    const fetchCatId = async () => {
+        const { data } = await supabase.from('cats').select('id').eq('owner_id', session.user.id).single();
+        if (data) setCatId(data.id);
+    };
+
+    const handleSaveNormal = async () => {
+        if (!catId) return Alert.alert("Error", "No cat profile found");
+
+        const isNormalDataComplete =
+            foodType !== null &&
+            (consumeMeals !== null && consumeMeals !== '') &&
+            (foodIntake !== null && foodIntake !== '') &&
+            (waterIntake !== null && waterIntake !== '') &&
+            urineLevel !== null &&
+            stoolLevel !== null;
+
+        if (!isNormalDataComplete) {
+            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก (Please complete all data missing)");
+        }
+
+        await saveData();
+    };
+
+    const handleSaveSomethingOff = async () => {
+        if (!catId) return Alert.alert("Error", "No cat profile found");
+
+        const hasSomethingOffData = isVomitChecked || isDiarrheaChecked || (behaviorTags && behaviorTags.length > 0) || (respiratoryTags && respiratoryTags.length > 0) || (notes && notes.trim() !== '');
+
+        const isNormalDataComplete =
+            foodType !== null &&
+            (consumeMeals !== null && consumeMeals !== '') &&
+            (foodIntake !== null && foodIntake !== '') &&
+            (waterIntake !== null && waterIntake !== '') &&
+            urineLevel !== null &&
+            stoolLevel !== null;
+
+        if (hasSomethingOffData && !isNormalDataComplete) {
+            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลในหน้า Normal ให้ครบด้วย (Please complete all Normal data)");
+        }
+
+        await saveData();
+    };
+
+    const saveData = async () => {
+        setLoading(true);
+        const logDate = initialDate ? new Date(initialDate) : new Date();
+
+        const payload = {
+            cat_id: catId,
+            log_date: `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`,
+
+            // From Normal
+            food_type_enum: foodType,
+            meals_per_day: consumeMeals !== null && consumeMeals !== '' ? Number(consumeMeals) : null,
+            food_intake: foodIntake !== null && foodIntake !== '' ? Number(foodIntake) : null,
+            water_level: waterIntake !== null && waterIntake !== '' ? Number(waterIntake) : null,
+            urine_level_enum: getLevelValue(urineLevel),
+            stool_level_enum: getLevelValue(stoolLevel),
+
+
+            // From Something off
+            vomit_color_enum: isVomitChecked ? formatToEnum(vomitColor) : null,
+            diarrhea_color_enum: isDiarrheaChecked ? formatToEnum(diarrheaColor) : null,
+            behavior_tags: behaviorTags.length > 0 ? behaviorTags : null,
+            respiratory_tags: respiratoryTags.length > 0 ? respiratoryTags : null,
+            notes: notes || null,
+        };
+
+        console.log("Saving payload data:", JSON.stringify(payload, null, 2));
+
+        const { error } = await supabase.from('daily_logs').upsert(payload, { onConflict: 'cat_id, log_date' });
+        setLoading(false);
+        if (error) Alert.alert('Error', error.message);
+        else Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
+    };
+
+    const state = {
+        foodType, consumeMeals, foodIntake, waterIntake, urineLevel, stoolLevel,
+        isVomitChecked, vomitColor, isDiarrheaChecked, diarrheaColor, behaviorTags, respiratoryTags, notes
+    };
+
+    const setters = {
+        setFoodType, setConsumeMeals, setFoodIntake, setWaterIntake, setUrineLevel, setStoolLevel,
+        setIsVomitChecked, setVomitColor, setIsDiarrheaChecked, setDiarrheaColor, setBehaviorTags, setRespiratoryTags, setNotes
+    };
+
+    return status === 'Normal' ? (
+        <NormalView props={props} setStatus={setStatus} state={state} setters={setters} handleSave={handleSaveNormal} loading={loading} />
+    ) : (
+        <SomethingOffView props={props} setStatus={setStatus} state={state} setters={setters} handleSave={handleSaveSomethingOff} loading={loading} />
+    );
 }
- 
