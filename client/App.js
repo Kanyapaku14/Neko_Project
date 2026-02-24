@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator, AppState } from 'react-native';
+// ✅ นำเข้า SafeAreaProvider ตรงนี้
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
 import SignInScreen from './src/screens/SignInScreen';
 import SignUpScreen from './src/screens/SignUpScreen';
 import ProfileScreen from './src/screens/profileScreen';
@@ -14,12 +17,17 @@ import HomeScreen from './src/screens/HomeScreen'; // อย่าลืม Impo
 import CalendarScreen from './src/screens/CalendarScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScreen
+import MainTabNavigator from './src/screens/MainTabNavigator'; // ✅ Import MainTabNavigator
+import CommunityScreen from './src/screens/CommunityScreen'; // ✅ Import CommunityScreen
+import RankingScreen from './src/screens/RankingScreen'; // ✅ Import RankingScreen
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
 import SetcameraScreen from './src/screens/SetcameraScreen';
 import PhotoCheck from './src/screens/PhotoCheck';
+// Removed duplicate PhotoCheck import
 import AnalysisResult from './src/screens/AnalysisResult';
+import CommunityProfile from './src/screens/CommunityProfile'; // ✅ Import CommunityProfile
 
 import { useFonts } from 'expo-font';
 import {
@@ -138,59 +146,80 @@ export default function App() {
     );
   }
 
-  // ส่วนจัดการ Session (ถ้าล็อกอินแล้ว)
-  if (session && !loading) {
-    if (authScreen === 'CatProfile') {
-      return <CatProfile session={session} onNavigateToHome={() => setAuthScreen('Home')} />;
-    }
-    if (authScreen === 'Profile') {
-      return <ProfileScreen session={session} onNavigateToCatProfile={() => setAuthScreen('CatProfile')} />;
-    }
-    if (authScreen === 'UserInfo') {
-      return <UserInfoScreen
-        session={session}
-        catId={catId}
-        onLogout={() => supabase.auth.signOut()}
-        onMissingProfile={() => setAuthScreen('Profile')}
-        onBack={() => setAuthScreen('Home')} // ✅ Back button support
-      />;
-    }
+  // --- ฟังก์ชันช่วยเหลือในการ Render หน้าจอต่างๆ ---
+  const renderScreen = () => {
+    // ส่วนจัดการ Session (ถ้าล็อกอินแล้ว)
+    if (session && !loading) {
+      if (authScreen === 'CatProfile') {
+        return <CatProfile session={session} onNavigateToHome={() => setAuthScreen('Home')} />;
+      }
+      if (authScreen === 'Profile') {
+        return <ProfileScreen session={session} onNavigateToCatProfile={() => setAuthScreen('CatProfile')} />;
+      }
+      if (authScreen === 'UserInfo') {
+        return <UserInfoScreen
+          session={session}
+          catId={catId}
+          onLogout={() => supabase.auth.signOut()}
+          onMissingProfile={() => setAuthScreen('Profile')}
+          onBack={() => setAuthScreen('Home')} // ✅ Back button support
+        />;
+      }
 
-    if (authScreen === 'LogDaily' || (typeof authScreen === 'object' && authScreen.screen === 'LogDaily')) {
-      return <LogDailyNormal
+      if (authScreen === 'LogDaily' || (typeof authScreen === 'object' && authScreen.screen === 'LogDaily')) {
+        return <LogDailyNormal
+          session={session}
+          onBack={() => setAuthScreen('Home')}
+          initialDate={typeof authScreen === 'object' ? authScreen.params?.date : null}
+        />;
+      }
+
+      if (authScreen === 'Calendar') {
+        return <CalendarScreen
+          session={session}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+
+      if (authScreen === 'Result') {
+        return <ResultScreen
+          onBack={() => setAuthScreen('Home')}
+          onSave={() => setAuthScreen('Home')}
+          // ✅ เพิ่มบรรทัดนี้ เพื่อให้ ResultScreen สามารถสั่งเปลี่ยนหน้าไปที่อื่นได้
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+
+    // ✅ MainTabNavigator Screen
+    if (authScreen === 'MainTabNavigator') {
+      return <MainTabNavigator
         session={session}
+        onNavigate={(screen) => setAuthScreen(screen)}
         onBack={() => setAuthScreen('Home')}
-        initialDate={typeof authScreen === 'object' ? authScreen.params?.date : null}
       />;
     }
 
-    if (authScreen === 'Calendar') {
-      return <CalendarScreen
+    // ✅ Community Profile Screen
+    if (authScreen === 'CommunityProfile') {
+      return <CommunityProfile
         session={session}
+        onBack={() => setAuthScreen('MainTabNavigator')}
         onNavigate={(screen) => setAuthScreen(screen)}
       />;
     }
 
-    if (authScreen === 'Result') {
-      return <ResultScreen
-        onBack={() => setAuthScreen('Home')}
-        onSave={() => setAuthScreen('Home')}
-      />;
-    }
-
-    if (authScreen === 'Overview') {
-      return <Dashboard
+    if (authScreen === 'Community') {
+      return <CommunityScreen
         session={session}
-        onBack={() => setAuthScreen('Home')}
+        onBack={() => setAuthScreen('MainTabNavigator')}
         onNavigate={(screen) => setAuthScreen(screen)}
       />;
     }
 
-    // ✅ Timeline Screen
-    if (authScreen === 'Timeline') {
-      return <TimelineScreen
+    if (authScreen === 'Ranking') {
+      return <RankingScreen
         session={session}
-        onBack={() => setAuthScreen('Overview')} // Back to Dashboard
+        onBack={() => setAuthScreen('MainTabNavigator')}
       />;
     }
 
@@ -200,56 +229,58 @@ export default function App() {
 
     if (authScreen === 'Setcamera') {
       return <SetcameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
-      return <CameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
     }
 
-    if (authScreen === 'PhotoCheck') {
-      return <PhotoCheck onNavigate={(screen) => setAuthScreen(screen)} />;
+      if (authScreen === 'Camera') {
+        return <CameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
+      }
+
+      // ✅ Default Home
+      return <HomeScreen
+        onLogout={navigateToSignIn}
+        onLogDaily={() => setAuthScreen('LogDaily')}
+        onAssess={() => setAuthScreen('Result')}
+        onSetting={() => setAuthScreen('UserInfo')} // ✅ Go to Settings (UserInfo)
+        onNavigate={(screen) => setAuthScreen(screen)}
+      />;
     }
 
-    if (authScreen === 'AnalysisResult') {
-      return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} />;
-    }
+    // ส่วนจัดการหน้าจอ (ถ้ายังไม่ล็อกอิน หรือ flow ปกติ)
+    return (
+      <>
+        {currentScreen === 'SignIn' && (
+          <SignInScreen onNavigate={navigateToSignUp} />
+        )}
 
-    // ✅ Default Home
-    return <HomeScreen
-      onLogout={navigateToSignIn}
-      onLogDaily={() => setAuthScreen('LogDaily')}
-      onAssess={() => setAuthScreen('Result')}
-      onSetting={() => setAuthScreen('UserInfo')} // ✅ Go to Settings (UserInfo)
-      onNavigate={(screen) => setAuthScreen(screen)}
-    />;
-  }
+        {currentScreen === 'SignUp' && (
+          <SignUpScreen onNavigate={navigateToSignIn} />
+        )}
 
-  // ส่วนจัดการหน้าจอ (ถ้ายังไม่ล็อกอิน หรือ flow ปกติ)
+        {/* ===== หน้า Home ===== */}
+        {currentScreen === 'Home' && (
+          <HomeScreen
+            onLogout={navigateToSignIn}
+            // ต้องส่ง props ไปให้กดแล้วไปหน้า LogDaily ได้
+            onLogDaily={navigateToLogDaily}
+          />
+        )}
+
+        {/* ===== ✅ 3. เพิ่มหน้า LogDaily ตรงนี้ ===== */}
+        {currentScreen === 'LogDaily' && (
+          <LogDailyNormal
+            session={session}
+            onBack={navigateToHome}
+            initialDate={authScreen.params?.date} // Pass date if available
+          />
+        )}
+      </>
+    );
+  };
+
+  // ✅ ครอบทั้งหมดด้วย SafeAreaProvider ที่นี่ครับ
   return (
-    <>
-      {currentScreen === 'SignIn' && (
-        <SignInScreen onNavigate={navigateToSignUp} />
-      )}
-
-      {currentScreen === 'SignUp' && (
-        <SignUpScreen onNavigate={navigateToSignIn} />
-      )}
-
-      {/* ===== หน้า Home ===== */}
-      {currentScreen === 'Home' && (
-        <HomeScreen
-          onLogout={navigateToSignIn}
-          // ต้องส่ง props ไปให้กดแล้วไปหน้า LogDaily ได้
-          onLogDaily={navigateToLogDaily}
-        />
-      )}
-
-      {/* ===== ✅ 3. เพิ่มหน้า LogDaily ตรงนี้ ===== */}
-      {currentScreen === 'LogDaily' && (
-        <LogDailyNormal
-          session={session}
-          onBack={navigateToHome}
-          initialDate={authScreen.params?.date} // Pass date if available
-        />
-      )}
-
-    </>
+    <SafeAreaProvider>
+      {renderScreen()}
+    </SafeAreaProvider>
   );
 }
