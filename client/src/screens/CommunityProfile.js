@@ -22,14 +22,17 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from 'expo-image-picker';
 import supabase from './config/supabaseClient';
 import PostCard from "../components/PostCard";
+import PostDetailScreen from "./PostDetail.Screen";
+import AddPostScreen from "./AddPostScreen";
 
 const { width } = Dimensions.get("window");
 
-export default function CommunityProfile({ session, onBack, onNavigate }) {
+export default function CommunityProfile({ session, userId, onBack, onNavigate }) {
     const [loading, setLoading] = useState(true);
     const [userProfile, setUserProfile] = useState(null);
     const [userPosts, setUserPosts] = useState([]);
     const [friendsCount, setFriendsCount] = useState(0);
+    const [userScore, setUserScore] = useState(0);
 
     // Bio & Cover Editing
     const [isEditingBio, setIsEditingBio] = useState(false);
@@ -39,11 +42,31 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
     const [uploadingAvatar, setUploadingAvatar] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
 
+    // Post Options & Editing
+    const [optionPost, setOptionPost] = useState(null);
+    const [editingPost, setEditingPost] = useState(null);
+    const [showAddPost, setShowAddPost] = useState(false);
+    const [selectedPost, setSelectedPost] = useState(null);
+
     useEffect(() => {
         if (session?.user?.id) {
             loadProfileData();
         }
-    }, [session]);
+    }, [session, userId]);
+
+    // Determine whose profile we are viewing
+    const profileId = userId || session?.user?.id;
+    const isReadyOnly = userId && userId !== session?.user?.id;
+
+    // Sync selectedPost when userPosts update (to show new comments immediately)
+    useEffect(() => {
+        if (selectedPost) {
+            const updated = userPosts.find(p => p.id === selectedPost.id);
+            if (updated) {
+                setSelectedPost(updated);
+            }
+        }
+    }, [userPosts]);
 
     const loadProfileData = async () => {
         setLoading(true);
@@ -51,7 +74,8 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
             await Promise.all([
                 fetchProfile(),
                 fetchUserPosts(),
-                fetchFriendsCount()
+                fetchFriendsCount(),
+                fetchUserScore()
             ]);
         } catch (e) {
             console.log("Error loading profile data:", e);
@@ -66,7 +90,8 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
             await Promise.all([
                 fetchProfile(),
                 fetchUserPosts(),
-                fetchFriendsCount()
+                fetchFriendsCount(),
+                fetchUserScore()
             ]);
         } finally {
             setRefreshing(false);
@@ -78,7 +103,7 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
             const { data, error } = await supabase
                 .from('profiles')
                 .select('*')
-                .eq('id', session.user.id)
+                .eq('id', profileId)
                 .single();
 
             if (error) {
@@ -110,14 +135,14 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
             .from('posts')
             .select(`
         *,
-        user:profiles!user_id(id, name),
+        user:profiles!user_id(id, name, avatar_url),
         likes:post_likes(user_id),
         comments:comments(
           *,
-          user:profiles!user_id(name)
+          user:profiles!user_id(name, avatar_url)
         )
       `)
-            .eq('user_id', session.user.id)
+            .eq('user_id', profileId)
             .order('created_at', { ascending: false });
 
         if (data) {
@@ -159,9 +184,149 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
         const { count, error } = await supabase
             .from('friends')
             .select('*', { count: 'exact', head: true })
-            .eq('user_id', session.user.id)
+            .eq('user_id', profileId)
             .eq('status', 'accepted');
         if (count !== null) setFriendsCount(count);
+    };
+
+    const fetchUserScore = async () => {
+        const score = await calcScore(profileId);
+        setUserScore(score);
+    };
+
+    // ─── Score Calculation (matching RankingScreen) ───
+    const calcScore = async (targetUserId) => {
+        let score = 0;
+        let streakData = { streak: 0, isDouble: false };
+        try {
+            // 1) Get cats owned by this user
+            let catIds = [];
+            try {
+                const { data: cats, error: catError } = await supabase
+                    .from("cats")
+                    .select("id")
+                    .eq("owner_id", targetUserId);
+
+                if (catError) throw catError;
+                catIds = cats ? cats.map((c) => c.id) : [];
+
+                // 2) Count daily_logs and compute streak
+                if (catIds.length > 0) {
+                    const { data: logs, error: logError } = await supabase
+                        .from("daily_logs")
+                        .select("log_date")
+                        .in("cat_id", catIds);
+
+                    if (logError) throw logError;
+
+                    score += (logs ? logs.length : 0) * 1;
+
+                    if (logs && logs.length > 0) {
+                        const uniqueDates = [...new Set(logs.map(l => l.log_date))].sort((a, b) => new Date(b) - new Date(a));
+                        const todayStr = new Date().toISOString().split('T')[0];
+                        const yesterday = new Date();
+                        yesterday.setDate(yesterday.getDate() - 1);
+                        const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+                        let streak = 0;
+                        if (uniqueDates[0] === todayStr || uniqueDates[0] === yesterdayStr) {
+                            streak = 1;
+                            let checkDate = new Date(uniqueDates[0]);
+                            for (let i = 1; i < uniqueDates.length; i++) {
+                                checkDate.setDate(checkDate.getDate() - 1);
+                                if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+                                    streak++;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+
+                        let bonus = 0;
+                        let fullCycles = Math.floor(streak / 7);
+                        let remainderDays = streak % 7;
+
+                        bonus += fullCycles * 28;
+                        for (let i = 1; i <= remainderDays; i++) {
+                            bonus += i;
+                        }
+                        score += bonus;
+
+                        streakData.streak = streak;
+                        streakData.isDouble = streak >= 7;
+                    }
+                }
+            } catch (catLogEx) {
+                console.log("CalcScore (Cats/Logs) Error:", catLogEx);
+            }
+
+            // 3) Count assessments (2pt each)
+            try {
+                const { count: assessCount } = await supabase
+                    .from("assessments")
+                    .select("id", { count: "exact", head: true })
+                    .eq("user_id", targetUserId);
+                score += (assessCount || 0) * 2;
+            } catch { }
+
+            // 4) Count assessments with image (3pt each)
+            try {
+                const { count: photoCount } = await supabase
+                    .from("assessments")
+                    .select("id", { count: "exact", head: true })
+                    .eq("user_id", targetUserId)
+                    .not("image_url", "is", null);
+                score += (photoCount || 0) * 3;
+            } catch { }
+        } catch (e) {
+            console.log("Score calc error:", e);
+        }
+
+        // 5) Count daily_checkins (Progressive Score: Day 1=1pt, Day 2=2pt, etc.)
+        try {
+            const { data: checkins, error: checkinError } = await supabase
+                .from("daily_checkins")
+                .select("checkin_date")
+                .eq("user_id", targetUserId)
+                .order("checkin_date", { ascending: false });
+
+            if (!checkinError && checkins && checkins.length > 0) {
+                const uniqueDates = [...new Set(checkins.map(c => c.checkin_date))];
+                const todayStr = new Date().toISOString().split('T')[0];
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+                let streak = 0;
+                let checkinScore = 0;
+
+                // Check if streak is active (checked in today or yesterday)
+                if (uniqueDates[0] === todayStr || uniqueDates[0] === yesterdayStr) {
+                    streak = 1;
+                    checkinScore += streak; // Day 1 = +1
+
+                    let checkDate = new Date(uniqueDates[0]);
+                    for (let i = 1; i < uniqueDates.length; i++) {
+                        checkDate.setDate(checkDate.getDate() - 1);
+                        if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+                            streak++;
+                            checkinScore += streak; // Day N = +N
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                score += checkinScore;
+            }
+        } catch (e) {
+            console.log("Checkin score error:", e);
+        }
+
+        if (streakData.isDouble) {
+            score *= 2;
+        }
+
+        return score;
     };
 
     const uploadImage = async (uri, bucket) => {
@@ -339,14 +504,160 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
         }
     };
 
+    // ➕ Save Post to Database
+    const handleSavePost = async (postData) => {
+        try {
+            setLoading(true);
+
+            // Re-using exiting uploadImage from CommunityProfile, but 'posts' bucket
+            let uploadedImageUrl = postData.image;
+            if (postData.image && !postData.image.startsWith('http')) {
+                uploadedImageUrl = await uploadImage(postData.image, 'posts');
+            }
+
+            const payload = {
+                user_id: session.user.id,
+                content: postData.content,
+                image_url: uploadedImageUrl,
+            };
+
+            let result;
+            if (editingPost) {
+                result = await supabase
+                    .from('posts')
+                    .update(payload)
+                    .eq('id', editingPost.id);
+            } else {
+                result = await supabase
+                    .from('posts')
+                    .insert(payload);
+            }
+
+            if (result.error) throw result.error;
+
+            await fetchUserPosts(); // Refresh posts
+            setEditingPost(null);
+            setShowAddPost(false);
+            Alert.alert("Success", "Post shared successfully! 🎉");
+        } catch (e) {
+            console.log("Save post error:", e);
+            Alert.alert("Post Error", e.message || "Could not save post. Please check your data or permissions.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // --- Actions ---
+    // 🗑️ Delete Post Sync
+    const handleDelete = (postId) => {
+        Alert.alert("Delete Post", "Are you sure you want to delete this post?", [
+            { text: "Cancel", style: "cancel" },
+            {
+                text: "Delete",
+                style: "destructive",
+                onPress: async () => {
+                    try {
+                        const { error } = await supabase
+                            .from('posts')
+                            .delete()
+                            .eq('id', postId);
+
+                        if (error) throw error;
+                        setUserPosts(prev => prev.filter(p => p.id !== postId));
+                        setOptionPost(null);
+                    } catch (e) {
+                        console.log("Delete error:", e);
+                    }
+                }
+            }
+        ]);
+    };
+
+    const handleEdit = (post) => {
+        setEditingPost(post);
+        setOptionPost(null);
+        setShowAddPost(true);
+    };
+
+    // ❤️ Like / Unlike Sync
+    const toggleLike = async (postId) => {
+        const post = userPosts.find(p => p.id === postId);
+        if (!post) return;
+
+        const isLiked = post.likes.includes(session.user.id);
+
+        try {
+            if (isLiked) {
+                await supabase
+                    .from('post_likes')
+                    .delete()
+                    .match({ post_id: postId, user_id: session.user.id });
+            } else {
+                await supabase
+                    .from('post_likes')
+                    .insert({ post_id: postId, user_id: session.user.id });
+            }
+
+            // Optimistic Update or Refresh
+            await fetchUserPosts();
+        } catch (e) {
+            console.log("Like error:", e);
+        }
+    };
+
+    // 💬 Comment
+    const addComment = async (postId, text) => {
+        if (!text.trim()) return;
+        try {
+            const { error } = await supabase
+                .from('comments')
+                .insert({
+                    post_id: postId,
+                    user_id: session.user.id,
+                    content: text
+                });
+
+            if (error) throw error;
+            await fetchUserPosts();
+        } catch (e) {
+            console.log("Comment error:", e);
+        }
+    };
+
+    // 🗑️ Delete Comment
+    const deleteCommentFromPost = async (postId, commentId) => {
+        try {
+            const { error } = await supabase
+                .from('comments')
+                .delete()
+                .match({ id: commentId, user_id: session.user.id });
+
+            if (error) throw error;
+
+            setUserPosts((prev) =>
+                prev.map((post) =>
+                    post.id === postId
+                        ? {
+                            ...post,
+                            comments: post.comments.filter((c) => c.id !== commentId),
+                        }
+                        : post
+                )
+            );
+        } catch (e) {
+            console.log("Delete comment error:", e);
+            Alert.alert("Error", "Failed to delete comment");
+        }
+    };
+
     const renderHeader = () => (
         <View style={styles.headerContent}>
             {/* Cover Image */}
             <TouchableOpacity
                 style={styles.coverImageContainer}
-                onPress={pickCoverImage}
-                disabled={uploadingCover}
-                activeOpacity={0.9}
+                onPress={isReadyOnly ? null : pickCoverImage}
+                disabled={uploadingCover || isReadyOnly}
+                activeOpacity={isReadyOnly ? 1 : 0.9}
             >
                 {userProfile?.cover_url && userProfile.cover_url.trim() !== "" ? (
                     <>
@@ -370,13 +681,15 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                     />
                 )}
 
-                <View style={[styles.coverOverlay, { zIndex: 10 }]}>
-                    {uploadingCover ? (
-                        <ActivityIndicator color="#FFF" size="small" />
-                    ) : (
-                        <Ionicons name="camera-outline" size={20} color="#FFF" />
-                    )}
-                </View>
+                {!isReadyOnly && (
+                    <View style={[styles.coverOverlay, { zIndex: 10 }]}>
+                        {uploadingCover ? (
+                            <ActivityIndicator color="#FFF" size="small" />
+                        ) : (
+                            <Ionicons name="camera-outline" size={20} color="#FFF" />
+                        )}
+                    </View>
+                )}
             </TouchableOpacity>
 
             <View style={styles.profileInfoContainer}>
@@ -384,29 +697,34 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                 <View style={styles.topRow}>
                     <TouchableOpacity
                         style={[styles.avatarWrapper, { zIndex: 5 }]}
-                        onPress={pickAvatarImage}
-                        disabled={uploadingAvatar}
+                        onPress={isReadyOnly ? null : pickAvatarImage}
+                        disabled={uploadingAvatar || isReadyOnly}
+                        activeOpacity={isReadyOnly ? 1 : 0.2}
                     >
                         <Image
                             source={{ uri: userProfile?.avatar_url || "https://placekitten.com/100/100" }}
                             style={styles.profileAvatar}
                             key={`avatar-${userProfile?.avatar_url}`}
                         />
-                        <View style={styles.avatarEditOverlay}>
-                            {uploadingAvatar ? (
-                                <ActivityIndicator color="#FFF" size="small" />
-                            ) : (
-                                <Ionicons name="camera" size={16} color="#FFF" />
-                            )}
-                        </View>
+                        {!isReadyOnly && (
+                            <View style={styles.avatarEditOverlay}>
+                                {uploadingAvatar ? (
+                                    <ActivityIndicator color="#FFF" size="small" />
+                                ) : (
+                                    <Ionicons name="camera" size={16} color="#FFF" />
+                                )}
+                            </View>
+                        )}
                     </TouchableOpacity>
 
-                    <TouchableOpacity
-                        style={styles.editBtnPill}
-                        onPress={() => onNavigate && onNavigate("Profile")}
-                    >
-                        <Text style={styles.editBtnText}>Edit profile</Text>
-                    </TouchableOpacity>
+                    {!isReadyOnly && (
+                        <TouchableOpacity
+                            style={styles.editBtnPill}
+                            onPress={() => onNavigate && onNavigate("Profile")}
+                        >
+                            <Text style={styles.editBtnText}>Edit profile</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
 
                 {/* 2. Name & Handle */}
@@ -418,13 +736,15 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                 {/* 3. Bio */}
                 <TouchableOpacity
                     style={styles.bioContainer}
-                    onPress={() => setIsEditingBio(true)}
-                    activeOpacity={0.7}
+                    onPress={isReadyOnly ? null : () => setIsEditingBio(true)}
+                    activeOpacity={isReadyOnly ? 1 : 0.7}
                 >
                     <Text style={styles.profileBio}>
-                        {userProfile?.bio || "Tap to add a bio... 🐾"}
+                        {userProfile?.bio || (isReadyOnly ? "No bio yet 🐾" : "Tap to add a bio... 🐾")}
                     </Text>
-                    <Ionicons name="pencil-outline" size={14} color="#CFD8DC" style={styles.bioIcon} />
+                    {!isReadyOnly && (
+                        <Ionicons name="pencil-outline" size={14} color="#CFD8DC" style={styles.bioIcon} />
+                    )}
                 </TouchableOpacity>
 
                 {/* 4. Stats Row (X Style: Number + Label) */}
@@ -438,7 +758,7 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                         <Text style={styles.xStatLabel}>Friends</Text>
                     </View>
                     <View style={styles.xStatItem}>
-                        <Text style={styles.xStatNumber}>{userProfile?.score || 0}</Text>
+                        <Text style={styles.xStatNumber}>{userScore}</Text>
                         <Text style={styles.xStatLabel}>Score</Text>
                     </View>
                 </View>
@@ -453,6 +773,22 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
         </View>
     );
 
+    // ➕ Add/Edit Post Screen Override
+    if (showAddPost) {
+        return (
+            <AddPostScreen
+                onClose={() => {
+                    setShowAddPost(false);
+                    setEditingPost(null); // Clear editing state on close
+                }}
+                onSubmit={handleSavePost}
+                initialPost={editingPost}
+                userProfile={userProfile}
+                currentUserId={session?.user?.id}
+            />
+        );
+    }
+
     return (
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="dark-content" />
@@ -462,13 +798,17 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                 <TouchableOpacity onPress={onBack} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color="#37474F" />
                 </TouchableOpacity>
-                <Text style={styles.topNavTitle}>My Profile</Text>
-                <TouchableOpacity
-                    style={styles.settingsBtn}
-                    onPress={() => onNavigate && onNavigate("UserInfo")}
-                >
-                    <Ionicons name="settings-outline" size={24} color="#37474F" />
-                </TouchableOpacity>
+                <Text style={styles.topNavTitle}>{isReadyOnly ? `${userProfile?.name || 'User'}'s Profile` : 'My Profile'}</Text>
+                {!isReadyOnly ? (
+                    <TouchableOpacity
+                        style={styles.settingsBtn}
+                        onPress={() => onNavigate && onNavigate("UserInfo")}
+                    >
+                        <Ionicons name="settings-outline" size={24} color="#37474F" />
+                    </TouchableOpacity>
+                ) : (
+                    <View style={styles.settingsBtn} />
+                )}
             </View>
 
             {loading ? (
@@ -487,8 +827,9 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                         <PostCard
                             post={item}
                             currentUserId={session?.user?.id}
-                            onLike={() => console.log("Like feature pending in Profile")}
-                            onOpen={() => onNavigate && onNavigate("PostDetail", { post: item })}
+                            onLike={toggleLike}
+                            onOpen={() => setSelectedPost(item)}
+                            onMore={(post) => setOptionPost(post)}
                         />
                     )}
                     contentContainerStyle={{ paddingBottom: 40 }}
@@ -546,6 +887,67 @@ export default function CommunityProfile({ session, onBack, onNavigate }) {
                     </View>
                 </KeyboardAvoidingView>
             </Modal>
+
+            {/* 🔍 Post Detail Modal */}
+            {selectedPost && selectedPost.id && (
+                <Modal
+                    visible={!!selectedPost}
+                    animationType="slide"
+                    presentationStyle="pageSheet"
+                    onRequestClose={() => setSelectedPost(null)}
+                >
+                    <PostDetailScreen
+                        post={selectedPost}
+                        onClose={() => setSelectedPost(null)}
+                        onAddComment={addComment}
+                        onDeleteComment={deleteCommentFromPost}
+                        userProfile={userProfile}
+                        currentUserId={session?.user?.id}
+                        onBack={() => setSelectedPost(null)}
+                        session={session}
+                        onNavigate={onNavigate}
+                    />
+                </Modal>
+            )}
+
+            {/* ⚙️ Options Modal (Bottom Sheet Style) */}
+            <Modal
+                visible={!!optionPost}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => setOptionPost(null)}
+            >
+                <TouchableOpacity
+                    style={styles.modalOverlay}
+                    activeOpacity={1}
+                    onPress={() => setOptionPost(null)}
+                >
+                    <View style={styles.bottomSheet}>
+                        <View style={styles.dragHandle} />
+
+                        {optionPost && optionPost.user.id === session?.user?.id ? (
+                            <>
+                                <TouchableOpacity style={styles.optionItem} onPress={() => handleEdit(optionPost)}>
+                                    <Ionicons name="pencil-outline" size={24} color="#37474F" />
+                                    <Text style={styles.optionText}>Edit Post</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.optionItem} onPress={() => handleDelete(optionPost.id)}>
+                                    <Ionicons name="trash-outline" size={24} color="#E57373" />
+                                    <Text style={[styles.optionText, { color: "#E57373" }]}>Delete Post</Text>
+                                </TouchableOpacity>
+                            </>
+                        ) : (
+                            <>
+                                <TouchableOpacity style={styles.optionItem} onPress={() => setOptionPost(null)}>
+                                    <Ionicons name="close-circle-outline" size={24} color="#37474F" />
+                                    <Text style={styles.optionText}>Close Options</Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
         </SafeAreaView>
     );
 }
@@ -797,5 +1199,39 @@ const styles = StyleSheet.create({
         color: "#FFFFFF",
         fontSize: 16,
         fontFamily: "Inter-Bold",
+    },
+    // Modal Styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.5)",
+        justifyContent: "flex-end",
+    },
+    bottomSheet: {
+        backgroundColor: "#FFFFFF",
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        padding: 24,
+        paddingBottom: 40,
+    },
+    dragHandle: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: "#E0E0E0",
+        alignSelf: "center",
+        marginBottom: 20,
+    },
+    optionItem: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: "#F5F5F5",
+    },
+    optionText: {
+        fontSize: 16,
+        fontFamily: "Inter-SemiBold",
+        color: "#37474F",
+        marginLeft: 16,
     },
 });

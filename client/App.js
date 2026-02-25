@@ -246,20 +246,22 @@ export default function App() {
         return <CommunityScreen
           session={session}
           onBack={() => setAuthScreen('MainTabNavigator')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
         />;
       }
       if (currentScreenName === 'Ranking') {
         return <RankingScreen
           session={session}
           onBack={() => setAuthScreen('MainTabNavigator')}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
         />;
       }
       if (currentScreenName === 'CommunityProfile') {
         return <CommunityProfile
           session={session}
+          userId={screenParams?.userId}
           onBack={() => setAuthScreen('MainTabNavigator')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
         />;
       }
       if (currentScreenName === 'Camera') {

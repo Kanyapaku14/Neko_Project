@@ -34,6 +34,7 @@ export default function RankingScreen({ session, onBack }) {
   const [loading, setLoading] = useState(true);
   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
   const [checkinHistory, setCheckinHistory] = useState([]); // List of dates checked in this week
+  const [currentCheckinStreak, setCurrentCheckinStreak] = useState(0);
 
   // Mission State
   const [myLogStreak, setMyLogStreak] = useState(0);
@@ -107,6 +108,7 @@ export default function RankingScreen({ session, onBack }) {
           setMyProfile({
             id: data.id,
             name: data.name || session.user.email?.split("@")[0] || "Me",
+            avatar_url: data.avatar_url || null,
           });
           const score = await calcScore(data.id);
           setMyScore(score);
@@ -226,42 +228,21 @@ export default function RankingScreen({ session, onBack }) {
       console.log("Combined Friend IDs:", friendIds);
 
       // 2. Fetch profiles if we have IDs
-      // 2. Fetch profiles if we have IDs
       if (friendIds.length > 0) {
-        let profiles = null;
-        let fetchError = null;
-
-        // Try getting score column first (Optimized)
-        const { data: profilesWithScore, error: scoreError } = await supabase
+        const { data: profiles, error: fetchError } = await supabase
           .from("profiles")
-          .select("id, name, score")
+          .select("id, name, avatar_url")
           .in("id", friendIds);
-
-        if (!scoreError) {
-          profiles = profilesWithScore;
-        } else {
-          console.log("Profile Score Column Missing?", scoreError.message);
-          // Fallback: Fetch without score
-          const { data: profilesBasic, error: basicError } = await supabase
-            .from("profiles")
-            .select("id, name")
-            .in("id", friendIds);
-
-          if (basicError) fetchError = basicError;
-          else profiles = profilesBasic;
-        }
 
         if (fetchError) {
           console.log("Profile Error:", fetchError);
-          // Alert.alert("Debug", "Failed to load profiles: " + fetchError.message); 
         }
 
         if (profiles) {
           const withScores = await Promise.all(
             profiles.map(async (f) => ({
               ...f,
-              // Use stored score if available, else calc
-              score: f.score !== undefined ? f.score : await calcScore(f.id),
+              score: await calcScore(f.id),
               status: 'accepted'
             }))
           );
@@ -283,7 +264,7 @@ export default function RankingScreen({ session, onBack }) {
       // 1. Fetch profiles (limit 20 for performance)
       const { data: profiles, error } = await supabase
         .from("profiles")
-        .select("id, name")
+        .select("id, name, avatar_url")
         .limit(20);
 
       if (error) throw error;
@@ -333,9 +314,42 @@ export default function RankingScreen({ session, onBack }) {
         })
       );
 
+      // Check if current user is in the list, if not, add them
+      const isCurrentUserIncluded = globalData.some(p => p.id === session.user.id);
+
+      if (!isCurrentUserIncluded && session?.user?.id) {
+        let meProfile = {
+          id: session.user.id,
+          name: session.user.email?.split("@")[0] || "Me",
+          avatar_url: null,
+          score: await calcScore(session.user.id),
+          status: 'me',
+          isMe: true
+        };
+
+        try {
+          // Attempt to get the real profile details for 'me'
+          const { data: myDbProfile } = await supabase
+            .from("profiles")
+            .select("id, name, avatar_url")
+            .eq("id", session.user.id)
+            .single();
+
+          if (myDbProfile) {
+            meProfile = {
+              ...meProfile,
+              name: myDbProfile.name || meProfile.name,
+              avatar_url: myDbProfile.avatar_url || null,
+            };
+          }
+        } catch (e) { }
+
+        globalData.push(meProfile);
+      }
+
       // Sort by score
       globalData.sort((a, b) => b.score - a.score);
-      setGlobalRankings(globalData);
+      setGlobalRankings(globalData.slice(0, 20));
 
     } catch (e) {
       console.log("Global ranking error:", e);
@@ -426,26 +440,58 @@ export default function RankingScreen({ session, onBack }) {
           .select("id", { count: "exact", head: true })
           .eq("user_id", userId)
           .not("image_url", "is", null);
+
         score += (photoCount || 0) * 3;
       } catch { }
     } catch (e) {
       console.log("Score calc error:", e);
     }
 
-    // 5) Count daily_checkins (1pt each)
+    // 5) Count daily_checkins (Progressive Score: Day 1=1pt, Day 2=2pt, etc.)
     try {
-      const { count: checkinCount } = await supabase
+      const { data: checkins, error: checkinError } = await supabase
         .from("daily_checkins")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId);
-      score += (checkinCount || 0) * 1;
+        .select("checkin_date")
+        .eq("user_id", userId)
+        .order("checkin_date", { ascending: false });
+
+      if (!checkinError && checkins && checkins.length > 0) {
+        const uniqueDates = [...new Set(checkins.map(c => c.checkin_date))];
+        const todayStr = new Date().toISOString().split('T')[0];
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+        let streak = 0;
+        let checkinScore = 0;
+
+        // Check if streak is active (checked in today or yesterday)
+        if (uniqueDates[0] === todayStr || uniqueDates[0] === yesterdayStr) {
+          streak = 1;
+          checkinScore += streak; // Day 1 = +1
+
+          let checkDate = new Date(uniqueDates[0]);
+          for (let i = 1; i < uniqueDates.length; i++) {
+            checkDate.setDate(checkDate.getDate() - 1);
+            if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+              streak++;
+              checkinScore += streak; // Day N = +N
+            } else {
+              break;
+            }
+          }
+        }
+        score += checkinScore;
+      }
     } catch (e) {
-      console.log("Checkin score error (table might not exist yet):", e);
+      console.log("Checkin score error:", e);
     }
 
     if (streakData.isDouble) {
       score *= 2;
     }
+
+    console.log(`FINAL calcScore for userId=${userId}:`, score);
 
     if (userId === session?.user?.id) {
       setMyLogStreak(streakData.streak);
@@ -465,21 +511,44 @@ export default function RankingScreen({ session, onBack }) {
         .eq("user_id", session.user.id)
         .eq("checkin_date", today);
 
-      if (data && data.length > 0) {
-        setHasCheckedInToday(true);
-      }
-
-      // Load last 7 days for the UI grid
-      const { data: history } = await supabase
+      // Determine current streak for the UI grid
+      const { data: allCheckins } = await supabase
         .from("daily_checkins")
         .select("checkin_date")
         .eq("user_id", session.user.id)
-        .order("checkin_date", { ascending: false })
-        .limit(7);
+        .order("checkin_date", { ascending: false });
 
-      if (history) {
-        setCheckinHistory(history.map(h => h.checkin_date));
+      let currentStreak = 0;
+      let alreadyCheckedInToday = false;
+      if (allCheckins && allCheckins.length > 0) {
+        setCheckinHistory(allCheckins.map(h => h.checkin_date)); // History of all check-ins to match dates
+
+        const uniqueDates = [...new Set(allCheckins.map(c => c.checkin_date))];
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+        if (uniqueDates[0] === today) {
+          alreadyCheckedInToday = true;
+          setHasCheckedInToday(true);
+        }
+
+        // The active streak calculation (base points for the next checkin)
+        if (uniqueDates[0] === today || uniqueDates[0] === yesterdayStr) {
+          currentStreak = 1;
+          let checkDate = new Date(uniqueDates[0]);
+          for (let i = 1; i < uniqueDates.length; i++) {
+            checkDate.setDate(checkDate.getDate() - 1);
+            if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+              currentStreak++;
+            } else {
+              break;
+            }
+          }
+        }
       }
+
+      setCurrentCheckinStreak(currentStreak);
     } catch (e) {
       console.log("Check status error:", e);
     }
@@ -489,6 +558,37 @@ export default function RankingScreen({ session, onBack }) {
     if (hasCheckedInToday || !session?.user?.id) return;
 
     try {
+      // 1. Determine streak to know how many points to award
+      let pointsToAward = 1;
+
+      const { data: previousCheckins } = await supabase
+        .from("daily_checkins")
+        .select("checkin_date")
+        .eq("user_id", session.user.id)
+        .order("checkin_date", { ascending: false });
+
+      if (previousCheckins && previousCheckins.length > 0) {
+        const uniqueDates = [...new Set(previousCheckins.map(c => c.checkin_date))];
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+        if (uniqueDates[0] === yesterdayStr) {
+          let streak = 1; // Yesterday is day 1 of history
+          let checkDate = new Date(uniqueDates[0]);
+          for (let i = 1; i < uniqueDates.length; i++) {
+            checkDate.setDate(checkDate.getDate() - 1);
+            if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+              streak++;
+            } else {
+              break;
+            }
+          }
+          pointsToAward = streak + 1; // Today's points = yesterday's streak + 1
+        }
+      }
+
+      // 2. Insert the check-in
       const { error } = await supabase
         .from("daily_checkins")
         .insert({
@@ -500,9 +600,7 @@ export default function RankingScreen({ session, onBack }) {
 
       setHasCheckedInToday(true);
 
-      // OPTIONAL: Update permanent score column if exists
-      // We try to run a simple RPC or direct update. 
-      // Since we don't have an RPC, let's try direct update (fetch + 1)
+      // 3. Update permanent score column if exists
       try {
         const { data: currentProfile } = await supabase
           .from("profiles")
@@ -511,7 +609,7 @@ export default function RankingScreen({ session, onBack }) {
           .single();
 
         if (currentProfile) {
-          const newScore = (currentProfile.score || 0) + 1;
+          const newScore = (currentProfile.score || 0) + pointsToAward;
           await supabase
             .from("profiles")
             .update({ score: newScore })
@@ -521,7 +619,7 @@ export default function RankingScreen({ session, onBack }) {
         console.log("Failed to update permanent score column:", scoreEx);
       }
 
-      Alert.alert("สำเร็จ! 🎉", "คุณได้รับ 1 คะแนนจากการเช็คอินวันนี้");
+      Alert.alert("สำเร็จ! 🎉", `เช็คอินต่อเนื่องรับ ${pointsToAward} คะแนน`);
       loadAll(); // Refresh score and ranking
     } catch (e) {
       console.log("Check-in error:", e);
@@ -575,7 +673,7 @@ export default function RankingScreen({ session, onBack }) {
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name")
+        .select("id, name, avatar_url")
         .or(`name.ilike.%${query}%,email.ilike.%${query}%`)
         .neq("id", session?.user?.id) // Exclude myself
         .limit(10);
@@ -864,18 +962,18 @@ export default function RankingScreen({ session, onBack }) {
                 <View style={styles.checkInHeader}>
                   <View>
                     <Text style={styles.checkInTitle}>Daily Check-in</Text>
-                    <Text style={styles.checkInSub}>Check-in daily to earn +1 pt</Text>
+                    <Text style={styles.checkInSub}>Check-in daily for progressive points!</Text>
                   </View>
                   <Ionicons name="calendar" size={24} color="#26A69A" />
                 </View>
 
                 <View style={styles.daysGrid}>
                   {[...Array(7)].map((_, i) => {
-                    const date = new Date();
-                    date.setDate(date.getDate() + i); // i=0 is today, i=1 is tomorrow...
-                    const dateStr = date.toISOString().split('T')[0];
-                    const isToday = i === 0;
-                    const isDone = checkinHistory.includes(dateStr) || (isToday && hasCheckedInToday);
+                    const cycleStart = Math.floor((currentCheckinStreak - (hasCheckedInToday && currentCheckinStreak > 0 ? 1 : 0)) / 7) * 7;
+                    const dayNum = cycleStart + i + 1;
+
+                    const isDone = dayNum <= currentCheckinStreak;
+                    const isToday = !hasCheckedInToday && dayNum === currentCheckinStreak + 1;
 
                     return (
                       <View key={i} style={styles.dayItem}>
@@ -887,10 +985,10 @@ export default function RankingScreen({ session, onBack }) {
                           {isDone ? (
                             <Ionicons name="checkmark-sharp" size={16} color="#FFF" />
                           ) : (
-                            <Text style={[styles.dayPoint, isToday && { color: '#26A69A' }]}>+1</Text>
+                            <Text style={[styles.dayPoint, isToday && { color: '#26A69A' }]}>+{dayNum}</Text>
                           )}
                         </View>
-                        <Text style={styles.dayLabel}>{isToday ? "Today" : `Day ${i + 1}`}</Text>
+                        <Text style={styles.dayLabel}>{isToday ? "Today" : `Day ${dayNum}`}</Text>
                       </View>
                     );
                   })}
@@ -923,7 +1021,7 @@ export default function RankingScreen({ session, onBack }) {
                   <View style={styles.myCardContent}>
                     <Image
                       source={{
-                        uri: "https://placekitten.com/80/80",
+                        uri: myProfile.avatar_url || "https://placekitten.com/80/80",
                       }}
                       style={styles.myAvatar}
                     />
@@ -964,7 +1062,7 @@ export default function RankingScreen({ session, onBack }) {
                     >
                       <View style={styles.requestInfo}>
                         <Image
-                          source={{ uri: "https://placekitten.com/40/40" }}
+                          source={{ uri: req.avatar_url || "https://placekitten.com/40/40" }}
                           style={styles.requestAvatar}
                         />
                         <View style={{ flex: 1 }}>
@@ -1002,18 +1100,19 @@ export default function RankingScreen({ session, onBack }) {
               {ranking.map((item, index) => {
                 const rank = index + 1;
                 return (
-                  <View
+                  <TouchableOpacity
                     key={item.id}
                     style={[
                       styles.rankCard,
                       item.isMe && styles.rankCardMe,
                       rank <= 3 && styles.rankCardTop,
                     ]}
+                    activeOpacity={1} // Prevents click visual feedback since it does nothing
                   >
                     <RankBadge rank={rank} />
                     <Image
                       source={{
-                        uri: "https://placekitten.com/50/50",
+                        uri: item.avatar_url || "https://placekitten.com/50/50",
                       }}
                       style={[
                         styles.rankAvatar,
@@ -1044,7 +1143,7 @@ export default function RankingScreen({ session, onBack }) {
                         <Text style={styles.topBadgeText}>TOP {rank}</Text>
                       </View>
                     )}
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
 
@@ -1162,7 +1261,7 @@ export default function RankingScreen({ session, onBack }) {
                     <View style={styles.resultCard}>
                       <Image
                         source={{
-                          uri: "https://placekitten.com/50/50",
+                          uri: item.avatar_url || "https://placekitten.com/50/50",
                         }}
                         style={styles.resultAvatar}
                       />
