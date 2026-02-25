@@ -60,8 +60,8 @@ const CustomDropdown = ({ value, onValueChange }) => {
     const [isOpen, setIsOpen] = useState(false);
  
     const options = [
-        { label: 'Dry Food', value: 'dry' },
-        { label: 'Wet Food', value: 'wet' },
+        { label: 'Dry Food', value: 'dry_food' },
+        { label: 'Wet Food', value: 'wet_food' },
         { label: 'BARF', value: 'barf' }
     ];
  
@@ -132,15 +132,21 @@ const CustomDropdown = ({ value, onValueChange }) => {
     );
 };
 
-// ==========================================
-// 1. หน้า NormalView
-// ==========================================
-const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) => {
-    const { onBack } = props;
-    const insets = useSafeAreaInsets();
 
-    const { foodType, consumeMeals, foodIntake, waterIntake, urineLevel, stoolLevel } = state;
-    const { setFoodType, setConsumeMeals, setFoodIntake, setWaterIntake, setUrineLevel, setStoolLevel } = setters;
+const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) => {
+    const { session, onBack, initialDate } = props;
+    const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
+
+    const {
+        foodType, consumeMeals, foodIntake, waterIntake, urineLevel, stoolLevel
+    } = state;
+
+    const {
+        setFoodType, setConsumeMeals, setFoodIntake, setWaterIntake, setUrineLevel, setStoolLevel
+    } = setters;
+
+    // Simplified: No internal fetchCatId or handleSave needed as they are lifted to LogDaily
+
 
     const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34', textLabel: '#333' };
  
@@ -274,12 +280,12 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
     );
 };
 
-// ==========================================
-// 2. หน้า SomethingOffView
-// ==========================================
+
+
 const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loading }) => {
-    const { onBack } = props;
-    const insets = useSafeAreaInsets();
+    const { session, onBack, initialDate } = props;
+    const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
+
 
     const {
         isVomitChecked, vomitColor,
@@ -302,6 +308,10 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
             setTargetTags([...currentTags, tag]);
         }
     };
+
+
+    // Simplified: No internal catId or handleSave needed as they are lifted to LogDaily
+
 
     const theme = { cardBg: '#FFFDFB', borderColor: '#E8DED6', textDark: '#D46B13', textLabel: '#333' };
  
@@ -474,8 +484,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
         </View>
     );
 };
- 
- 
+
 export default function LogDaily(props) {
     const { session, onBack, initialDate } = props;
     const [status, setStatus] = useState('Normal');
@@ -546,36 +555,63 @@ export default function LogDaily(props) {
     };
 
     const saveData = async () => {
+        if (!catId) return Alert.alert("Error", "No cat profile found");
         setLoading(true);
         const logDate = initialDate ? new Date(initialDate) : new Date();
+        const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
 
-        const payload = {
-            cat_id: catId,
-            log_date: `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`,
+        try {
+            // Step 1: UPSERT daily_logs (parent)
+            const { data: dailyLog, error: dailyError } = await supabase
+                .from('daily_logs')
+                .upsert({ 
+                    cat_id: catId, 
+                    log_date: logDateStr, 
+                    log_type: (isVomitChecked || isDiarrheaChecked || behaviorTags.length > 0 || respiratoryTags.length > 0) ? 'something_off' : 'normal' 
+                }, { onConflict: 'cat_id, log_date' })
+                .select('id')
+                .single();
 
-            // From Normal
-            food_type_enum: foodType,
-            meals_per_day: consumeMeals !== null && consumeMeals !== '' ? Number(consumeMeals) : null,
-            food_intake: foodIntake !== null && foodIntake !== '' ? Number(foodIntake) : null,
-            water_level: waterIntake !== null && waterIntake !== '' ? Number(waterIntake) : null,
-            urine_level_enum: getLevelValue(urineLevel),
-            stool_level_enum: getLevelValue(stoolLevel),
+            if (dailyError) throw dailyError;
 
+            // Step 2: UPSERT normal_logs (child) - Use upsert with onConflict on daily_log_id
+            const { error: normalError } = await supabase
+                .from('normal_logs')
+                .upsert({
+                    daily_log_id: dailyLog.id,
+                    food_type: foodType,
+                    meals_per_day: consumeMeals !== null && consumeMeals !== '' ? Number(consumeMeals) : 0,
+                    total_food_grams: foodIntake !== null && foodIntake !== '' ? Number(foodIntake) : 0,
+                    water_ml_per_day: waterIntake !== null && waterIntake !== '' ? Number(waterIntake) : 0,
+                    urine_level: getLevelValue(urineLevel),
+                    stool_level: getLevelValue(stoolLevel),
+                }, { onConflict: 'daily_log_id' });
 
-            // From Something off
-            vomit_color_enum: isVomitChecked ? formatToEnum(vomitColor) : null,
-            diarrhea_color_enum: isDiarrheaChecked ? formatToEnum(diarrheaColor) : null,
-            behavior_tags: behaviorTags.length > 0 ? behaviorTags : null,
-            respiratory_tags: respiratoryTags.length > 0 ? respiratoryTags : null,
-            notes: notes || null,
-        };
+            if (normalError) throw normalError;
 
-        console.log("Saving payload data:", JSON.stringify(payload, null, 2));
+            // Step 3: UPSERT something_off_logs (child) - Use upsert with onConflict on daily_log_id
+            const { error: offError } = await supabase
+                .from('something_off_logs')
+                .upsert({
+                    daily_log_id: dailyLog.id,
+                    has_vomit: isVomitChecked,
+                    vomit_type: isVomitChecked ? formatToEnum(vomitColor) : null,
+                    has_diarrhea: isDiarrheaChecked,
+                    diarrhea_type: isDiarrheaChecked ? formatToEnum(diarrheaColor) : null,
+                    behavior_energy: behaviorTags.length > 0 ? behaviorTags : null,
+                    respiratory_physical: respiratoryTags.length > 0 ? respiratoryTags : null,
+                    notes: notes || null,
+                }, { onConflict: 'daily_log_id' });
 
-        const { error } = await supabase.from('daily_logs').upsert(payload, { onConflict: 'cat_id, log_date' });
-        setLoading(false);
-        if (error) Alert.alert('Error', error.message);
-        else Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
+            if (offError) throw offError;
+
+            Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
+        } catch (err) {
+            console.error('Save error:', err);
+            Alert.alert('Error', err.message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const state = {

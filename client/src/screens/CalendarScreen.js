@@ -48,7 +48,7 @@ export default function CalendarScreen({ onNavigate, session }) {
     const fetchLog = async () => {
       if (!catId || !selectedDate) return;
       
-      // Use local date string instead of UTC
+      setLoading(true);
       const year = selectedDate.getFullYear();
       const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
       const day = String(selectedDate.getDate()).padStart(2, '0');
@@ -56,14 +56,15 @@ export default function CalendarScreen({ onNavigate, session }) {
       
       const { data, error } = await supabase
         .from('daily_logs')
-        .select('*')
+        .select('*, normal_logs(*), something_off_logs(*)')
         .eq('cat_id', catId)
         .eq('log_date', dateString)
         .maybeSingle(); 
       
+      if (error) console.error("Error fetching calendar log:", error);
       setDailyLog(data || null);
-      setLoading(false);
-    };
+      
+      setLoading(false);    };
     fetchLog();
   }, [selectedDate, catId]);
 
@@ -170,12 +171,16 @@ export default function CalendarScreen({ onNavigate, session }) {
             <View style={styles.summaryCard}>
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>FOOD</Text>
-                <Text style={styles.summaryValue}>{dailyLog.food_intake || '-'} g</Text>
+                <Text style={styles.summaryValue}>
+                  {dailyLog.normal_logs?.total_food_grams ?? '-'} g
+                </Text>
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>WATER</Text>
-                <Text style={styles.summaryValue}>{dailyLog.water_level || '-'} ml</Text>
+                <Text style={styles.summaryValue}>
+                  {dailyLog.normal_logs?.water_ml_per_day ?? '-'} ml
+                </Text>
               </View>
             </View>
 
@@ -185,46 +190,64 @@ export default function CalendarScreen({ onNavigate, session }) {
                 <MaterialCommunityIcons name="water-percent" size={18} color="#147C78" />
                 <Text style={styles.textLogLabel}>Urine: </Text>
                 <Text style={styles.textLogValue}>
-                   {dailyLog.urine_level_enum?.replace(/_/g, ' ') || '-'}
-                   {dailyLog.urine_color_enum ? ` (${dailyLog.urine_color_enum.replace(/_/g, ' ')})` : ''}
+                   {dailyLog.normal_logs?.urine_level?.replace(/_/g, ' ') || '-'}
                 </Text>
              </View>
 
              <View style={styles.textLogRow}>
-                <MaterialCommunityIcons name="poop" size={18} color="#147C78" />
+                <MaterialCommunityIcons name="emoticon-poop" size={18} color="#147C78" />
                 <Text style={styles.textLogLabel}>Stool: </Text>
                 <Text style={styles.textLogValue}>
-                   {dailyLog.stool_level_enum?.replace(/_/g, ' ') || '-'}
-                   {dailyLog.stool_color_enum ? ` (${dailyLog.stool_color_enum.replace(/_/g, ' ')})` : ''}
+                   {dailyLog.normal_logs?.stool_level?.replace(/_/g, ' ') || '-'}
                 </Text>
              </View>
 
-             {(dailyLog.vomit_level_enum || dailyLog.vomit_color_enum) && (
-                <View style={styles.textLogRow}>
-                   <MaterialCommunityIcons name="alert-circle" size={18} color="#D32F2F" />
-                   <Text style={[styles.textLogLabel, {color: '#D32F2F'}]}>Vomit: </Text>
-                   <Text style={styles.textLogValue}>
-                      {dailyLog.vomit_level_enum?.replace(/_/g, ' ') || '-'}
-                      {dailyLog.vomit_color_enum ? ` (${dailyLog.vomit_color_enum.replace(/_/g, ' ')})` : ''}
-                   </Text>
-                </View>
-             )}
+              {/* something_off_logs section */}
+              {dailyLog.something_off_logs && (
+                <>
+                  <View style={{ height: 1.5, backgroundColor: 'rgba(20, 124, 120, 0.2)', marginVertical: 10 }} />
+                  
+                  {dailyLog.something_off_logs.has_vomit && (
+                    <View style={styles.textLogRow}>
+                      <MaterialCommunityIcons name="alert-circle" size={18} color="#D32F2F" />
+                      <Text style={[styles.textLogLabel, { color: '#D32F2F' }]}>Vomit: </Text>
+                      <Text style={[styles.textLogValue, { color: '#D32F2F' }]}>
+                        {dailyLog.something_off_logs.vomit_type?.replace(/_/g, ' ') || 'Yes'}
+                      </Text>
+                    </View>
+                  )}
 
-             {dailyLog.behavior_enum && (
-                <View style={styles.textLogRow}>
-                   <MaterialCommunityIcons name="cat" size={18} color="#147C78" />
-                   <Text style={styles.textLogLabel}>Behavior: </Text>
-                   <Text style={styles.textLogValue}>{dailyLog.behavior_enum.replace(/_/g, ' ')}</Text>
-                </View>
-             )}
+                  {dailyLog.something_off_logs.has_diarrhea && (
+                    <View style={styles.textLogRow}>
+                      <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#D32F2F" />
+                      <Text style={[styles.textLogLabel, { color: '#D32F2F' }]}>Diarrhea: </Text>
+                      <Text style={[styles.textLogValue, { color: '#D32F2F' }]}>
+                        {dailyLog.something_off_logs.diarrhea_type?.replace(/_/g, ' ') || 'Yes'}
+                      </Text>
+                    </View>
+                  )}
 
-             {dailyLog.notes && (
-                <View style={[styles.textLogRow, {alignItems: 'flex-start'}]}>
-                   <MaterialCommunityIcons name="note-text" size={18} color="#147C78" />
-                   <Text style={styles.textLogLabel}>Notes: </Text>
-                   <Text style={[styles.textLogValue, {flex: 1}]}>{dailyLog.notes}</Text>
-                </View>
-             )}
+                  {dailyLog.something_off_logs.behavior_energy && (
+                    <View style={styles.textLogRow}>
+                      <MaterialCommunityIcons name="cat" size={18} color="#147C78" />
+                      <Text style={styles.textLogLabel}>Behavior: </Text>
+                      <Text style={[styles.textLogValue, { flex: 1 }]}>
+                        {Array.isArray(dailyLog.something_off_logs.behavior_energy) 
+                          ? dailyLog.something_off_logs.behavior_energy.join(', ')
+                          : dailyLog.something_off_logs.behavior_energy}
+                      </Text>
+                    </View>
+                  )}
+
+                  {dailyLog.something_off_logs.notes && (
+                    <View style={[styles.textLogRow, { alignItems: 'flex-start' }]}>
+                      <MaterialCommunityIcons name="note-text" size={18} color="#147C78" />
+                      <Text style={styles.textLogLabel}>Notes: </Text>
+                      <Text style={[styles.textLogValue, { flex: 1 }]}>{dailyLog.something_off_logs.notes}</Text>
+                    </View>
+                  )}
+                </>
+              )}
           </View>
         </View>
         ) : (
