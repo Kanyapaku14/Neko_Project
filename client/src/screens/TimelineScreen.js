@@ -39,10 +39,10 @@ export default function TimelineScreen({ session, onBack }) {
             
             setCat(catData);
 
-            // 2. Get All Logs
+            // 2. Get All Logs with child tables
             const { data: logsData, error: logsError } = await supabase
                 .from('daily_logs')
-                .select('*')
+                .select('*, normal_logs(*), something_off_logs(*)')
                 .eq('cat_id', catData.id)
                 .order('log_date', { ascending: false });
 
@@ -142,8 +142,12 @@ export default function TimelineScreen({ session, onBack }) {
                                                     </Text>
                                                 </View>
                                                 <Text style={styles.cardDetail}>
-                                                    Appetite {log.food_intake > 80 ? 'good' : 'fair'}, 
-                                                    energy levels {log.behavior_enum ? log.behavior_enum : 'normal'}. 
+                                                    Appetite {log.normal_logs?.total_food_grams > 80 ? 'good' : 'fair'}, 
+                                                    energy levels {log.something_off_logs?.behavior_energy 
+                                                        ? (Array.isArray(log.something_off_logs.behavior_energy) 
+                                                            ? log.something_off_logs.behavior_energy.join(', ') 
+                                                            : log.something_off_logs.behavior_energy)
+                                                        : 'normal'}. 
                                                     {analysis.alerts.length > 0 ? `Issues: ${analysis.alerts.join(', ')}` : ' No issues reported.'}
                                                 </Text>
                                             </View>

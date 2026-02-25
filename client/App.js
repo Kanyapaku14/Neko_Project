@@ -235,6 +235,23 @@ export default function App() {
         return <CameraScreen onNavigate={(screen) => setAuthScreen(screen)} />;
       }
 
+      // ✅ Dashboard Screen
+      if (authScreen === 'Dashboard') {
+        return <Dashboard
+          session={session}
+          onBack={() => setAuthScreen('Home')}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+
+      // ✅ Timeline Screen
+      if (authScreen === 'Timeline') {
+        return <TimelineScreen
+          session={session}
+          onBack={() => setAuthScreen('Dashboard')}
+        />;
+      }
+
       // ✅ Default Home
       return <HomeScreen
         onLogout={navigateToSignIn}

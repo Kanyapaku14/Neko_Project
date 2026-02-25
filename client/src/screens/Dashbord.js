@@ -50,7 +50,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       // 2. ดึง Log ย้อนหลัง 7 วัน (เรียงจากล่าสุดไปเก่าสุด)
       const { data: logsData, error: logsError } = await supabase
         .from("daily_logs")
-        .select("*") 
+        .select("*, normal_logs(*), something_off_logs(*)") 
         .eq("cat_id", catData.id)
         .order("log_date", { ascending: false }) 
         .limit(7);
@@ -91,8 +91,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         return `${date.getDate()}/${date.getMonth() + 1}`;
       });
 
-      const foodData = chartLogs.map((log) => log.food_intake || 0);
-      const waterData = chartLogs.map((log) => log.water_level || 0); // หรือ water_intake ตาม DB คุณ
+      const foodData = chartLogs.map((log) => log.normal_logs?.total_food_grams || 0);
+      const waterData = chartLogs.map((log) => log.normal_logs?.water_ml_per_day || 0);
 
       setChartData({
         labels: labels,

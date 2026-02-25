@@ -58,8 +58,8 @@ const CustomDropdown = ({ value, onValueChange }) => {
     const [isOpen, setIsOpen] = useState(false);
 
     const options = [
-        { label: 'Dry Food', value: 'dry' },
-        { label: 'Wet Food', value: 'wet' },
+        { label: 'Dry Food', value: 'dry_food' },
+        { label: 'Wet Food', value: 'wet_food' },
         { label: 'BARF', value: 'barf' }
     ];
 
@@ -154,28 +154,43 @@ const NormalView = ({ props, setStatus }) => {
         if (!catId) return Alert.alert("Error", "No cat profile found");
         setLoading(true);
         const logDate = initialDate ? new Date(initialDate) : new Date();
+        const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
 
-        const payload = {
-            cat_id: catId,
-            log_date: `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`,
-            food_type_enum: foodType,
-            meals_per_day: Number(consumeMeals) || 0,
-            food_intake: Number(foodIntake) || 0,
-            water_level: Number(waterIntake) || 0,
-            urine_level_enum: getLevelValue(urineLevel),
-            stool_level_enum: getLevelValue(stoolLevel),
-            vomit_level_enum: null,
-            urine_color_enum: null,
-            stool_color_enum: null,
-            behavior_enum: null,
-        };
+        try {
+            // Step 1: UPSERT daily_logs (parent)
+            const { data: dailyLog, error: dailyError } = await supabase
+                .from('daily_logs')
+                .upsert({ cat_id: catId, log_date: logDateStr, log_type: 'normal' }, { onConflict: 'cat_id, log_date' })
+                .select('id')
+                .single();
 
-        console.log('SENDING TO SUPABASE (v1.8) 👉', JSON.stringify(payload, null, 2));
+            if (dailyError) throw dailyError;
 
-        const { error } = await supabase.from('daily_logs').upsert(payload, { onConflict: 'cat_id, log_date' });
-        setLoading(false);
-        if (error) Alert.alert('Error', error.message);
-        else Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
+            // Step 2: DELETE + INSERT normal_logs (child) - จัดการเฉพาะตาราง normal_logs แต่อาการจาก something_off_logs จะยังอยู่ครบ
+            await supabase.from('normal_logs').delete().eq('daily_log_id', dailyLog.id);
+            
+            const { error: normalError } = await supabase
+                .from('normal_logs')
+                .insert({
+                    daily_log_id: dailyLog.id,
+                    food_type: foodType,
+                    meals_per_day: Number(consumeMeals) || 0,
+                    total_food_grams: Number(foodIntake) || 0,
+                    water_ml_per_day: Number(waterIntake) || 0,
+                    urine_level: getLevelValue(urineLevel),
+                    stool_level: getLevelValue(stoolLevel),
+                    notes: null,
+                });
+
+            if (normalError) throw normalError;
+
+            Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
+        } catch (err) {
+            console.error('Save error:', err);
+            Alert.alert('Error', err.message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34', textLabel: '#333' };
@@ -345,25 +360,72 @@ const SomethingOffView = ({ props, setStatus }) => {
     };
 
     const handleSave = async () => {
+        if (!catId) return Alert.alert("Error", "No cat profile found");
         setLoading(true);
         const logDate = initialDate ? new Date(initialDate) : new Date();
+        const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
 
-        const payload = {
-            cat_id: catId,
-            log_date: `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`,
-            // ข้อมูลสำหรับ Something off
-            vomit_color_enum: isVomitChecked ? formatToEnum(vomitColor) : null,
-            // ใน Database ของคุณต้องเพิ่ม field มารองรับ diarrhea_color, behavior_tags, respiratory_tags ด้วยนะครับ
-            diarrhea_color_enum: isDiarrheaChecked ? formatToEnum(diarrheaColor) : null,
-            behavior_tags: behaviorTags.length > 0 ? behaviorTags : null,
-            respiratory_tags: respiratoryTags.length > 0 ? respiratoryTags : null,
-            notes: notes || null,
-        };
+        try {
+            // Check if Normal log exists for this date first
+            const { data: existingDaily } = await supabase
+                .from('daily_logs')
+                .select('id')
+                .eq('cat_id', catId)
+                .eq('log_date', logDateStr)
+                .maybeSingle();
 
-        const { error } = await supabase.from('daily_logs').upsert(payload, { onConflict: 'cat_id, log_date' });
-        setLoading(false);
-        if (error) Alert.alert('Error', error.message);
-        else Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
+            let normalExists = false;
+            if (existingDaily) {
+                const { data: normalLog } = await supabase
+                    .from('normal_logs')
+                    .select('id')
+                    .eq('daily_log_id', existingDaily.id)
+                    .maybeSingle();
+                if (normalLog) normalExists = true;
+            }
+
+            if (!normalExists) {
+                setLoading(false);
+                return Alert.alert(
+                    "กรุณากรอกข้อมูล Normal ก่อน",
+                    "คุณต้องบันทึกข้อมูลการกินและขับถ่ายปกติก่อนที่จะบันทึกอาการผิดปกติของวันนี้"
+                );
+            }
+
+            // Step 1: UPSERT daily_logs (parent)
+            const { data: dailyLog, error: dailyError } = await supabase
+                .from('daily_logs')
+                .upsert({ cat_id: catId, log_date: logDateStr, log_type: 'something_off' }, { onConflict: 'cat_id, log_date' })
+                .select('id')
+                .single();
+
+            if (dailyError) throw dailyError;
+
+            // Step 2: DELETE + INSERT something_off_logs (child) - จัดการเฉพาะตารางนี้ เพื่อให้ข้อมูลฝั่ง Normal ไม่หาย
+            await supabase.from('something_off_logs').delete().eq('daily_log_id', dailyLog.id);
+
+            const { error: offError } = await supabase
+                .from('something_off_logs')
+                .insert({
+                    daily_log_id: dailyLog.id,
+                    has_vomit: isVomitChecked,
+                    vomit_type: isVomitChecked ? vomitColor : null,
+                    has_diarrhea: isDiarrheaChecked,
+                    diarrhea_type: isDiarrheaChecked ? diarrheaColor : null,
+                    behavior_energy: behaviorTags.length > 0 ? behaviorTags : null,
+                    respiratory_physical: respiratoryTags.length > 0 ? respiratoryTags : null,
+                    notes: notes || null,
+                });
+
+            if (offError) throw offError;
+
+            Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
+        } catch (err) {
+            console.error('Save error:', err);
+            Alert.alert('Error', err.message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const theme = { cardBg: '#FFFDFB', borderColor: '#E8DED6', textDark: '#D46B13', textLabel: '#333' };
