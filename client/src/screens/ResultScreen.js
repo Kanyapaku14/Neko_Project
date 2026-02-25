@@ -7,8 +7,9 @@ import {
   ActivityIndicator,
   Alert,
   StyleSheet,
-  Modal // ✅ Import Modal เพิ่มเข้ามา
+  Modal
 } from "react-native";
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from "expo-linear-gradient";
 import styles from "../styles/resultStyles";
 
@@ -105,19 +106,15 @@ const ResultScreenFactory = {
 };
 
 export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
+  const insets = useSafeAreaInsets();
   const [loadingData, setLoadingData] = useState(true);
   const [loadingGuidance, setLoadingGuidance] = useState(false);
-
-  // ✅ State สำหรับควบคุมการเปิด/ปิด Pop-up แจ้งเตือนเมื่อไม่มีข้อมูล
   const [showNoDataModal, setShowNoDataModal] = useState(false);
-
   const [selectedConditionValue, setSelectedConditionValue] = useState(null);
   const [selectedConditionLabel, setSelectedConditionLabel] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-
   const [preventionData, setPreventionData] = useState(null);
   const [counselingData, setCounselingData] = useState(null);
-
   const [riskData, setRiskData] = useState(INITIAL_RISK_DATA);
   const [overallRisk, setOverallRisk] = useState("Unknown");
   const [summaryTitle, setSummaryTitle] = useState("");
@@ -128,7 +125,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
   useEffect(() => {
     const loadInitialData = async () => {
       if (!catId) {
-        setShowNoDataModal(true); // เปิด Modal แจ้งเตือน
+        setShowNoDataModal(true);
         setLoadingData(false);
         return;
       }
@@ -147,9 +144,8 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
           setSummaryTitle(result.summaryTitle || "");
           setSummaryDesc(result.summaryDesc || "");
 
-          // ตรวจสอบข้อมูลว่าง
           if (result.overallRisk === "No Data") {
-            setShowNoDataModal(true); // เปิด Modal แทน Alert แบบเดิม
+            setShowNoDataModal(true);
           }
 
         } else {
@@ -208,9 +204,8 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
       locations={[0.42, 1]}
       style={styles.container}
     >
-      {/* ========================================================= */}
-      {/* ✅ Custom Modal (Pop-up แบบแต่งสีได้) */}
-      {/* ========================================================= */}
+      <View style={{ height: insets.top }} />
+
       <Modal
         animationType="fade"
         transparent={true}
@@ -219,23 +214,17 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
       >
         <View style={customStyles.modalOverlay}>
           <View style={customStyles.modalContainer}>
-
             <Text style={customStyles.modalTitle}>ยังไม่มีข้อมูลสุขภาพ</Text>
-
             <Text style={customStyles.modalText}>
               AI ต้องการข้อมูลประจำวัน (Daily Log) เพื่อใช้ประเมินความเสี่ยง ไปบันทึกข้อมูลของน้องแมวตอนนี้เลยไหม?
             </Text>
-
             <View style={customStyles.modalButtonRow}>
-              {/* ปุ่มสีเทาอ่อน (Cancel) */}
               <TouchableOpacity
                 style={[customStyles.modalButton, customStyles.modalButtonCancel]}
                 onPress={() => setShowNoDataModal(false)}
               >
                 <Text style={customStyles.modalButtonCancelText}>ไว้ทีหลัง</Text>
               </TouchableOpacity>
-
-              {/* ปุ่มสีเด่น (OK -> ไปหน้า LogDaily) */}
               <TouchableOpacity
                 style={[customStyles.modalButton, customStyles.modalButtonConfirm]}
                 onPress={() => {
@@ -246,13 +235,10 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
                 <Text style={customStyles.modalButtonConfirmText}>บันทึกเลย</Text>
               </TouchableOpacity>
             </View>
-
           </View>
         </View>
       </Modal>
-      {/* ========================================================= */}
 
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack}><Text style={styles.backArrow}>‹</Text></TouchableOpacity>
         <Text style={styles.headerTitle}>Assessment</Text>
@@ -299,18 +285,26 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
 
         <Text style={styles.sectionTitle}>Recommended Approach</Text>
 
-        <View style={[styles.card, { zIndex: 2000 }]}>
+        {/* Card 1: Disease Prevention */}
+        <View style={[styles.card, { zIndex: 2000, elevation: 0, shadowOpacity: 0 }]}>
           <Text style={styles.cardTitle}>Disease Prevention</Text>
-          <View style={{ marginBottom: 15, zIndex: 3000 }}>
+
+          <View style={{ marginBottom: 15, zIndex: 3000, width: '55%' }}>
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => setIsDropdownOpen(!isDropdownOpen)}
               style={customStyles.dropdownHeader}
             >
-              <Text style={{ fontSize: 16, color: selectedConditionLabel ? '#000' : '#888' }}>
-                {selectedConditionLabel || "เลือกโรคเพื่อดูคำแนะนำ..."}
+              {/* ✅ แก้ไข: ใช้ flexShrink: 1 แทน flex: 1 และใส่ paddingRight เพื่อป้องกันไม่ให้ข้อความไปดันลูกศร */}
+              <Text
+                style={{ fontSize: 13, color: selectedConditionLabel ? '#000' : '#888', flexShrink: 1, paddingRight: 8 }}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {selectedConditionLabel || "เลือกโรค..."}
               </Text>
-              <Text style={{ fontSize: 14, color: '#666' }}>{isDropdownOpen ? "▲" : "▼"}</Text>
+              {/* ลูกศรตอนนี้จะเกาะอยู่ริมขวาเสมอ ไม่กระเด็นออกนอกกล่องแล้ว */}
+              <Text style={{ fontSize: 12, color: '#666' }}>{isDropdownOpen ? "▲" : "▼"}</Text>
             </TouchableOpacity>
 
             {isDropdownOpen && (
@@ -325,7 +319,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
                       setIsDropdownOpen(false);
                     }}
                   >
-                    <Text style={{ fontSize: 16, color: selectedConditionValue === item.value ? '#1abc9c' : '#333' }}>
+                    <Text style={{ fontSize: 14, color: selectedConditionValue === item.value ? '#1abc9c' : '#333' }}>
                       {item.label}
                     </Text>
                   </TouchableOpacity>
@@ -357,7 +351,8 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
           )}
         </View>
 
-        <View style={[styles.card, { zIndex: 1000 }]}>
+        {/* Card 2: Counseling */}
+        <View style={[styles.card, { zIndex: 1000, marginTop: 5, elevation: 0, shadowOpacity: 0 }]}>
           <Text style={styles.cardTitle}>Counseling</Text>
           {loadingGuidance ? (
             <View style={styles.loadingContainer}>
@@ -387,15 +382,25 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
 }
 
 const customStyles = StyleSheet.create({
-  dropdownHeader: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 50 },
-  dropdownList: { marginTop: 5, borderWidth: 1, borderColor: '#eee', borderRadius: 8, backgroundColor: '#fff', position: 'absolute', top: 50, left: 0, right: 0, zIndex: 9999, elevation: 5 },
-  dropdownItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  // ✅ แก้ไข: เพิ่ม paddingHorizontal: 12 เพื่อให้ลูกศรมีระยะห่างจากขอบขวา และข้อความไม่ชิดซ้ายจนเกินไป
+  dropdownHeader: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    height: 38
+  },
+  dropdownList: { marginTop: 4, borderWidth: 1, borderColor: '#eee', borderRadius: 8, backgroundColor: '#fff', position: 'absolute', top: 38, left: 0, right: 0, zIndex: 9999, elevation: 5 },
+  dropdownItem: { padding: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   dropdownItemActive: { backgroundColor: '#e6fffa' },
 
-  // ✅ สไตล์สำหรับ Custom Modal (Pop-up)
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)', // พื้นหลังดำโปร่งใส
+    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'center',
     alignItems: 'center'
   },
@@ -437,18 +442,18 @@ const customStyles = StyleSheet.create({
     marginHorizontal: 6
   },
   modalButtonCancel: {
-    backgroundColor: '#F0F0F0' // สีเทาอ่อนมากๆ ดูไม่เด่น
+    backgroundColor: '#F0F0F0'
   },
   modalButtonConfirm: {
-    backgroundColor: '#1abc9c' // สีเขียวมิ้นต์ สีหลักแอปให้ดูเด่นน่ากด
+    backgroundColor: '#1abc9c'
   },
   modalButtonCancelText: {
-    color: '#7f8c8d', // อักษรสีเทาเข้ม
+    color: '#7f8c8d',
     fontWeight: 'bold',
     fontSize: 15
   },
   modalButtonConfirmText: {
-    color: '#fff', // อักษรสีขาว
+    color: '#fff',
     fontWeight: 'bold',
     fontSize: 15
   }
