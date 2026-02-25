@@ -3,13 +3,14 @@
  */
 
 export const getHealthStatus = (score) => {
-  if (score >= 80) return { label: "Excellent", color: "#6FCF97", text: "Excellent health condition" };
-  if (score >= 60) return { label: "Good", color: "#2D9CDB", text: "Generally good health" };
-  if (score >= 40) return { label: "Fair", color: "#F2C94C", text: "Requires close monitoring" };
-  return { label: "Attention", color: "#EB5757", text: "Consult a veterinarian" };
+    if (score >= 80) return { label: "Excellent", color: "#6FCF97", text: "Excellent health condition" };
+    if (score >= 60) return { label: "Good", color: "#2D9CDB", text: "Generally good health" };
+    if (score >= 40) return { label: "Fair", color: "#F2C94C", text: "Requires close monitoring" };
+    return { label: "Attention", color: "#EB5757", text: "Consult a veterinarian" };
 };
 
 export const analyzeHealthLog = (log) => {
+
   // log จะมาในรูปแบบที่มี child arrays: normal_logs: [...], something_off_logs: [...]
   if (!log) return { score: 0, redFlags: 0, alerts: [], status: getHealthStatus(0) };
 
@@ -100,10 +101,10 @@ export const analyzeHealthLog = (log) => {
   // Clamp score
   score = Math.max(0, Math.min(100, score));
 
-  return {
-    score,
-    redFlags,
-    alerts,
-    status: getHealthStatus(score)
-  };
+    return {
+        score,
+        redFlags,
+        alerts,
+        status: getHealthStatus(score)
+    };
 };

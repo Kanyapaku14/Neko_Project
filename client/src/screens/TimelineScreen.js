@@ -31,23 +31,37 @@ export default function TimelineScreen({ session, onBack }) {
                 console.error("Error fetching cat:", catError);
                 throw catError;
             }
-            
+
             if (!catData) {
                 setLoading(false);
                 return;
             }
-            
+
             setCat(catData);
 
             // 2. Get All Logs with child tables
             const { data: logsData, error: logsError } = await supabase
                 .from('daily_logs')
                 .select('*, normal_logs(*), something_off_logs(*)')
+
                 .eq('cat_id', catData.id)
                 .order('log_date', { ascending: false });
 
             if (logsError) throw logsError;
-            setLogs(logsData || []);
+
+            // Unify data
+            const unifiedLogs = (logsData || []).map(log => {
+                const details = log.log_type === 'something_off'
+                    ? (log.something_off_logs?.[0] || log.something_off_logs)
+                    : (log.normal_logs?.[0] || log.normal_logs);
+
+                return {
+                    ...log,
+                    ...(details || {})
+                };
+            });
+
+            setLogs(unifiedLogs);
 
         } catch (error) {
             console.error("Error fetching timeline:", error);
@@ -65,7 +79,7 @@ export default function TimelineScreen({ session, onBack }) {
 
         if (date.toDateString() === today.toDateString()) return "Today";
         if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
-        
+
         return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     };
 
@@ -82,7 +96,7 @@ export default function TimelineScreen({ session, onBack }) {
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                     <Ionicons name="chevron-back" size={24} color="#00695C" />
+                    <Ionicons name="chevron-back" size={24} color="#00695C" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Health Timeline</Text>
                 <View style={{ width: 24 }} />
@@ -91,10 +105,10 @@ export default function TimelineScreen({ session, onBack }) {
             {/* Cat Info */}
             <View style={styles.catInfo}>
                 {/* Avatar Placeholder */}
-                 <View style={styles.avatarContainer}>
-                     <Image source={require('../../assets/cioncat.jpg')} style={styles.avatar} /> 
-                 </View>
-                 <Text style={styles.catName}>{cat?.name || 'Luna'}</Text>
+                <View style={styles.avatarContainer}>
+                    <Image source={require('../../assets/cioncat.jpg')} style={styles.avatar} />
+                </View>
+                <Text style={styles.catName}>{cat?.name || 'Luna'}</Text>
             </View>
 
             {/* Tabs */}
@@ -102,7 +116,7 @@ export default function TimelineScreen({ session, onBack }) {
                 <TouchableOpacity style={[styles.tab, styles.activeTab]}>
                     <Text style={styles.activeTabText}>ALL</Text>
                 </TouchableOpacity>
-                 <TouchableOpacity style={styles.tab}>
+                <TouchableOpacity style={styles.tab}>
                     <Text style={styles.inactiveTabText}>log</Text>
                 </TouchableOpacity>
             </View>
@@ -119,7 +133,7 @@ export default function TimelineScreen({ session, onBack }) {
                         {Object.keys(groupedLogs).map((groupLabel, groupIndex) => (
                             <View key={groupIndex} style={styles.groupContainer}>
                                 <Text style={styles.groupTitle}>{groupLabel}</Text>
-                                
+
                                 {groupedLogs[groupLabel].map((log, index) => {
                                     const analysis = analyzeHealthLog(log);
                                     return (
@@ -142,12 +156,14 @@ export default function TimelineScreen({ session, onBack }) {
                                                     </Text>
                                                 </View>
                                                 <Text style={styles.cardDetail}>
+
                                                     Appetite {log.normal_logs?.total_food_grams > 80 ? 'good' : 'fair'}, 
                                                     energy levels {log.something_off_logs?.behavior_energy 
                                                         ? (Array.isArray(log.something_off_logs.behavior_energy) 
                                                             ? log.something_off_logs.behavior_energy.join(', ') 
                                                             : log.something_off_logs.behavior_energy)
                                                         : 'normal'}. 
+
                                                     {analysis.alerts.length > 0 ? `Issues: ${analysis.alerts.join(', ')}` : ' No issues reported.'}
                                                 </Text>
                                             </View>
@@ -253,7 +269,7 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: '#263238',
         marginBottom: 15,
-        marginLeft: 25, 
+        marginLeft: 25,
     },
     timelineItem: {
         position: 'relative',
@@ -280,7 +296,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 2,
-        borderColor: '#fff', 
+        borderColor: '#fff',
     },
     card: {
         borderRadius: 12,

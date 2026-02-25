@@ -13,11 +13,19 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import BottomNav from '../components/BottomNav';
 import useCameraData from '../hooks/useCameraData';
+import ActivityLevelChart from '../components/ActivityLevelChart';
 
 const { width } = Dimensions.get('window');
 
 export default function CameraScreen({ onNavigate, session }) {
   const { data } = useCameraData(session);
+  const [currentCamera, setCurrentCamera] = React.useState(1);
+
+  const toggleCamera = () => {
+    // Navigate to Phone screen, specifically the Test Connection step
+    onNavigate('Phone', { initialStep: 'test_connection' });
+  };
+
   if (!data) return null;
 
   const minutes = Math.floor((Date.now() - data.connectedAt) / 60000);
@@ -37,13 +45,27 @@ export default function CameraScreen({ onNavigate, session }) {
             <View style={styles.cameraContainer}>
               <View style={styles.cameraFrame}>
                 <View style={styles.videoPlaceholder}>
-                  <Text style={styles.placeholderText}>Camera Feed Live</Text>
-                  <Ionicons name="videocam" size={48} color="rgba(255,255,255,0.5)" />
+                  <MaterialCommunityIcons
+                    name={currentCamera === 1 ? "videocam" : "camera-account"}
+                    size={48}
+                    color="rgba(255,255,255,0.5)"
+                  />
                 </View>
                 <View style={styles.cameraStatusBadge}>
                   <View style={[styles.cameraStatusDot, { backgroundColor: '#4CAF50' }]} />
-                  <Text style={styles.cameraStatusText}>Connected - 2m ago</Text>
+                  <Text style={styles.cameraStatusText}>
+                    {currentCamera === 1 ? 'Connected - 2m ago' : 'Connected - Live'}
+                  </Text>
                 </View>
+
+                {/* Switch Camera Button */}
+                <TouchableOpacity
+                  style={styles.switchCameraButton}
+                  onPress={toggleCamera}
+                  activeOpacity={0.7}
+                >
+                  <MaterialCommunityIcons name="camera" size={24} color="#FFF" />
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -63,20 +85,16 @@ export default function CameraScreen({ onNavigate, session }) {
 
           <View style={styles.chartCard}>
             <View style={styles.graphHeader}>
-              <Text style={styles.chartTitle}>Moderate</Text>
+              <Text style={styles.chartTitle}>{data.posture.normal.name === 'Active' ? 'Active' : 'Moderate'}</Text>
               <Text style={styles.graphSubtitle}>Activity Level</Text>
             </View>
 
-            <View style={styles.chartContainer}>
-              {data.activity.map((v, i) => (
-                <View key={i} style={styles.barGroup}>
-                  <View style={styles.barBackground}>
-                    <View style={[styles.barFill, { height: `${v}%` }]} />
-                  </View>
-                  <Text style={styles.barLabel}>{['6AM', '12AM', '6PM', 'NEW'][i]}</Text>
-                </View>
-              ))}
-            </View>
+            <ActivityLevelChart
+              data={{
+                labels: ['6AM', '12AM', '6PM', 'NEW'],
+                activity: data.activity
+              }}
+            />
           </View>
 
           <View style={styles.row}>
@@ -85,7 +103,7 @@ export default function CameraScreen({ onNavigate, session }) {
                 <MaterialCommunityIcons name="food-apple" size={24} color="#008080" />
               </View>
               <Text style={styles.cardLabel}>Food</Text>
-              <Text style={styles.value}>{data.food} Times</Text>
+              <Text style={styles.value}>{data.food} Grams</Text>
             </View>
 
             <View style={styles.card}>
@@ -129,7 +147,10 @@ export default function CameraScreen({ onNavigate, session }) {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.btn}>
+          <TouchableOpacity
+            style={styles.btn}
+            onPress={() => onNavigate('Timeline')}
+          >
             <MaterialCommunityIcons name="timeline-text-outline" size={20} color="#00695C" />
             <Text style={styles.btnText}>View Timeline</Text>
             <Ionicons name="chevron-forward" size={20} color="#00695C" />
@@ -218,6 +239,24 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '500',
+  },
+  switchCameraButton: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    backgroundColor: 'rgba(20, 124, 120, 0.7)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.3)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   statusBadge: {
     position: 'absolute',

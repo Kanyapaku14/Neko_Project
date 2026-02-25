@@ -9,6 +9,7 @@ import {
   SafeAreaView,
   Modal,
   TouchableWithoutFeedback,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -17,6 +18,7 @@ export default function FeedHeader({
   onBack,
   onProfile,
   onSettings,
+  avatarUrl,
 }) {
   const [showDropdown, setShowDropdown] = useState(false);
   return (
@@ -35,9 +37,13 @@ export default function FeedHeader({
           <View>
             <TouchableOpacity
               onPress={() => setShowDropdown(true)}
-              style={styles.iconBtn}
+              style={[styles.iconBtn, { overflow: 'hidden' }]}
             >
-              <Ionicons name="person-circle-outline" size={26} color="#37474F" />
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={{ width: '100%', height: '100%' }} />
+              ) : (
+                <Ionicons name="person-circle-outline" size={26} color="#37474F" />
+              )}
             </TouchableOpacity>
 
             <Modal
