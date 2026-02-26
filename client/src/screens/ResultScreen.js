@@ -14,6 +14,7 @@ import {
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from "expo-linear-gradient";
+import Svg, { Circle } from 'react-native-svg';
 import styles from "../styles/resultStyles";
 
 // ===== รายชื่อโรค =====
@@ -42,6 +43,19 @@ const getRiskColor = (riskLevel) => {
     case "Extreme": return "#e74c3c";
     default: return "#bdc3c7";
   }
+};
+
+const getOverallRiskDetails = (score) => {
+  if (score === null || score === undefined || score === "No Data") return { label: "0", color: "#666666", text: "No Data" };
+  const numScore = Number(score);
+  if (isNaN(numScore) || numScore === 0) return { label: "0", color: "#666666", text: "No Data" };
+  if (numScore >= 91) return { label: `${numScore}%`, color: "#2ecc71", text: "Good Health" };
+  if (numScore >= 71) return { label: `${numScore}%`, color: "#1abc9c", text: "Low Risk" };
+  if (numScore >= 61) return { label: `${numScore}%`, color: "#f1c40f", text: "Moderate Risk" };
+  if (numScore >= 51) return { label: `${numScore}%`, color: "#e67e22", text: "High Risk" };
+  if (numScore >= 41) return { label: `${numScore}%`, color: "#d35400", text: "Severe Risk" };
+  if (numScore >= 31) return { label: `${numScore}%`, color: "#c0392b", text: "Serious Risk" };
+  return { label: `${numScore}%`, color: "#e74c3c", text: "Extreme Risk" };
 };
 
 const formatPreventionData = (data) => {
@@ -119,7 +133,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
   const [preventionData, setPreventionData] = useState(null);
   const [counselingData, setCounselingData] = useState(null);
   const [riskData, setRiskData] = useState(INITIAL_RISK_DATA);
-  const [overallRisk, setOverallRisk] = useState("Unknown");
+  const [overallScore, setOverallScore] = useState("No Data");
   const [summaryTitle, setSummaryTitle] = useState("");
   const [summaryDesc, setSummaryDesc] = useState("");
 
@@ -143,11 +157,11 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
             : INITIAL_RISK_DATA;
 
           setRiskData(validRiskData);
-          setOverallRisk(result.overallRisk || "No Data");
+          setOverallScore(result.overallScore !== undefined ? result.overallScore : result.overallRisk || "No Data");
           setSummaryTitle(result.summaryTitle || "");
           setSummaryDesc(result.summaryDesc || "");
 
-          if (result.overallRisk === "No Data") {
+          if (result.overallRisk === "No Data" || result.overallScore === "No Data") {
             setShowNoDataModal(true);
           }
 
@@ -201,6 +215,13 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
     );
   }
 
+  const numScore = Number(overallScore) || 0;
+  const clampedScore = isNaN(numScore) ? 0 : Math.max(0, Math.min(100, numScore));
+  const radius = 82;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (clampedScore / 100) * circumference;
+  const riskDetails = getOverallRiskDetails(overallScore);
+
   return (
     <LinearGradient
       colors={['#FFFFFF', '#B2E1DB']}
@@ -251,9 +272,32 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} nestedScrollEnabled={true}>
         <View style={styles.circleWrapper}>
           <View style={styles.circleBg}>
-            <View style={styles.circleProgress} /><Text style={styles.riskText}>{overallRisk}</Text>
+            <Svg width="180" height="180" style={{ position: 'absolute', transform: [{ rotate: '-90deg' }] }}>
+              {/* Background Track Circle */}
+              <Circle
+                cx="90"
+                cy="90"
+                r={radius}
+                stroke="#E1ECEB"
+                strokeWidth="16"
+                fill="none"
+              />
+              {/* Foreground Progress Circle */}
+              <Circle
+                cx="90"
+                cy="90"
+                r={radius}
+                stroke={riskDetails.color}
+                strokeWidth="16"
+                strokeDasharray={circumference}
+                strokeDashoffset={strokeDashoffset}
+                strokeLinecap="round"
+                fill="none"
+              />
+            </Svg>
+            <Text style={[styles.riskText, { color: riskDetails.color }]}>{riskDetails.label}</Text>
           </View>
-          <Text style={styles.recommendText}>Health Assessment Result</Text>
+          <Text style={[styles.recommendText, { color: riskDetails.color }]}>{riskDetails.text}</Text>
           <Text style={styles.subText}>Overall Health Risk</Text>
         </View>
 
