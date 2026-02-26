@@ -7,8 +7,11 @@ import {
   ActivityIndicator,
   Alert,
   StyleSheet,
-  Modal
+  Modal,
+  Dimensions
 } from "react-native";
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from "expo-linear-gradient";
 import styles from "../styles/resultStyles";
@@ -286,7 +289,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
         <Text style={styles.sectionTitle}>Recommended Approach</Text>
 
         {/* Card 1: Disease Prevention */}
-        <View style={[styles.card, { zIndex: 2000, elevation: 0, shadowOpacity: 0 }]}>
+        <View style={[styles.card, { zIndex: 2000, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 60, alignSelf: 'center', height: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
           <Text style={styles.cardTitle}>Disease Prevention</Text>
 
           <View style={{ marginBottom: 15, zIndex: 3000, width: '55%' }}>
@@ -352,7 +355,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
         </View>
 
         {/* Card 2: Counseling */}
-        <View style={[styles.card, { zIndex: 1000, marginTop: 5, elevation: 0, shadowOpacity: 0 }]}>
+        <View style={[styles.card, { zIndex: 1000, marginTop: 5, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 60, alignSelf: 'center', height: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
           <Text style={styles.cardTitle}>Counseling</Text>
           {loadingGuidance ? (
             <View style={styles.loadingContainer}>
@@ -375,6 +378,24 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
             </View>
           )}
         </View>
+
+        {/* Save Assessment Button */}
+        <TouchableOpacity
+          style={{
+            backgroundColor: '#1abc9c',
+            width: SCREEN_WIDTH - 60,
+            alignSelf: 'center',
+            paddingVertical: 14,
+            borderRadius: 12,
+            alignItems: 'center',
+            marginTop: 20,
+            marginBottom: 20,
+          }}
+          onPress={onSave}
+          activeOpacity={0.8}
+        >
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Save Assessment</Text>
+        </TouchableOpacity>
 
       </ScrollView>
     </LinearGradient>
