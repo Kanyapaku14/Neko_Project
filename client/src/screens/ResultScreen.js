@@ -248,7 +248,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 150 }} nestedScrollEnabled={true}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} nestedScrollEnabled={true}>
         <View style={styles.circleWrapper}>
           <View style={styles.circleBg}>
             <View style={styles.circleProgress} /><Text style={styles.riskText}>{overallRisk}</Text>
@@ -289,10 +289,10 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
         <Text style={styles.sectionTitle}>Recommended Approach</Text>
 
         {/* Card 1: Disease Prevention */}
-        <View style={[styles.card, { zIndex: 2000, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 60, alignSelf: 'center', height: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
+        <View style={[styles.card, { zIndex: 2000, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 40, alignSelf: 'center', height: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
           <Text style={styles.cardTitle}>Disease Prevention</Text>
 
-          <View style={{ marginBottom: 15, zIndex: 3000, width: '55%' }}>
+          <View style={{ marginBottom: 15, marginTop: 10, zIndex: 3000, width: '38%' }}>
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -300,7 +300,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
             >
               {/* ✅ แก้ไข: ใช้ flexShrink: 1 แทน flex: 1 และใส่ paddingRight เพื่อป้องกันไม่ให้ข้อความไปดันลูกศร */}
               <Text
-                style={{ fontSize: 13, color: selectedConditionLabel ? '#000' : '#888', flexShrink: 1, paddingRight: 8 }}
+                style={{ fontSize: 11, color: selectedConditionLabel ? '#000' : '#888', flexShrink: 1, paddingRight: 8 }}
                 numberOfLines={1}
                 ellipsizeMode="tail"
               >
@@ -322,7 +322,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
                       setIsDropdownOpen(false);
                     }}
                   >
-                    <Text style={{ fontSize: 14, color: selectedConditionValue === item.value ? '#1abc9c' : '#333' }}>
+                    <Text style={{ fontSize: 11, color: selectedConditionValue === item.value ? '#1abc9c' : '#333' }}>
                       {item.label}
                     </Text>
                   </TouchableOpacity>
@@ -337,43 +337,51 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
               <Text style={styles.loadingText}>กำลังขอคำแนะนำจาก AI...</Text>
             </View>
           ) : (
-            <View>
+            <View style={{ flex: 1, paddingBottom: 10 }}>
               {preventionData ? (
-                <>
+                <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8, color: '#333' }}>
                     {preventionData.title}
                   </Text>
                   <Text style={styles.cardDesc}>
                     {formatPreventionData(preventionData)}
                   </Text>
-                </>
+                </View>
               ) : (
-                <Text style={styles.cardDesc}>กรุณาเลือกโรคด้านบนเพื่อดูคำแนะนำ</Text>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                  <Text style={[styles.cardDesc, { fontSize: 11, textAlign: 'center', color: '#888' }]}>
+                    กรุณาเลือกโรคด้านบนเพื่อดูคำแนะนำ
+                  </Text>
+                </View>
               )}
             </View>
           )}
         </View>
 
         {/* Card 2: Counseling */}
-        <View style={[styles.card, { zIndex: 1000, marginTop: 5, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 60, alignSelf: 'center', height: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
+        <View style={[styles.card, { zIndex: 1000, marginTop: 5, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 40, alignSelf: 'center', height: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
           <Text style={styles.cardTitle}>Counseling</Text>
           {loadingGuidance ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color="#1abc9c" />
             </View>
           ) : (
-            <View>
+            <View style={{ flex: 1, paddingBottom: 10 }}>
               {counselingData ? (
-                <>
+                <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8, color: '#D32F2F' }}>
                     {counselingData.title}
                   </Text>
                   <Text style={styles.cardDesc}>
                     {formatCounselingData(counselingData)}
                   </Text>
-                </>
+                </View>
               ) : (
-                <Text style={styles.cardDesc}>ข้อมูลจะแสดงหลังจากเลือกโรคแล้ว</Text>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                  <Text style={[styles.cardDesc, { fontSize: 11, textAlign: 'center', color: '#888' }]}>
+                    ข้อมูลจะแสดงหลังจากเลือกโรคแล้ว
+                  </Text>
+                </View>
               )}
             </View>
           )}
@@ -406,14 +414,14 @@ const customStyles = StyleSheet.create({
   // ✅ แก้ไข: เพิ่ม paddingHorizontal: 12 เพื่อให้ลูกศรมีระยะห่างจากขอบขวา และข้อความไม่ชิดซ้ายจนเกินไป
   dropdownHeader: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderColor: '#E0E0E0',
+    borderRadius: 6,
+    paddingHorizontal: 10,
     backgroundColor: '#fff',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    height: 38
+    height: 32
   },
   dropdownList: { marginTop: 4, borderWidth: 1, borderColor: '#eee', borderRadius: 8, backgroundColor: '#fff', position: 'absolute', top: 38, left: 0, right: 0, zIndex: 9999, elevation: 5 },
   dropdownItem: { padding: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
