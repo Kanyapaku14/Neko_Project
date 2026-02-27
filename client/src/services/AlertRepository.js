@@ -13,7 +13,7 @@
  *   await AlertRepository.syncToRemote();   // Push all local → backend
  */
 
-import AlertEngine from './AlertEngine';
+import AlertEngine, { AlertEvents } from './AlertEngine';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 // Replace BASE_URL with your actual API endpoint when ready
@@ -37,6 +37,19 @@ const apiFetch = (path, options = {}) => {
 
 // ─── AlertRepository ─────────────────────────────────────────────────────────
 const AlertRepository = {
+
+    /**
+     * Initialize the repository to listen for local alerts and sync them.
+     * Call this once at app startup (e.g. in App.js or a service initializer).
+     */
+    init() {
+        AlertEngine.on(AlertEvents.ALERT_ADDED, (alert) => {
+            // Only push if it didn't come from remote to avoid loops
+            if (!alert._fromRemote) {
+                this.push(alert);
+            }
+        });
+    },
 
     /**
      * Push a single alert to the remote database.
@@ -123,7 +136,7 @@ const AlertRepository = {
      *   - On app resume / network reconnect
      *   - After user resolves an identity confirmation
      *
-     * @returns {Promise<number>} Count of successfully synced feedback items
+      @returns {Promise<number>} Count of successfully synced feedback items
      */
     async syncFeedbackUsed() {
         const candidates = AlertEngine.getHistory().filter(

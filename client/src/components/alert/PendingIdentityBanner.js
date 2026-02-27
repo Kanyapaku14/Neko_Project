@@ -4,44 +4,38 @@
  * Compact banner shown on CameraScreen when there are pending behavior identity
  * confirmations waiting for the user.
  *
- * Shows aggregated count (e.g. "พบ 3 พฤติกรรมที่ต้องยืนยัน") so the user
- * knows how many items need attention without overwhelming them.
- *
  * Props:
  *   count       {number}    - Number of pending identity confirmations
- *   onPress     {Function}  - Called when user taps the banner → navigate to AlertScreen
+ *   onPress     {Function}  - Called when user taps the banner to open alerts
  */
 
-import React, { useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import React from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 
 export default function PendingIdentityBanner({ count, onPress }) {
-    // Don't render if nothing is pending
     if (!count || count <= 0) return null;
 
     const label = count === 1
-        ? 'พบพฤติกรรมที่ต้องระบุแมว'
-        : `พบ ${count} พฤติกรรมที่ต้องยืนยัน`;
+        ? '1 behavior needs cat identification'
+        : `${count} behaviors need confirmation`;
 
     return (
         <TouchableOpacity
             style={styles.banner}
             activeOpacity={0.8}
             onPress={onPress}
-            accessibilityLabel={`${label} — กดเพื่อไปยังหน้าแจ้งเตือน`}
+            accessibilityLabel={`${label} - tap to open notifications`}
             accessibilityRole="button"
         >
-            {/* Left icon + text */}
             <View style={styles.iconContainer}>
                 <MaterialCommunityIcons name="help-rhombus-outline" size={20} color="#FFFFFF" />
             </View>
             <View style={styles.textContainer}>
                 <Text style={styles.title} numberOfLines={1}>{label}</Text>
-                <Text style={styles.subtitle}>กดเพื่อระบุตัวตนแมว</Text>
+                <Text style={styles.subtitle}>Tap to identify the cat</Text>
             </View>
 
-            {/* Count badge */}
             <View style={styles.countBadge}>
                 <Text style={styles.countText}>{count > 9 ? '9+' : count}</Text>
             </View>
@@ -53,7 +47,7 @@ export default function PendingIdentityBanner({ count, onPress }) {
 
 const styles = StyleSheet.create({
     banner: {
-        backgroundColor: '#E65100',   // Deep orange — distinct from the red critical banner
+        backgroundColor: '#E65100',
         borderRadius: 12,
         padding: 12,
         flexDirection: 'row',

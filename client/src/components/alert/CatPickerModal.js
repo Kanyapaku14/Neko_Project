@@ -1,15 +1,7 @@
 /**
  * CatPickerModal.js
  *
- * Modal for the user to identify which cat was detected in an uncertain behavior event.
- *
- * Props:
- *   visible           {boolean}   - Controls modal visibility
- *   alert             {Object}    - The pending_identity alert object
- *   cats              {Array}     - List of cat objects: [{ id, name, color? }]
- *   onSelect          {Function}  - (catId: string) => void — called when user picks a cat
- *   onSkip            {Function}  - () => void — called when user skips / is unsure
- *   onDismiss         {Function}  - () => void — called on backdrop press or back
+ * Modal for selecting which cat was detected in a pending identity event.
  */
 
 import React, { useState } from 'react';
@@ -20,12 +12,9 @@ import {
     TouchableOpacity,
     StyleSheet,
     Image,
-    Pressable,
-    Platform,
     Dimensions,
 } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -68,11 +57,9 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
         >
             <View style={styles.backdrop}>
                 <View style={styles.modalContainer}>
-
-                    {/* Header */}
                     <View style={styles.header}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                            <Text style={styles.headerTitle}>ระบุตัวตนแมว</Text>
+                        <View style={styles.headerLeft}>
+                            <Text style={styles.headerTitle}>Identify Cat</Text>
                             {queueLength > 1 && (
                                 <View style={styles.queueBadge}>
                                     <Text style={styles.queueBadgeText}>1/{queueLength}</Text>
@@ -84,38 +71,28 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                         </TouchableOpacity>
                     </View>
 
-                    {/* Detection Info Card */}
                     <View style={styles.detectionCard}>
                         {cropSnapshot ? (
-                            <Image
-                                source={{ uri: cropSnapshot }}
-                                style={styles.snapshot}
-                                resizeMode="cover"
-                            />
+                            <Image source={{ uri: cropSnapshot }} style={styles.snapshot} resizeMode="cover" />
                         ) : (
                             <View style={styles.snapshotPlaceholder}>
                                 <MaterialCommunityIcons name="camera-off-outline" size={32} color="#B0BEC5" />
-                                <Text style={styles.snapshotPlaceholderText}>ไม่มีรูปภาพ</Text>
+                                <Text style={styles.snapshotPlaceholderText}>No image available</Text>
                             </View>
                         )}
                         <View style={styles.infoRow}>
-                            <View style={[styles.behaviorBadge, { backgroundColor: behaviorColor + '20' }]}>
+                            <View style={[styles.behaviorBadge, { backgroundColor: `${behaviorColor}20` }]}>
                                 <MaterialCommunityIcons name={behaviorIcon} size={18} color={behaviorColor} />
                                 <Text style={[styles.behaviorLabel, { color: behaviorColor }]}>
-                                    {behaviorLabel || 'ไม่ทราบพฤติกรรม'}
+                                    {behaviorLabel || 'Unknown behavior'}
                                 </Text>
                             </View>
-                            {confidencePct != null && (
-                                <Text style={styles.confidenceText}>มั่นใจ {confidencePct}%</Text>
-                            )}
+                            {confidencePct != null && <Text style={styles.confidenceText}>Confidence {confidencePct}%</Text>}
                         </View>
                     </View>
 
-                    <Text style={styles.instructionText}>
-                        เลือกแมวที่คุณคิดว่าแสดงพฤติกรรมนี้:
-                    </Text>
+                    <Text style={styles.instructionText}>Select the cat you think showed this behavior:</Text>
 
-                    {/* Dropdown Selection */}
                     <View style={{ zIndex: 100 }}>
                         <TouchableOpacity
                             style={styles.dropdownToggle}
@@ -123,9 +100,9 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                             activeOpacity={0.8}
                         >
                             <Text style={styles.dropdownToggleText}>
-                                {cats.length === 0 ? "ไม่มีรายชื่อแมวในระบบ" : "คลิกเพื่อเลือกแมว..."}
+                                {cats.length === 0 ? 'No cats found in the system' : 'Tap to choose a cat...'}
                             </Text>
-                            <Ionicons name={dropdownOpen ? "chevron-up" : "chevron-down"} size={20} color="#546E7A" />
+                            <Ionicons name={dropdownOpen ? 'chevron-up' : 'chevron-down'} size={20} color="#546E7A" />
                         </TouchableOpacity>
 
                         {dropdownOpen && cats.length > 0 && (
@@ -143,16 +120,13 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                         )}
                     </View>
 
-                    {/* Spacer when dropdown is open so buttons aren't hidden */}
                     <View style={{ height: dropdownOpen ? (cats.length * 45) + 10 : 20 }} />
 
-                    {/* Action Buttons */}
                     <View style={styles.actionRow}>
                         <TouchableOpacity style={styles.skipButton} onPress={onSkip} activeOpacity={0.7}>
-                            <Text style={styles.skipText}>ข้ามไปก่อน</Text>
+                            <Text style={styles.skipText}>Skip for now</Text>
                         </TouchableOpacity>
                     </View>
-
                 </View>
             </View>
         </Modal>
@@ -184,6 +158,11 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         marginBottom: 16,
     },
+    headerLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
     headerTitle: {
         fontSize: 20,
         fontWeight: '700',
@@ -210,7 +189,7 @@ const styles = StyleSheet.create({
     },
     snapshot: {
         width: '100%',
-        height: 140, // Responsive height based on container
+        height: 140,
     },
     snapshotPlaceholder: {
         width: '100%',

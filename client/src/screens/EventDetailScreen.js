@@ -142,10 +142,10 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
                         <View style={styles.card}>
                             <View style={styles.identifyHeader}>
                                 <MaterialCommunityIcons name="help-rhombus-outline" size={20} color="#E65100" style={{ marginRight: 8 }} />
-                                <Text style={[styles.sectionTitle, { color: '#E65100' }]}>ระบุตัวตนแมว</Text>
+                                <Text style={[styles.sectionTitle, { color: '#E65100' }]}>Identify Cat</Text>
                             </View>
                             <Text style={styles.descText}>
-                                ระบบตรวจพบพฤติกรรมนี้แต่ไม่แน่ใจว่าเป็นแมวตัวไหน กรุณาช่วยระบุเพื่อความแม่นยำของโมเดล
+                                The system detected this behavior but is unsure which cat it is. Please identify to improve model accuracy.
                             </Text>
                             <TouchableOpacity
                                 style={styles.identifyButton}
@@ -153,7 +153,7 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
                                 activeOpacity={0.8}
                             >
                                 <MaterialCommunityIcons name="paw" size={16} color="#FFF" style={{ marginRight: 6 }} />
-                                <Text style={styles.identifyButtonText}>ระบุว่าเป็นแมวตัวไหน</Text>
+                                <Text style={styles.identifyButtonText}>Identify which cat</Text>
                             </TouchableOpacity>
                         </View>
                     )}

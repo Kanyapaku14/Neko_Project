@@ -1,7 +1,7 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+﻿import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
- * Minimal EventEmitter — replaces Node's `events` module which is
+ * Minimal EventEmitter â€” replaces Node's `events` module which is
  * not available in React Native / Expo Hermes environment.
  */
 class SimpleEmitter {
@@ -47,7 +47,7 @@ class AlertEngineService {
         this._loadAlerts();
     }
 
-    // Public subscription API — clean and testable
+    // Public subscription API â€” clean and testable
     on(event, cb) { this.emitter.on(event, cb); }
     off(event, cb) { this.emitter.off(event, cb); }
 
@@ -143,17 +143,17 @@ class AlertEngineService {
             isRead: false,
             resolved: normalizedSeverity !== 'critical',
 
-            // ── Identity Confirmation Fields (optional, undefined if not a pending_identity alert) ──
-            // pendingIdentityConfirm: bool — true while waiting for user to identify the cat
-            // behaviorLabel: string — e.g. 'vomiting'
-            // confidence: number — model confidence 0-1
-            // cropSnapshot: string — URL/URI to crop image
-            // sessionId: string — session this detection belongs to
-            // source: string — model name e.g. 'behavior_classifier_v3'
-            // resolvedCatId: string|null — cat_id chosen by user
-            // resolvedAt: string|null — ISO timestamp of resolution
-            // resolvedBy: string|null — 'user' | 'auto' | 'skipped'
-            // feedbackUsedForTraining: bool — set to true by backend after training
+            // â”€â”€ Identity Confirmation Fields (optional, undefined if not a pending_identity alert) â”€â”€
+            // pendingIdentityConfirm: bool â€” true while waiting for user to identify the cat
+            // behaviorLabel: string â€” e.g. 'vomiting'
+            // confidence: number â€” model confidence 0-1
+            // cropSnapshot: string â€” URL/URI to crop image
+            // sessionId: string â€” session this detection belongs to
+            // source: string â€” model name e.g. 'behavior_classifier_v3'
+            // resolvedCatId: string|null â€” cat_id chosen by user
+            // resolvedAt: string|null â€” ISO timestamp of resolution
+            // resolvedBy: string|null â€” 'user' | 'auto' | 'skipped'
+            // feedbackUsedForTraining: bool â€” set to true by backend after training
             ...(alertData.pendingIdentityConfirm !== undefined && {
                 pendingIdentityConfirm: alertData.pendingIdentityConfirm,
                 behaviorLabel: alertData.behaviorLabel || null,
@@ -198,14 +198,16 @@ class AlertEngineService {
 
         const confidencePct = confidence != null ? Math.round(confidence * 100) : null;
         const confidenceStr = confidencePct != null ? ` (${confidencePct}% confidence)` : '';
-        const titleText = isAbnormal ? `ตรวจพบพฤติกรรมผิดปกติ — โปรดระบุแมว` : `ตรวจพบพฤติกรรม — โปรดระบุแมว`;
+        const titleText = isAbnormal
+            ? 'Abnormal behavior detected - Please identify the cat'
+            : 'Behavior detected - Please identify the cat';
 
         await this.logEvent({
             type: 'pending_identity',
             severity: isAbnormal ? 'warning' : 'info',
             title: titleText,
-            desc: `ตรวจพบ "${behaviorLabel}"${confidenceStr} แต่ไม่แน่ใจว่าเป็นแมวตัวไหน กรุณาระบุตัวตน`,
-            details: source ? `จากโมเดล: ${source}` : '',
+            desc: `Detected "${behaviorLabel}"${confidenceStr}, but the system is not sure which cat it is. Please identify the cat.`,
+            details: source ? `From model: ${source}` : '',
             pendingIdentityConfirm: true,
             behaviorLabel,
             confidence: confidence ?? null,
@@ -261,7 +263,7 @@ class AlertEngineService {
     }
 
     /**
-     * Resolve a pending_identity alert — user has identified which cat it is.
+     * Resolve a pending_identity alert â€” user has identified which cat it is.
      * @param {string} alertId
      * @param {string} catId - The cat_id selected by the user
      * @param {'user'|'auto'|'skipped'} [resolvedBy='user']
@@ -279,7 +281,7 @@ class AlertEngineService {
         if (resolved) {
             await this._saveAlerts();
             this.emitter.emit(AlertEvents.IDENTITY_RESOLVED, resolved);
-            console.log(`AlertEngine: Identity resolved for alert [${alertId}] → cat [${catId}]`);
+            console.log(`AlertEngine: Identity resolved for alert [${alertId}] -> cat [${catId}]`);
         }
     }
 
@@ -318,6 +320,77 @@ class AlertEngineService {
         }
     }
 
+    /**
+     * Delete a specific alert (Soft delete)
+     */
+    async deleteAlert(alertId) {
+        let changed = false;
+        this.alerts = this.alerts.map(a => {
+            if (a.id === alertId && !a.isDeleted) {
+                changed = true;
+                return { ...a, isDeleted: true, deletedAt: new Date().toISOString() };
+            }
+            return a;
+        });
+        if (changed) await this._saveAlerts();
+    }
+
+    /**
+     * Soft delete multiple alerts
+     */
+    async deleteMultipleAlerts(alertIds) {
+        let changed = false;
+        this.alerts = this.alerts.map(a => {
+            if (alertIds.includes(a.id) && !a.isDeleted) {
+                changed = true;
+                return { ...a, isDeleted: true, deletedAt: new Date().toISOString() };
+            }
+            return a;
+        });
+        if (changed) await this._saveAlerts();
+    }
+
+    /**
+     * Permanently delete multiple alerts
+     */
+    async permanentlyDeleteMultipleAlerts(alertIds) {
+        const before = this.alerts.length;
+        this.alerts = this.alerts.filter(a => !alertIds.includes(a.id));
+        if (this.alerts.length !== before) {
+            await this._saveAlerts();
+        }
+    }
+
+    /**
+     * Delete all non-pending alerts (Soft delete)
+     */
+    async deleteAllAlerts() {
+        let changed = false;
+        this.alerts = this.alerts.map(a => {
+            if (a.pendingIdentityConfirm !== true && !a.isDeleted) {
+                changed = true;
+                return { ...a, isDeleted: true, deletedAt: new Date().toISOString() };
+            }
+            return a;
+        });
+        if (changed) await this._saveAlerts();
+    }
+
+    /**
+     * Toggle Pin status
+     */
+    async togglePin(alertId) {
+        let changed = false;
+        this.alerts = this.alerts.map(a => {
+            if (a.id === alertId) {
+                changed = true;
+                return { ...a, isPinned: !a.isPinned };
+            }
+            return a;
+        });
+        if (changed) await this._saveAlerts();
+    }
+
     async markAsRead(alertId) {
         let changed = false;
         this.alerts = this.alerts.map(a => {
@@ -348,7 +421,11 @@ class AlertEngineService {
     }
 
     getHistory() {
-        return this.alerts;
+        return this.alerts.filter(a => !a.isDeleted);
+    }
+
+    getDeletedHistory() {
+        return this.alerts.filter(a => a.isDeleted);
     }
 
     getUnreadCount() {
@@ -363,3 +440,4 @@ class AlertEngineService {
 // Export as Singleton
 const AlertEngine = new AlertEngineService();
 export default AlertEngine;
+
