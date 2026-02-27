@@ -6,20 +6,88 @@ import {
   ScrollView,
   StyleSheet,
   Dimensions,
-  TouchableOpacity
+  TouchableOpacity,
+  Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import BottomNav from '../components/BottomNav';
 import useCameraData from '../hooks/useCameraData';
 import ActivityLevelChart from '../components/ActivityLevelChart';
+import AlertEngine, { AlertEvents } from '../services/AlertEngine';
+import PendingIdentityBanner from '../components/alert/PendingIdentityBanner';
+import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
 
 const { width } = Dimensions.get('window');
 
 export default function CameraScreen({ onNavigate, session }) {
   const { data } = useCameraData(session);
   const [currentCamera, setCurrentCamera] = React.useState(1);
+  const [cameraStatus, setCameraStatus] = React.useState('disconnected');
+  const [unreadAlerts, setUnreadAlerts] = React.useState(0);
+  const [hasCriticalAlert, setHasCriticalAlert] = React.useState(false);
+  const [pendingIdentityCount, setPendingIdentityCount] = React.useState(0);
+  const bannerAnim = React.useRef(new Animated.Value(0)).current;
+
+  // Retrieve global queue context to open manual queue
+  const { openPendingQueue } = React.useContext(GlobalAlertQueueContext);
+
+  // Animation for sticky banner
+  React.useEffect(() => {
+    if (hasCriticalAlert) {
+      Animated.spring(bannerAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 50,
+        friction: 7
+      }).start();
+    } else {
+      Animated.timing(bannerAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [hasCriticalAlert]);
+
+  // Subscribe to AlertEngine
+  React.useEffect(() => {
+    // Initial load
+    setUnreadAlerts(AlertEngine.getUnreadCount());
+    setHasCriticalAlert(AlertEngine.hasActiveCritical());
+    setPendingIdentityCount(AlertEngine.getPendingIdentityCount());
+
+    const handler = (data) => {
+      setUnreadAlerts(data.unreadCount);
+      setHasCriticalAlert(data.hasCritical);
+      setPendingIdentityCount(AlertEngine.getPendingIdentityCount());
+    };
+
+    AlertEngine.on(AlertEvents.UPDATED, handler);
+    return () => AlertEngine.off(AlertEvents.UPDATED, handler);
+  }, []);
+
+  React.useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const storedStatus = await AsyncStorage.getItem('camera_status');
+        if (storedStatus) {
+          setCameraStatus((prev) => (prev !== storedStatus ? storedStatus : prev));
+        }
+      } catch (e) {
+        console.error("Failed to fetch camera status:", e);
+      }
+    };
+
+    fetchStatus();
+
+    // Polling is a quick workaround for non-react-navigation custom routers 
+    // to ensure shared state updates when returning from SetcameraScreen
+    const interval = setInterval(fetchStatus, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   const toggleCamera = () => {
     // Navigate to Phone screen, specifically the Test Connection step
@@ -28,7 +96,6 @@ export default function CameraScreen({ onNavigate, session }) {
 
   if (!data) return null;
 
-  const minutes = Math.floor((Date.now() - data.connectedAt) / 60000);
   const modeDisplay = data.settings?.monitoringMode
     ? data.settings.monitoringMode.charAt(0).toUpperCase() + data.settings.monitoringMode.slice(1)
     : 'Multi';
@@ -39,7 +106,53 @@ export default function CameraScreen({ onNavigate, session }) {
     <LinearGradient colors={['#FFFFFF', '#95e4e4ff']} style={{ flex: 1 }}>
       <SafeAreaView style={styles.container}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          <Text style={styles.headerTitle}>Camera</Text>
+          <View style={styles.headerContainer}>
+            <View style={{ width: 32 }} />
+            <Text style={styles.headerTitle}>Camera</Text>
+            <TouchableOpacity onPress={() => onNavigate('Alert')} style={styles.bellButton}>
+              <Ionicons name="notifications-outline" size={24} color="#0C5A58" />
+              {unreadAlerts > 0 ? <View style={styles.notificationDot} /> : null}
+            </TouchableOpacity>
+          </View>
+
+          {hasCriticalAlert ? (
+            <Animated.View style={[
+              styles.overlayBannerWrapper,
+              {
+                opacity: bannerAnim,
+                transform: [{
+                  translateY: bannerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-20, 0]
+                  })
+                }, {
+                  scale: bannerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.95, 1]
+                  })
+                }]
+              }
+            ]}>
+              <TouchableOpacity
+                style={styles.overlayBanner}
+                activeOpacity={0.8}
+                onPress={() => onNavigate('Alert')}
+              >
+                <Ionicons name="warning" size={20} color="#fff" />
+                <View style={styles.overlayTextContainer}>
+                  <Text style={styles.overlayTitle}>Camera Issue Detected</Text>
+                  <Text style={styles.overlayDesc}>Litter Box camera is offline.</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#fff" />
+              </TouchableOpacity>
+            </Animated.View>
+          ) : null}
+
+          {/* Pending Identity Banner for normal behaviors (or missed popups) */}
+          <PendingIdentityBanner
+            count={pendingIdentityCount}
+            onPress={openPendingQueue}
+          />
 
           <View style={styles.cameraBox}>
             <View style={styles.cameraContainer}>
@@ -52,13 +165,47 @@ export default function CameraScreen({ onNavigate, session }) {
                   />
                 </View>
                 <View style={styles.cameraStatusBadge}>
-                  <View style={[styles.cameraStatusDot, { backgroundColor: '#4CAF50' }]} />
+                  <View style={[styles.cameraStatusDot, {
+                    backgroundColor: cameraStatus === 'connected' ? '#4CAF50' :
+                      cameraStatus === 'connecting' ? '#FFC107' : '#F44336'
+                  }]} />
                   <Text style={styles.cameraStatusText}>
-                    {currentCamera === 1 ? 'Connected - 2m ago' : 'Connected - Live'}
+                    {cameraStatus === 'connected' ? 'Connected - Live' :
+                      cameraStatus === 'connecting' ? 'Connecting...' : 'Camera Disconnected'}
                   </Text>
                 </View>
 
-                {/* Switch Camera Button */}
+                {/* TEMPORARY DEV BUTTONS: Simulate behaviors for Auto-Popup testing */}
+                <View style={{ position: 'absolute', top: 12, right: 12, zIndex: 100, gap: 8 }}>
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: '#D32F2F', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20
+                    }}
+                    onPress={() => {
+                      AlertEngine.logPendingIdentity({
+                        behaviorLabel: 'vomiting', confidence: 0.88, sessionId: 'test_session_' + Date.now(),
+                        source: 'Manual Test Button', isAbnormal: true, cropSnapshot: 'https://placekitten.com/300/300'
+                      });
+                    }}
+                  >
+                    <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>Simulate Abnormal (Auto)</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: '#E65100', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20
+                    }}
+                    onPress={() => {
+                      AlertEngine.logPendingIdentity({
+                        behaviorLabel: 'eating', confidence: 0.95, sessionId: 'test_session_' + Date.now(),
+                        source: 'Manual Test Button', isAbnormal: false, cropSnapshot: 'https://placekitten.com/300/300'
+                      });
+                    }}
+                  >
+                    <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>Simulate Normal (Banner)</Text>
+                  </TouchableOpacity>
+                </View>
+
                 <TouchableOpacity
                   style={styles.switchCameraButton}
                   onPress={toggleCamera}
@@ -69,9 +216,6 @@ export default function CameraScreen({ onNavigate, session }) {
               </View>
             </View>
 
-            <View style={styles.statusBadge}>
-              <Text style={styles.badgeText}>Connected - {minutes}m ago</Text>
-            </View>
           </View>
 
           <View style={styles.household}>
@@ -167,7 +311,7 @@ export default function CameraScreen({ onNavigate, session }) {
 
         <BottomNav current="Camera" onNavigate={onNavigate} />
       </SafeAreaView>
-    </LinearGradient>
+    </LinearGradient >
   );
 }
 
@@ -179,13 +323,66 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 100,
   },
+  headerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     textAlign: 'center',
     color: '#0C5A58',
-    marginTop: 8,
+  },
+  bellButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  notificationDot: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F44336',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  overlayBannerWrapper: {
     marginBottom: 16,
+    zIndex: 10,
+  },
+  overlayBanner: {
+    backgroundColor: '#F44336',
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  overlayTextContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  overlayTitle: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  overlayDesc: {
+    color: '#ffebee',
+    fontSize: 12,
   },
   cameraBox: {
     marginBottom: 0,
@@ -257,20 +454,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
-  },
-  statusBadge: {
-    position: 'absolute',
-    top: 20,
-    left: 20,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  badgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
   },
   household: {
     backgroundColor: '#E0F2F1',

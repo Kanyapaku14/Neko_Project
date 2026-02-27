@@ -6,9 +6,9 @@ import { View, Text, SafeAreaView, TouchableOpacity, StyleSheet, ScrollView, Ima
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import supabase from './config/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
-import { Picker } from '@react-native-picker/picker';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import AlertEngine from '../services/AlertEngine'; // Global Alert Manager
 
 const CAMERA_BRANDS = [
     { label: 'TP-Link Tapo C200', value: 'tapo_c200', api: 'Tapo Cloud API' },
@@ -21,8 +21,10 @@ const CAMERA_BRANDS = [
 // 2. Main Component (หน้าจอตั้งค่า)
 // ==============================================
 export default function SetcameraScreen({ onNavigate, session }) {
-    // State simulating connection status (Toggle for demo)
-    const [isConnected, setIsConnected] = useState(true);
+    // State simulating connection status
+    const [streamUrl, setStreamUrl] = useState(null);
+    const [lastSignal, setLastSignal] = useState(null);
+    const [cameraStatus, setCameraStatus] = useState("disconnected"); // 'disconnected' | 'connecting' | 'connected'
 
     // Monitoring Mode State
     const [monitoringMode, setMonitoringMode] = useState('multi'); // 'single' | 'multi'
@@ -33,6 +35,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
     // Hardware State
     const [selectedCameraPreset, setSelectedCameraPreset] = useState('tapo_c200');
     const [customCameraBrand, setCustomCameraBrand] = useState('');
+    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const selectedCameraMeta = CAMERA_BRANDS.find((item) => item.value === selectedCameraPreset);
     const selectedCameraApi = selectedCameraMeta?.api || 'Manual API setup required';
 
@@ -53,8 +56,10 @@ export default function SetcameraScreen({ onNavigate, session }) {
                     // Load saved selection settings
                     const mode = await AsyncStorage.getItem('camera_monitoringMode');
                     const savedCatsJson = await AsyncStorage.getItem('camera_selectedCats');
+                    const savedStatus = await AsyncStorage.getItem('camera_status');
 
                     if (mode) setMonitoringMode(mode);
+                    if (savedStatus) setCameraStatus(savedStatus);
 
                     if (savedCatsJson) {
                         setSelectedCats(JSON.parse(savedCatsJson));
@@ -74,8 +79,37 @@ export default function SetcameraScreen({ onNavigate, session }) {
         load();
     }, [session]);
 
-    const toggleConnection = () => {
-        setIsConnected(!isConnected);
+    const updateCameraStatus = async (status) => {
+        setCameraStatus(status);
+        await AsyncStorage.setItem('camera_status', status);
+
+        // Global Alert Engine Triggers
+        if (status === 'disconnected') {
+            await AlertEngine.logEvent({
+                type: 'camera_connection',
+                severity: 'critical',
+                title: 'Camera Disconnected',
+                desc: 'Lost connection to Litter Box camera.',
+                details: 'The camera feed cannot be established. Please check power or Wi-Fi.'
+            });
+        } else if (status === 'connected') {
+            await AlertEngine.resolveActiveAlerts('camera_connection', {
+                title: 'System Online',
+                desc: 'Camera connection restored automatically.',
+                details: 'All systems functioning normally.'
+            });
+        }
+    };
+
+    const handleTestConnection = () => {
+        // Here you would eventually add your real frontend fetch/reconnect logic
+        if (cameraStatus === 'disconnected') {
+            updateCameraStatus('connecting');
+            setTimeout(() => updateCameraStatus('connected'), 1500);
+        } else if (cameraStatus === 'connected') {
+            updateCameraStatus('connecting');
+            setTimeout(() => updateCameraStatus('connected'), 800);
+        }
     };
 
     const toggleCatSelection = async (id) => {
@@ -84,7 +118,6 @@ export default function SetcameraScreen({ onNavigate, session }) {
             newSelected = [id];
         } else {
             if (selectedCats.includes(id)) {
-                // Prevent deselecting all if you want at least one?
                 if (selectedCats.length > 1) {
                     newSelected = selectedCats.filter(catId => catId !== id);
                 }
@@ -128,29 +161,49 @@ export default function SetcameraScreen({ onNavigate, session }) {
                     <View style={[styles.card, { backgroundColor: 'rgba(0,0,0,0.25)' }]}>
                         <View style={styles.connectionHeader}>
                             <View style={styles.statusRow}>
-                                <View style={[styles.statusDot, { backgroundColor: isConnected ? '#56b059ff' : '#F44336' }]} />
+                                <View style={[styles.statusDot, {
+                                    backgroundColor: cameraStatus === 'connected' ? '#56b059ff' :
+                                        cameraStatus === 'connecting' ? '#FFC107' : '#F44336'
+                                }]} />
                                 <Text style={styles.sectionTitleWhite}>
-                                    {isConnected ? 'Camera Connected' : 'Camera Disconnected'}
+                                    {cameraStatus === 'connected' ? 'Camera Connected' :
+                                        cameraStatus === 'connecting' ? 'Connecting...' : 'Camera Disconnected'}
                                 </Text>
                             </View>
                             {/* Status Icon Top Right */}
-                            <View style={[styles.statusIconBg, { backgroundColor: isConnected ? '#75c776ff' : '#F44336' }]}>
-                                <Ionicons name={isConnected ? "refresh" : "alert-outline"} size={16} color="#fff" />
+                            <View style={[styles.statusIconBg, {
+                                backgroundColor: cameraStatus === 'connected' ? '#75c776ff' :
+                                    cameraStatus === 'connecting' ? '#FFB300' : '#F44336'
+                            }]}>
+                                <Ionicons name={cameraStatus === 'connected' ? "checkmark" : cameraStatus === "connecting" ? "sync" : "alert-outline"} size={16} color="#fff" />
                             </View>
                         </View>
 
                         <Text style={styles.statusDesc}>
-                            {isConnected
+                            {cameraStatus === 'connected'
                                 ? 'Connection Health: Excellent \nSignal Strength: Strong'
-                                : 'No signal received from this camera\nPlease check the camera power and internet connection'
+                                : cameraStatus === 'connecting'
+                                    ? 'Establishing secure connection...'
+                                    : 'No signal received from this camera\nPlease check the camera power and internet connection'
                             }
                         </Text>
 
                         <TouchableOpacity
-                            style={styles.actionButtonGray}
-                            onPress={toggleConnection}
+                            style={[
+                                styles.actionButtonGray,
+                                cameraStatus === 'connected' && { backgroundColor: '#4CAF50', borderColor: '#4CAF50' },
+                                cameraStatus === 'connecting' && { opacity: 0.6 }
+                            ]}
+                            onPress={handleTestConnection}
+                            disabled={cameraStatus === 'connecting'}
                         >
-                            <Text style={styles.actionButtonText}>Test Connection</Text>
+                            <Text style={[
+                                styles.actionButtonText,
+                                cameraStatus === 'connected' && { color: '#fff' }
+                            ]}>
+                                {cameraStatus === 'connected' ? 'Refresh Signal' :
+                                    cameraStatus === 'connecting' ? 'Connecting...' : 'Test Connection'}
+                            </Text>
                         </TouchableOpacity>
                     </View>
 
@@ -163,14 +216,18 @@ export default function SetcameraScreen({ onNavigate, session }) {
 
                         <View style={styles.previewContent}>
                             {/* Placeholder Image or Message */}
-                            {isConnected ? (
+                            {cameraStatus === 'connected' ? (
                                 <View style={styles.previewPlaceholder}>
                                     <Ionicons name="image-outline" size={48} color="#ccc" />
                                 </View>
                             ) : (
                                 <View style={styles.previewPlaceholder}>
-                                    <Text style={styles.errorText}>The camera in the litter box area has lost connection.</Text>
-                                    <Text style={styles.errorSubText}>Health monitoring is temporarily paused.</Text>
+                                    <Text style={styles.errorText}>
+                                        {cameraStatus === 'connecting' ? 'Connecting to camera...' : 'The camera in the litter box area has lost connection.'}
+                                    </Text>
+                                    <Text style={styles.errorSubText}>
+                                        {cameraStatus === 'connecting' ? 'Please wait' : 'Health monitoring is temporarily paused.'}
+                                    </Text>
                                 </View>
                             )}
 
@@ -234,20 +291,54 @@ export default function SetcameraScreen({ onNavigate, session }) {
                     <View style={styles.card}>
                         <Text style={styles.sectionTitle}>Camera Hardware</Text>
                         <Text style={styles.label}>Camera brand (API compatible)</Text>
-                        <View style={styles.pickerContainer}>
-                            <Picker
-                                selectedValue={selectedCameraPreset}
-                                onValueChange={(itemValue) => {
-                                    setSelectedCameraPreset(itemValue);
-                                }}
-                                style={styles.picker}
-                                mode="dropdown"
-                                dropdownIconColor="#333"
+                        <View style={{ marginBottom: 12 }}>
+                            <TouchableOpacity
+                                style={styles.dropdownHeader}
+                                onPress={() => setIsDropdownOpen(!isDropdownOpen)}
+                                activeOpacity={0.7}
                             >
-                                {CAMERA_BRANDS.map((camera) => (
-                                    <Picker.Item key={camera.value} label={camera.label} value={camera.value} />
-                                ))}
-                            </Picker>
+                                <Text style={styles.dropdownHeaderText}>
+                                    {selectedCameraMeta?.label || 'Select Camera'}
+                                </Text>
+                                <Ionicons name={isDropdownOpen ? "chevron-up" : "chevron-down"} size={20} color="#555" />
+                            </TouchableOpacity>
+
+                            {isDropdownOpen && (
+                                <View style={styles.dropdownListContainer}>
+                                    {CAMERA_BRANDS.map((camera, index) => (
+                                        <TouchableOpacity
+                                            key={camera.value}
+                                            style={[
+                                                styles.dropdownItem,
+                                                index === CAMERA_BRANDS.length - 1 && { borderBottomWidth: 0 }
+                                            ]}
+                                            onPress={() => {
+                                                if (selectedCameraPreset !== camera.value) {
+                                                    setSelectedCameraPreset(camera.value);
+                                                    setIsDropdownOpen(false);
+
+                                                    // Reset states to prevent state sticking
+                                                    setStreamUrl(null);
+                                                    setLastSignal(null);
+                                                    updateCameraStatus("disconnected");
+                                                } else {
+                                                    setIsDropdownOpen(false);
+                                                }
+                                            }}
+                                        >
+                                            <Text style={[
+                                                styles.dropdownItemText,
+                                                selectedCameraPreset === camera.value && styles.dropdownItemTextSelected
+                                            ]}>
+                                                {camera.label}
+                                            </Text>
+                                            {selectedCameraPreset === camera.value && (
+                                                <Ionicons name="checkmark" size={18} color="#00695C" />
+                                            )}
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            )}
                         </View>
 
                         {selectedCameraPreset === 'custom' && (
@@ -509,19 +600,45 @@ const styles = StyleSheet.create({
         marginBottom: 4,
         fontWeight: '600'
     },
-    pickerContainer: {
+    dropdownHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
         backgroundColor: '#fff',
-        borderRadius: 8,
-        overflow: 'hidden',
-        marginBottom: 12,
-        height: 40,
-        justifyContent: 'center',
         borderWidth: 1,
-        borderColor: '#CFD8DC'
+        borderColor: '#CFD8DC',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        height: 44,
     },
-    picker: {
-        width: '100%',
+    dropdownHeaderText: {
         color: '#333',
+        fontSize: 12,
+    },
+    dropdownListContainer: {
+        backgroundColor: '#fff',
+        borderWidth: 1,
+        borderColor: '#CFD8DC',
+        borderRadius: 8,
+        marginTop: 4,
+        overflow: 'hidden',
+    },
+    dropdownItem: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f0f0f0',
+    },
+    dropdownItemText: {
+        color: '#555',
+        fontSize: 12,
+    },
+    dropdownItemTextSelected: {
+        color: '#00695C',
+        fontWeight: 'bold',
     },
     inputRow: {
         flexDirection: 'row',
