@@ -1,6 +1,8 @@
+import 'react-native-gesture-handler';
 import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator, AppState } from 'react-native';
-// ✅ นำเข้า SafeAreaProvider ตรงนี้
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+// Import SafeAreaProvider here
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import SignInScreen from './src/screens/SignInScreen';
@@ -12,7 +14,7 @@ import supabase from './src/screens/config/supabaseClient';
 import Dashboard from './src/screens/Dashbord';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// ✅ 1. Import ไฟล์ LogDailyNormal เข้ามา
+// 1. Import the LogDailyNormal file
 import LogDailyNormal from './src/screens/LogDailyNormal';
 import HomeScreen from './src/screens/HomeScreen'; // อย่าลืม Import Home ด้วยถ้าจะใช้
 import CalendarScreen from './src/screens/CalendarScreen';
@@ -30,6 +32,9 @@ import MainTabNavigator from './src/screens/MainTabNavigator';
 import CommunityScreen from './src/screens/CommunityScreen';
 import RankingScreen from './src/screens/RankingScreen';
 import CommunityProfile from './src/screens/CommunityProfile';
+import { GlobalAlertQueueProvider } from './src/services/GlobalAlertQueue';
+import AlertScreen from './src/screens/AlertScreen';
+import EventDetailScreen from './src/screens/EventDetailScreen';
 
 import { useFonts } from 'expo-font';
 import {
@@ -276,8 +281,14 @@ export default function App() {
       if (currentScreenName === 'AnalysisResult') {
         return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} />;
       }
+      if (currentScreenName === 'Alert') {
+        return <AlertScreen onBack={() => setAuthScreen('Camera')} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+      }
+      if (currentScreenName === 'EventDetail') {
+        return <EventDetailScreen onBack={() => setAuthScreen('Alert')} alertData={screenParams?.alertData} />;
+      }
 
-            // ✅ Dashboard Screen
+      // Dashboard Screen
       if (authScreen === 'Dashboard') {
         return <Dashboard
           session={session}
@@ -286,7 +297,7 @@ export default function App() {
         />;
       }
 
-      // ✅ Timeline Screen
+      // Timeline Screen
       if (authScreen === 'Timeline') {
         return <TimelineScreen
           session={session}
@@ -294,7 +305,7 @@ export default function App() {
         />;
       }
 
-   if (currentScreenName === 'Phone') {
+      if (currentScreenName === 'Phone') {
         return (
           <Phone
             session={session}
@@ -304,7 +315,7 @@ export default function App() {
           />
         );
       }
-      // ✅ Default Home
+      // Default Home
       return <HomeScreen
         onLogout={handleSignOut}
         onLogDaily={() => setAuthScreen('LogDaily')}
@@ -328,10 +339,14 @@ export default function App() {
   };
 
 
-  // ✅ ครอบทั้งหมดด้วย SafeAreaProvider ที่นี่ครับ
+  // Wrap everything with SafeAreaProvider here
   return (
-    <SafeAreaProvider>
-      {renderScreen()}
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <GlobalAlertQueueProvider session={session}>
+          {renderScreen()}
+        </GlobalAlertQueueProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
