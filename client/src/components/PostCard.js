@@ -12,7 +12,7 @@ const { width } = Dimensions.get('window');
 
 export default function PostCard({ post, onLike, onOpen, onMore, currentUserId }) {
   const isLiked = post.likes.includes(currentUserId);
-  const timeAgo = new Date(post.createdAt).toLocaleDateString(); // Simple date format
+  const timeAgo = new Date(post.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
   return (
     <View style={styles.cardContainer}>

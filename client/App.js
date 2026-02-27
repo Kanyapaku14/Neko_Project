@@ -246,20 +246,22 @@ export default function App() {
         return <CommunityScreen
           session={session}
           onBack={() => setAuthScreen('MainTabNavigator')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
         />;
       }
       if (currentScreenName === 'Ranking') {
         return <RankingScreen
           session={session}
           onBack={() => setAuthScreen('MainTabNavigator')}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
         />;
       }
       if (currentScreenName === 'CommunityProfile') {
         return <CommunityProfile
           session={session}
+          userId={screenParams?.userId}
           onBack={() => setAuthScreen('MainTabNavigator')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
         />;
       }
       if (currentScreenName === 'Camera') {
@@ -274,7 +276,25 @@ export default function App() {
       if (currentScreenName === 'AnalysisResult') {
         return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} />;
       }
-      if (currentScreenName === 'Phone') {
+
+            // ✅ Dashboard Screen
+      if (authScreen === 'Dashboard') {
+        return <Dashboard
+          session={session}
+          onBack={() => setAuthScreen('Home')}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+
+      // ✅ Timeline Screen
+      if (authScreen === 'Timeline') {
+        return <TimelineScreen
+          session={session}
+          onBack={() => setAuthScreen('Dashboard')}
+        />;
+      }
+
+   if (currentScreenName === 'Phone') {
         return (
           <Phone
             session={session}
@@ -284,8 +304,7 @@ export default function App() {
           />
         );
       }
-
-      // Default Home for auth
+      // ✅ Default Home
       return <HomeScreen
         onLogout={handleSignOut}
         onLogDaily={() => setAuthScreen('LogDaily')}
