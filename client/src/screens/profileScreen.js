@@ -282,36 +282,39 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
                     </View>
 
                     {/* Gender Selection */}
-                    <View style={styles.inputGroup}>
+                    <View style={[styles.inputGroup, { zIndex: 3000 }]}>
                         <Text style={styles.labelprofile}>Gender</Text>
-                        <TouchableOpacity 
-                            style={[styles.input, { justifyContent: 'center' }]} 
+                        <TouchableOpacity
+                            activeOpacity={0.8}
                             onPress={() => setShowGenderPicker(!showGenderPicker)}
+                            style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
                         >
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <Text style={{ color: gender ? '#333' : '#999', fontSize: 16 }}>
-                                    {gender || 'Select Gender'}
-                                </Text>
-                                <Text style={{ color: '#2F6A62', fontSize: 12 }}>▼</Text>
-                            </View>
+                            <Text
+                                style={{ fontSize: 16, color: gender ? '#333' : '#999', flexShrink: 1, paddingRight: 8 }}
+                                numberOfLines={1}
+                                ellipsizeMode="tail"
+                            >
+                                {gender || "Select Gender"}
+                            </Text>
+                            <Text style={{ fontSize: 12, color: '#666' }}>{showGenderPicker ? "▲" : "▼"}</Text>
                         </TouchableOpacity>
 
                         {showGenderPicker && (
-                            <View style={{ backgroundColor: '#fff', borderRadius: 10, marginTop: 5, borderWidth: 1, borderColor: '#eee', overflow: 'hidden' }}>
-                                <Picker
-                                    selectedValue={gender}
-                                    onValueChange={(itemValue) => {
-                                        setGender(itemValue);
-                                        if (itemValue !== "") setShowGenderPicker(false);
-                                    }}
-                                    style={{ width: '100%' }}
-                                    dropdownIconColor="#2F6A62"
-                                >
-                                    <Picker.Item label="Select Gender" value="" color="#999" />
-                                    <Picker.Item label="Male" value="Male" />
-                                    <Picker.Item label="Female" value="Female" />
-                                    <Picker.Item label="Other" value="Other" />
-                                </Picker>
+                            <View style={{ backgroundColor: '#fff', borderRadius: 10, marginTop: 5, borderWidth: 1, borderColor: '#eee', overflow: 'hidden', position: 'absolute', top: 70, left: 0, right: 0, zIndex: 4000, elevation: 5 }}>
+                                {[{ label: 'Male', value: 'Male' }, { label: 'Female', value: 'Female' }, { label: 'Other', value: 'Other' }].map((item, index) => (
+                                    <TouchableOpacity
+                                        key={index}
+                                        style={{ padding: 12, borderBottomWidth: index === 2 ? 0 : 1, borderBottomColor: '#f0f0f0' }}
+                                        onPress={() => {
+                                            setGender(item.value);
+                                            setShowGenderPicker(false);
+                                        }}
+                                    >
+                                        <Text style={{ fontSize: 16, color: gender === item.value ? '#2F6A62' : '#333' }}>
+                                            {item.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
                             </View>
                         )}
                     </View>

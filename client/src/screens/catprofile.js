@@ -11,6 +11,7 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
     const [catName, setCatName] = useState('');
     const [birthDate, setBirthDate] = useState('');
     const [gender, setGender] = useState('Male'); // Male, Female
+    const [isGenderDropdownOpen, setIsGenderDropdownOpen] = useState(false);
     const [isNeutered, setIsNeutered] = useState('Yes'); // Yes, No
     const [breed, setBreed] = useState('');
     const [currentWeight, setCurrentWeight] = useState('');
@@ -283,18 +284,42 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
                     {/* Gender and Sterilization Row */}
                     <View style={styles.rowContainer}>
                         {/* Gender Column */}
-                        <View style={{ width: '48%' }}>
+                        <View style={{ width: '48%', zIndex: 3000 }}>
                             <Text style={[styles.label, { marginBottom: 5 }]}>Gender</Text>
-                            <View style={[styles.input, { width: '100%', paddingHorizontal: 0, justifyContent: 'center' }]}>
-                                <Picker
-                                    selectedValue={gender}
-                                    onValueChange={(itemValue) => setGender(itemValue)}
-                                    style={{ width: '100%', height: 50 }}
-                                    dropdownIconColor="#2F6A62"
+                            <View style={{ width: '100%', position: 'relative' }}>
+                                <TouchableOpacity
+                                    activeOpacity={0.8}
+                                    onPress={() => setIsGenderDropdownOpen(!isGenderDropdownOpen)}
+                                    style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }]}
                                 >
-                                    <Picker.Item label="Male" value="Male" />
-                                    <Picker.Item label="Female" value="Female" />
-                                </Picker>
+                                    <Text
+                                        style={{ fontSize: 16, color: gender ? '#333' : '#999', flexShrink: 1, paddingRight: 8 }}
+                                        numberOfLines={1}
+                                        ellipsizeMode="tail"
+                                    >
+                                        {gender || "Select Gender"}
+                                    </Text>
+                                    <Text style={{ fontSize: 12, color: '#666' }}>{isGenderDropdownOpen ? "▲" : "▼"}</Text>
+                                </TouchableOpacity>
+
+                                {isGenderDropdownOpen && (
+                                    <View style={{ backgroundColor: '#fff', borderRadius: 10, marginTop: 5, borderWidth: 1, borderColor: '#eee', overflow: 'hidden', position: 'absolute', top: 50, left: 0, right: 0, zIndex: 4000, elevation: 5 }}>
+                                        {[{ label: 'Male', value: 'Male' }, { label: 'Female', value: 'Female' }].map((item, index) => (
+                                            <TouchableOpacity
+                                                key={index}
+                                                style={{ padding: 12, borderBottomWidth: index === 1 ? 0 : 1, borderBottomColor: '#f0f0f0' }}
+                                                onPress={() => {
+                                                    setGender(item.value);
+                                                    setIsGenderDropdownOpen(false);
+                                                }}
+                                            >
+                                                <Text style={{ fontSize: 16, color: gender === item.value ? '#2F6A62' : '#333' }}>
+                                                    {item.label}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                )}
                             </View>
                         </View>
 

@@ -447,7 +447,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   editButton: {
-    backgroundColor: "rgba(255,255,255,0.4)", // Slightly more opaque
+    backgroundColor: "#3FA8A4", // Slightly more opaque
     paddingVertical: 16,
     width: "100%", // Full width
     borderRadius: 12,

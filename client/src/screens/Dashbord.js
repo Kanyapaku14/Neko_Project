@@ -6,6 +6,8 @@ import HealthTrendsChart from "../components/HealthTrendsChart";
 import HomeHeader from "../components/HomeHeader";
 import supabase from "./config/supabaseClient";
 import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
+import * as Print from 'expo-print';
+import { shareAsync } from 'expo-sharing';
 
 
 
@@ -20,16 +22,20 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState("7 DAY");
   const [userProfile, setUserProfile] = useState(null);
+  
+  // States for PDF Export
+  const [catDetails, setCatDetails] = useState(null);
+  const [rawLogs, setRawLogs] = useState([]);
 
   useEffect(() => {
     if (session?.user) {
-      fetchLast7DaysLogs();
+      fetchDashboardData();
     } else {
       setLoading(false);
     }
-  }, [session]);
+  }, [session, selectedPeriod]);
 
-  const fetchLast7DaysLogs = async () => {
+  const fetchDashboardData = async () => {
     try {
       setLoading(true);
 
@@ -41,10 +47,10 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         .single();
       setUserProfile(profile);
 
-      // 1. หา ID แมวของ User
+      // 1. หาข้อมูลแมวทั้งหมดของ User ไว้ทำ PDF
       const { data: catData, error: catError } = await supabase
         .from("cats")
-        .select("id")
+        .select("*")
         .eq("owner_id", session.user.id)
         .limit(1)
         .single();
@@ -55,8 +61,11 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         setCurrentScore(100); // ถ้าไม่มีแมว ให้เต็ม 100 ไปก่อน
         return;
       }
+      setCatDetails(catData);
 
-      // 2. ดึง Log ย้อนหลัง 7 วัน พร้อมข้อมูลรายละเอียด
+      let daysLimit = selectedPeriod === "1 MONTH" ? 30 : 7;
+
+      // 2. ดึง Log ย้อนหลังตามช่วงเวลา พร้อมข้อมูลรายละเอียด
       const { data: logsData, error: logsError } = await supabase
         .from("daily_logs")
 
@@ -64,14 +73,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
         .eq("cat_id", catData.id)
         .order("log_date", { ascending: false })
-        .limit(7);
+        .limit(daysLimit);
 
       if (logsError) throw logsError;
 
       // ====================================================
       // 🎯 ส่วนคำนวณคะแนนเฉลี่ย 7 วัน (หัวใจสำคัญ)
       // ====================================================
-      // Unified data for processing
       const unifiedLogs = (logsData || []).map(log => {
         const details = log.log_type === 'something_off'
           ? (log.something_off_logs?.[0] || log.something_off_logs)
@@ -82,6 +90,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
           ...(details || {})
         };
       });
+
+      setRawLogs(unifiedLogs);
 
       if (unifiedLogs.length > 0) {
         let totalScore = 0;
@@ -123,7 +133,164 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     }
   };
 
-  const periods = ["7 DAY"];
+  const calculateAge = (birthdate) => {
+    if (!birthdate) return 'N/A';
+    const birth = new Date(birthdate);
+    const today = new Date();
+    let years = today.getFullYear() - birth.getFullYear();
+    let months = today.getMonth() - birth.getMonth();
+    if (months < 0) {
+      years--;
+      months += 12;
+    }
+    return `${years} yrs ${months} mos`;
+  };
+
+  const handleExportPDF = async () => {
+    if (!catDetails || rawLogs.length === 0) {
+      alert("No data available to export");
+      return;
+    }
+
+    try {
+      const logsForExport = rawLogs.slice(0, 7); // เอาแค่ 7 วันล่าสุดเวลา Generate
+      
+      const rowsHTML = logsForExport.map((log) => {
+        const dateObj = new Date(log.log_date);
+        const dateStr = `${dateObj.getDate().toString().padStart(2, '0')}/${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getFullYear()}`;
+        
+        let typeText = log.log_type === 'normal' ? 'Normal' : 'Something Off';
+        let color = log.log_type === 'normal' ? 'green' : 'orange';
+
+        // หาแค่ค่าคร่าวๆ ถ้ามี log_type something_off แสดงอาการ
+        let summary = "-";
+        if (log.log_type === 'something_off') {
+           const issues = [];
+           if (log.has_vomit) issues.push('Vomit');
+           if (log.has_diarrhea) issues.push('Diarrhea');
+           if (log.behavior_energy) issues.push(log.behavior_energy);
+           if (log.respiratory_physical) issues.push(log.respiratory_physical);
+           summary = issues.join(', ') || 'Abnormal';
+        } else {
+           summary = `Food: ${log.total_food_grams || 0}g, Water: ${log.water_ml_per_day || 0}ml`;
+        }
+
+        return `
+          <tr>
+            <td style="text-align: center;">${dateStr}</td>
+            <td style="color: ${color}; font-weight: bold; text-align: center;">${typeText}</td>
+            <td>${summary}</td>
+            <td>${log.notes || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const html = `
+        <html>
+          <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+            <style>
+              @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap');
+              body {
+                font-family: 'Sarabun', sans-serif;
+                padding: 40px;
+                color: #333;
+              }
+              h1 {
+                text-align: center;
+                color: #2D4A47;
+                margin-bottom: 5px;
+              }
+              .subtitle {
+                text-align: center;
+                color: #5F7671;
+                margin-bottom: 30px;
+              }
+              .info-box {
+                background: #f4f8f7;
+                padding: 15px 25px;
+                border-radius: 12px;
+                border: 1px solid #d1e2e0;
+                margin-bottom: 30px;
+              }
+              .info-box h2 {
+                margin-top: 0;
+                color: #2D4A47;
+                font-size: 18px;
+                border-bottom: 2px solid #2D4A47;
+                padding-bottom: 5px;
+              }
+              .info-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px 20px;
+                font-size: 14px;
+              }
+              .info-row span.label {
+                font-weight: bold;
+                color: #5F7671;
+              }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 10px;
+                font-size: 14px;
+              }
+              th, td {
+                border: 1px solid #d1e2e0;
+                padding: 12px;
+                text-align: left;
+              }
+              th {
+                background-color: #2D4A47;
+                color: white;
+                text-align: center;
+              }
+              tr:nth-child(even) {
+                background-color: #f9fbfb;
+              }
+            </style>
+          </head>
+          <body>
+            <h1>Cat Health Report</h1>
+            <div class="subtitle">Summary of the last 7 days</div>
+            
+            <div class="info-box">
+              <h2>Cat Profile</h2>
+              <div class="info-grid">
+                <div class="info-row"><span class="label">Name:</span> ${catDetails.name || 'Unknown'}</div>
+                <div class="info-row"><span class="label">Breed:</span> ${catDetails.breed || 'Unknown'}</div>
+                <div class="info-row"><span class="label">Age:</span> ${calculateAge(catDetails.birthdate)}</div>
+                <div class="info-row"><span class="label">Gender:</span> ${catDetails.gender === 'M' ? 'Male' : catDetails.gender === 'F' ? 'Female' : 'Unknown'}</div>
+                <div class="info-row"><span class="label">Weight:</span> ${catDetails.weight ? catDetails.weight + ' kg' : 'Unknown'}</div>
+                <div class="info-row"><span class="label">Spayed/Neutered:</span> ${catDetails.spayed_neutered ? 'Yes' : 'No'}</div>
+              </div>
+            </div>
+
+            <h2>Health Logs (Last 7 Days)</h2>
+            <table>
+              <tr>
+                <th width="15%">Date</th>
+                <th width="15%">Status</th>
+                <th width="45%">Details</th>
+                <th width="25%">Notes</th>
+              </tr>
+              ${rowsHTML}
+            </table>
+          </body>
+        </html>
+      `;
+
+      const { uri } = await Print.printToFileAsync({ html });
+      await shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+      
+    } catch (error) {
+      console.error("Error creating PDF:", error);
+      alert("Failed to create PDF");
+    }
+  };
+
+  const periods = ["7 DAY", "1 MONTH"];
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -248,7 +415,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                   selectedPeriod === period && styles.periodButtonActive,
                 ]}
                 onPress={() => setSelectedPeriod(period)}
-                disabled={period !== "7 DAY"}
               >
                 <Text
                   style={[
@@ -303,7 +469,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
               shadowRadius: 4,
               elevation: 3
             }}
-            onPress={() => console.log('Export pressed')}
+            onPress={handleExportPDF}
           >
             <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#2D4A47', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
               <MaterialCommunityIcons name="export-variant" size={20} color="#fff" />
