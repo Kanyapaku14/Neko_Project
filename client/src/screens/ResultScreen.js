@@ -46,9 +46,9 @@ const getRiskColor = (riskLevel) => {
 };
 
 const getOverallRiskDetails = (score) => {
-  if (score === null || score === undefined || score === "No Data") return { label: "0", color: "#666666", text: "No Data" };
+  if (score === null || score === undefined || score === "No Data") return { label: "No Data", color: "#B0B0B0", text: "No Data" };
   const numScore = Number(score);
-  if (isNaN(numScore) || numScore === 0) return { label: "0", color: "#666666", text: "No Data" };
+  if (isNaN(numScore) || numScore === 0) return { label: "0", color: "#B0B0B0", text: "Extreme Risk" };
   if (numScore >= 91) return { label: `${numScore}%`, color: "#2ecc71", text: "Good Health" };
   if (numScore >= 71) return { label: `${numScore}%`, color: "#1abc9c", text: "Low Risk" };
   if (numScore >= 61) return { label: `${numScore}%`, color: "#f1c40f", text: "Moderate Risk" };
@@ -141,6 +141,27 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
 
   useEffect(() => {
     const loadInitialData = async () => {
+      // ==========================================
+      // 🚨 MOCK DATA สำหรับทดสอบ Donut Chart และ UI
+      // (ถ้าต้องการใช้ข้อมูลจริงจาก API ให้ลบ หรือ Comment ล็อคนี้ออก)
+      // ==========================================
+      setLoadingData(true);
+      setTimeout(() => {
+        setRiskData([
+          { label: "Kidney Disease", value: "Moderate", score: 68 },
+          { label: "Diabetes", value: "Low", score: 25 },
+          { label: "Urolithiasis", value: "Normal", score: 10 },
+          { label: "Gum Disease", value: "High", score: 85 },
+          { label: "Feline Panleukopenia", value: "Extreme", score: 98 },
+        ]);
+        setOverallScore(68); // ทดสอบคะแนนความเสี่ยงโดยรวม (Overall Score)
+        setSummaryTitle("ความเสี่ยงระดับปานกลาง");
+        setSummaryDesc("จากข้อมูลเบื้องต้นพบความเสี่ยงบางประการ ควรติดตามอาการน้องแมวอย่างใกล้ชิด");
+        setLoadingData(false);
+      }, 800); // จำลองการโหลด 0.8 วินาที
+      return;
+      // ==========================================
+
       if (!catId) {
         setShowNoDataModal(true);
         setLoadingData(false);
@@ -283,19 +304,21 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
                 fill="none"
               />
               {/* Foreground Progress Circle */}
-              <Circle
-                cx="90"
-                cy="90"
-                r={radius}
-                stroke={riskDetails.color}
-                strokeWidth="16"
-                strokeDasharray={circumference}
-                strokeDashoffset={strokeDashoffset}
-                strokeLinecap="round"
-                fill="none"
-              />
+              {clampedScore > 0 && (
+                <Circle
+                  cx="90"
+                  cy="90"
+                  r={radius}
+                  stroke={riskDetails.color}
+                  strokeWidth="16"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={strokeDashoffset}
+                  strokeLinecap="round"
+                  fill="none"
+                />
+              )}
             </Svg>
-            <Text style={[styles.riskText, { color: riskDetails.color }]}>{riskDetails.label}</Text>
+            <Text style={[styles.riskText, { color: riskDetails.color, fontSize: riskDetails.label === "No Data" ? 22 : undefined }]}>{riskDetails.label}</Text>
           </View>
           <Text style={[styles.recommendText, { color: riskDetails.color }]}>{riskDetails.text}</Text>
           <Text style={styles.subText}>Overall Health Risk</Text>
