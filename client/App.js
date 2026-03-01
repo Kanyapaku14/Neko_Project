@@ -23,6 +23,7 @@ import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScr
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
+import GalleryScreen from './src/screens/GalleryScreen';
 import SetcameraScreen from './src/screens/SetcameraScreen';
 import PhotoCheck from './src/screens/PhotoCheck';
 import AnalysisResult from './src/screens/AnalysisResult';
@@ -271,6 +272,9 @@ export default function App() {
       }
       if (currentScreenName === 'Camera') {
         return <CameraScreen session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+      }
+      if (currentScreenName === 'Gallery') {
+        return <GalleryScreen session={session} onBack={() => setAuthScreen('Camera')} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
       }
       if (currentScreenName === 'Setcamera') {
         return <SetcameraScreen session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;

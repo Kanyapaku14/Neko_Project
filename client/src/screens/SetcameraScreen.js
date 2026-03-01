@@ -134,22 +134,26 @@ export default function SetcameraScreen({ onNavigate, session }) {
         await AsyncStorage.setItem('camera_monitoringMode', mode);
         // Reset selection logic based on mode if needed
         if (mode === 'single') {
-            const first = [myCats[0].id];
-            setSelectedCats(first);
-            await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(first));
+            if (myCats && myCats.length > 0) {
+                const first = [myCats[0].id];
+                setSelectedCats(first);
+                await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(first));
+            } else {
+                setSelectedCats([]);
+            }
         }
     };
 
     return (
         <LinearGradient
-            colors={['#FFFFFF', '#95e4e4ff']} // Match CameraScreen Gradient
+            colors={['#F5FBFB', '#F5FBFB']}
             style={{ flex: 1 }}
         >
             <SafeAreaView style={styles.container}>
                 {/* Header */}
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => onNavigate('Camera')} style={styles.backButton}>
-                        <Ionicons name="arrow-back" size={24} color="#0C5A58" />
+                        <Ionicons name="arrow-back" size={20} color="#1C1C1E" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Camera Settings</Text>
                     <View style={styles.backButton} />
@@ -158,7 +162,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
                 <ScrollView contentContainerStyle={styles.content}>
 
                     {/* 1. Connection Status Banner */}
-                    <View style={[styles.card, { backgroundColor: 'rgba(0,0,0,0.25)' }]}>
+                    <View style={styles.card}>
                         <View style={styles.connectionHeader}>
                             <View style={styles.statusRow}>
                                 <View style={[styles.statusDot, {
@@ -208,10 +212,10 @@ export default function SetcameraScreen({ onNavigate, session }) {
                     </View>
 
                     {/* 2. Live Preview */}
-                    <View style={[styles.card, { padding: 0, overflow: 'hidden', backgroundColor: '#555' }]}>
+                    <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>
                         <View style={styles.previewHeader}>
-                            <Ionicons name="videocam-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
-                            <Text style={[styles.sectionTitleWhite, { color: '#fff' }]}>Live Preview</Text>
+                            <Ionicons name="videocam-outline" size={18} color="#1C1C1E" style={{ marginRight: 8 }} />
+                            <Text style={styles.sectionTitleWhite}>Live Preview</Text>
                         </View>
 
                         <View style={styles.previewContent}>
@@ -381,6 +385,22 @@ export default function SetcameraScreen({ onNavigate, session }) {
                         </View>
                     </View>
 
+                    {/* 5. Setup & Guide */}
+                    <View style={styles.card}>
+                        <Text style={styles.sectionTitle}>Help & Guide</Text>
+                        <Text style={styles.statusDesc}>
+                            Need help connecting your camera or want to learn how the tracking zones work? View the interactive setup guide again.
+                        </Text>
+                        <TouchableOpacity
+                            style={{ paddingVertical: 8, alignItems: 'flex-start' }}
+                            onPress={() => onNavigate('Phone', { initialStep: 'guide' })}
+                        >
+                            <Text style={{ color: '#00695C', fontWeight: '500', fontSize: 13, textDecorationLine: 'underline' }}>
+                                View Camera Setup Instructions
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+
                     <View style={{ height: 40 }} />
                 </ScrollView>
             </SafeAreaView>
@@ -394,7 +414,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        // backgroundColor: '#fff', // Removed for gradient
+        backgroundColor: '#F5FBFB',
     },
     header: {
         flexDirection: 'row',
@@ -402,15 +422,22 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: 16,
         paddingTop: 8,
-        paddingBottom: 16,
+        paddingBottom: 12,
     },
     backButton: {
-        width: 32,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     headerTitle: {
-        fontSize: 24, // Match CameraScreen
-        fontWeight: 'bold',
-        color: '#0C5A58', // Match CameraScreen
+        fontSize: 22,
+        fontWeight: '700',
+        color: '#1C1C1E',
         textAlign: 'center',
         flex: 1,
     },
@@ -420,24 +447,29 @@ const styles = StyleSheet.create({
     },
     // Cards
     card: {
-        backgroundColor: 'rgba(0, 0, 0, 0.25)', // Match CameraScreen Card Style
-        borderWidth: 0.5,
-        borderColor: '#898989',
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
         borderRadius: 16,
         padding: 16,
         marginBottom: 16,
         overflow: 'hidden',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.06,
+        shadowRadius: 10,
+        elevation: 3,
     },
     sectionTitle: {
-        color: '#FFFFFF', // Changed to White for contrast
+        color: '#1C1C1E',
         fontSize: 16,
-        fontWeight: 'bold',
+        fontWeight: '700',
         marginBottom: 12,
     },
     sectionTitleWhite: {
-        color: '#333', // Dark text for contrast on gray card
+        color: '#1C1C1E',
         fontSize: 16,
-        fontWeight: 'bold',
+        fontWeight: '700',
     },
 
     // Connection Status
@@ -465,21 +497,21 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     statusDesc: {
-        color: '#333', // Dark text
-        fontSize: 12,
+        color: '#3A3A3C',
+        fontSize: 13,
         marginBottom: 16,
         lineHeight: 18,
     },
     actionButtonGray: {
-        backgroundColor: 'rgba(0,0,0,0.1)',
+        backgroundColor: '#EEF2FF',
         paddingVertical: 12,
-        borderRadius: 20,
+        borderRadius: 999,
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#ddd'
+        borderColor: '#D6E4FF'
     },
     actionButtonText: {
-        color: '#333',
+        color: '#1A56C5',
         fontWeight: '600',
     },
 
@@ -488,11 +520,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         padding: 12,
-        backgroundColor: 'rgba(37, 40, 40, 0.1)'
+        backgroundColor: '#F8FAFC'
     },
     previewContent: {
         height: 180,
-        backgroundColor: '#abb2b1ff', // Placeholder bg
+        backgroundColor: '#ECEFF1',
         justifyContent: 'center',
         alignItems: 'center',
         position: 'relative',
@@ -503,13 +535,13 @@ const styles = StyleSheet.create({
         padding: 20,
     },
     errorText: {
-        color: '#fff',
+        color: '#374151',
         textAlign: 'center',
         fontSize: 12,
         fontWeight: '600',
     },
     errorSubText: {
-        color: '#eee',
+        color: '#6B7280',
         textAlign: 'center',
         fontSize: 10,
         marginTop: 4,
@@ -517,7 +549,7 @@ const styles = StyleSheet.create({
     overlayButton: {
         position: 'absolute',
         bottom: 16,
-        backgroundColor: 'rgba(70, 73, 73, 0.5)',
+        backgroundColor: '#3C8FDD',
         paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 20,
@@ -532,7 +564,7 @@ const styles = StyleSheet.create({
     // Monitoring Mode
     toggleContainer: {
         flexDirection: 'row',
-        backgroundColor: '#CFD8DC', // Lighter gray for toggle bg
+        backgroundColor: '#F2F4F7',
         borderRadius: 20,
         padding: 4,
         marginBottom: 16,
@@ -544,7 +576,7 @@ const styles = StyleSheet.create({
         borderRadius: 16,
     },
     toggleBtnActive: {
-        backgroundColor: '#fff', // White active
+        backgroundColor: '#fff',
         elevation: 2
     },
     toggleText: {
@@ -587,14 +619,14 @@ const styles = StyleSheet.create({
         marginTop: 8,
     },
     infoText: {
-        color: '#555',
+        color: '#6D6D72',
         fontSize: 10,
         marginLeft: 6,
     },
 
     // Hardware
     label: {
-        color: '#333',
+        color: '#3A3A3C',
         fontSize: 12,
         marginTop: 8,
         marginBottom: 4,
@@ -606,19 +638,19 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         backgroundColor: '#fff',
         borderWidth: 1,
-        borderColor: '#CFD8DC',
+        borderColor: '#E5E7EB',
         borderRadius: 8,
         paddingHorizontal: 12,
         height: 44,
     },
     dropdownHeaderText: {
-        color: '#333',
+        color: '#1F2937',
         fontSize: 12,
     },
     dropdownListContainer: {
         backgroundColor: '#fff',
         borderWidth: 1,
-        borderColor: '#CFD8DC',
+        borderColor: '#E5E7EB',
         borderRadius: 8,
         marginTop: 4,
         overflow: 'hidden',
@@ -648,7 +680,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         marginBottom: 16,
         borderWidth: 1,
-        borderColor: '#CFD8DC'
+        borderColor: '#E5E7EB'
     },
     input: {
         flex: 1,
@@ -657,7 +689,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
     },
     copyButton: {
-        backgroundColor: '#00695C',
+        backgroundColor: '#3C8FDD',
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 4,
@@ -668,7 +700,3 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
     },
 });
-
-
-
-

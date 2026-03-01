@@ -21,7 +21,7 @@ import supabase from '../screens/config/supabaseClient'; // Make sure this path 
 export const GlobalAlertQueueContext = createContext({
     // Expose methods in case screens want to manually push to queue
     pushAlert: () => { },
-    // Open the entire pending queue (e.g. from banner click)
+    // Open the entire pending queue 
     openPendingQueue: () => { },
 });
 
@@ -37,7 +37,7 @@ export function GlobalAlertQueueProvider({ children, session }) {
                 try {
                     const { data, error } = await supabase
                         .from('cats')
-                        .select('id, name, image_url') // Fetch needed fields
+                        .select('id, name, image_url')
                         .eq('owner_id', session.user.id);
                     if (!error && data) {
                         setCatsFromDb(data);
@@ -112,7 +112,8 @@ export function GlobalAlertQueueProvider({ children, session }) {
 
     const handleSelect = async (catId) => {
         if (!currentAlert) return;
-        await AlertEngine.resolveIdentity(currentAlert.id, catId, 'user');
+        const selectedCat = catsFromDb.find(c => c.id === catId);
+        await AlertEngine.resolveIdentity(currentAlert.id, catId, 'user', selectedCat?.name || null);
         setCurrentAlert(null); // Triggers effect #3 to pop next
     };
 
@@ -139,7 +140,7 @@ export function GlobalAlertQueueProvider({ children, session }) {
                 onSelect={handleSelect}
                 onSkip={handleSkip}
                 onDismiss={handleDismiss}
-                queueLength={queue.length} // Pass queue length to show "1 of 3" badge if desired
+                queueLength={queue.length}
             />
         </GlobalAlertQueueContext.Provider>
     );

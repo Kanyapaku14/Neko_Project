@@ -39,18 +39,16 @@ const SwipeableNotificationCard = ({
     alert,
     onPress,
     onDelete,
-    onRequestDeleteConfirm = (onConfirm, onCancel) => {
-        if (onConfirm) onConfirm();
-        else if (onCancel) onCancel();
-    },
     onMarkRead,
     isSelecting,
     isSelected,
     onToggleSelect,
+    onRequestDeleteConfirm,
 }) => {
-    const SWIPE_ENABLED = Platform.OS !== 'web';
     const pan = useRef(new Animated.ValueXY()).current;
     const deleteProgress = useRef(new Animated.Value(0)).current;
+    const selectModeAnim = useRef(new Animated.Value(isSelecting ? 1 : 0)).current;
+    const selectedAnim = useRef(new Animated.Value(isSelected ? 1 : 0)).current;
     const isDeletingRef = useRef(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const HARD_SWIPE_THRESHOLD_X = -(Dimensions.get('window').width * 0.5);
@@ -58,8 +56,10 @@ const SwipeableNotificationCard = ({
     const HARD_SWIPE_X = -198;
     const SWIPE_TRIGGER_X = -42;
     const SWIPE_OVERSHOOT_RESISTANCE = 0.22;
-    const isPending = alert.pendingIdentityConfirm === true;
+    const isSkippedUnfilled = alert.type === 'pending_identity' && alert.resolvedBy === 'skipped';
+    const isPending = alert.pendingIdentityConfirm === true || isSkippedUnfilled;
     const isCritical = alert.severity === 'critical';
+    const isIdentityResolved = alert.type === 'pending_identity' && !isPending && alert.resolvedBy && alert.resolvedBy !== 'skipped';
     const deleteOpacity = pan.x.interpolate({
         inputRange: [SWIPE_OPEN_X, -36, 0],
         outputRange: [1, 0.45, 0],
@@ -97,7 +97,7 @@ const SwipeableNotificationCard = ({
             mass: 0.85,
             overshootClamping: true,
         }).start();
-    const runDeleteAnimationAndDelete = () => {
+    const performDelete = () => {
         if (isDeletingRef.current) return;
         isDeletingRef.current = true;
         Animated.timing(deleteProgress, {
@@ -110,64 +110,67 @@ const SwipeableNotificationCard = ({
             onDelete(alert.id);
         });
     };
-    const requestDeleteConfirm = (onConfirm, onCancel) => {
-        try {
-            if (typeof onRequestDeleteConfirm === 'function') {
-                onRequestDeleteConfirm?.(onConfirm, onCancel, { mode: 'single' });
-                return;
-            }
-        } catch (e) {
-            // Fallback to local flow if parent callback is stale or undefined at runtime
+    const showDeleteConfirm = (onCancel) => {
+        if (typeof onRequestDeleteConfirm === 'function') {
+            onRequestDeleteConfirm({
+                title: 'Delete Notification',
+                message: 'Are you sure you want to delete this notification? This cannot be undone.',
+                confirmText: 'Delete',
+                onConfirm: performDelete,
+                onCancel: () => {
+                    if (onCancel) onCancel();
+                },
+            });
+            return;
         }
-        if (onConfirm) onConfirm();
-        else if (onCancel) onCancel();
+        performDelete();
     };
+
+    useEffect(() => {
+        Animated.timing(selectModeAnim, {
+            toValue: isSelecting ? 1 : 0,
+            duration: 180,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+        }).start();
+    }, [isSelecting, selectModeAnim]);
+
+    useEffect(() => {
+        Animated.spring(selectedAnim, {
+            toValue: isSelected ? 1 : 0,
+            useNativeDriver: true,
+            stiffness: 320,
+            damping: 20,
+            mass: 0.65,
+            overshootClamping: false,
+        }).start();
+    }, [isSelected, selectedAnim]);
 
     const panResponder = useRef(
         PanResponder.create({
             onMoveShouldSetPanResponderCapture: (evt, gestureState) => {
-                if (!SWIPE_ENABLED) return false;
                 if (isSelecting) return false;
-                const dx = gestureState && typeof gestureState.dx === 'number' ? gestureState.dx : 0;
-                const dy = gestureState && typeof gestureState.dy === 'number' ? gestureState.dy : 0;
-                return Math.abs(dx) > 20 && Math.abs(dx) > Math.abs(dy);
+                return Math.abs(gestureState.dx) > 20 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
             },
             onPanResponderMove: (evt, gestureState) => {
-                if (!SWIPE_ENABLED) return;
-                try {
-                    if (!pan || !pan.x || typeof pan.x.setValue !== 'function') return;
-                    const dx = Number(gestureState && gestureState.dx);
-                    if (!Number.isFinite(dx) || dx >= 0) return;
-
-                    let nextX = dx;
-                    if (nextX < SWIPE_OPEN_X) {
-                        nextX = SWIPE_OPEN_X + (nextX - SWIPE_OPEN_X) * SWIPE_OVERSHOOT_RESISTANCE;
-                    }
-                    // Absolute safety clamp for transient invalid gesture bursts.
-                    nextX = Math.max(nextX, HARD_SWIPE_X - 28);
-
-                    if (!Number.isFinite(nextX)) return;
-                    pan.x.setValue(nextX);
-                    if (pan.y && typeof pan.y.setValue === 'function') {
-                        pan.y.setValue(0);
-                    }
-                } catch (e) {
-                    // Ignore invalid transient gesture values to avoid crashing the UI thread bridge.
+                if (gestureState.dx < 0) {
+                    const rawX = gestureState.dx;
+                    const nextX = rawX < SWIPE_OPEN_X
+                        ? SWIPE_OPEN_X + (rawX - SWIPE_OPEN_X) * SWIPE_OVERSHOOT_RESISTANCE
+                        : rawX;
+                    pan.setValue({ x: nextX, y: 0 });
                 }
             },
             onPanResponderRelease: (evt, gestureState) => {
-                if (!SWIPE_ENABLED) return;
-                const dx = gestureState && typeof gestureState.dx === 'number' ? gestureState.dx : 0;
-                const vx = gestureState && typeof gestureState.vx === 'number' ? gestureState.vx : 0;
-                const isHardSwipe = dx < HARD_SWIPE_THRESHOLD_X;
+                const isHardSwipe = gestureState.dx < HARD_SWIPE_THRESHOLD_X;
                 if (isHardSwipe) {
-                    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch (e) {}
-                    animateToX(HARD_SWIPE_X, vx);
-                    requestDeleteConfirm(runDeleteAnimationAndDelete, () => animateToX(0, vx));
-                } else if (dx < SWIPE_TRIGGER_X) {
-                    animateToX(SWIPE_OPEN_X, vx);
+                    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch (e) { }
+                    animateToX(HARD_SWIPE_X, gestureState.vx);
+                    showDeleteConfirm(() => animateToX(0, gestureState.vx));
+                } else if (gestureState.dx < SWIPE_TRIGGER_X) {
+                    animateToX(SWIPE_OPEN_X, gestureState.vx);
                 } else {
-                    animateToX(0, vx);
+                    animateToX(0, gestureState.vx);
                 }
             },
         })
@@ -187,8 +190,8 @@ const SwipeableNotificationCard = ({
                 <TouchableOpacity
                     style={styles.deleteButton}
                     onPress={() => {
-                        try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch (e) {}
-                        requestDeleteConfirm(runDeleteAnimationAndDelete, () => animateToX(0, 0));
+                        try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch (e) { }
+                        showDeleteConfirm(() => animateToX(0, 0));
                     }}
                 >
                     <Animated.View
@@ -214,7 +217,7 @@ const SwipeableNotificationCard = ({
                         transform: [{ translateX: pan.x }, { translateY: cardTranslateY }, { scale: cardScale }],
                     },
                 ]}
-                {...(SWIPE_ENABLED ? panResponder.panHandlers : {})}
+                {...panResponder.panHandlers}
             >
                 <TouchableOpacity
                     style={styles.cardMainContent}
@@ -225,22 +228,93 @@ const SwipeableNotificationCard = ({
                     }}
                 >
                     {isSelecting && (
-                        <View style={styles.selectIconWrap}>
-                            <View style={[styles.selectIconCircle, isSelected && styles.selectIconCircleSelected]}>
-                                <Ionicons
-                                    name={isSelected ? 'checkmark' : 'ellipse-outline'}
-                                    size={isSelected ? 18 : 22}
-                                    color={isSelected ? '#FFFFFF' : '#C7C7CC'}
+                        <Animated.View
+                            style={[
+                                styles.selectIconWrap,
+                                {
+                                    opacity: selectModeAnim,
+                                    transform: [
+                                        {
+                                            translateX: selectModeAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: [-8, 0],
+                                            }),
+                                        },
+                                        {
+                                            scale: selectModeAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: [0.85, 1],
+                                            }),
+                                        },
+                                    ],
+                                },
+                            ]}
+                        >
+                            <Animated.View
+                                style={[
+                                    styles.selectIconCircle,
+                                    isSelected ? styles.selectIconCircleSelected : styles.selectIconCircleIdle,
+                                    {
+                                        transform: [
+                                            {
+                                                scale: selectedAnim.interpolate({
+                                                    inputRange: [0, 1],
+                                                    outputRange: [1, 1.08],
+                                                }),
+                                            },
+                                        ],
+                                    },
+                                ]}
+                            >
+                                <Animated.View
+                                    style={[
+                                        styles.selectIconFill,
+                                        {
+                                            opacity: selectedAnim,
+                                            transform: [
+                                                {
+                                                    scale: selectedAnim.interpolate({
+                                                        inputRange: [0, 1],
+                                                        outputRange: [0.7, 1],
+                                                    }),
+                                                },
+                                            ],
+                                        },
+                                    ]}
                                 />
-                            </View>
-                        </View>
+                                {isSelected ? (
+                                    <Ionicons name="checkmark" size={22} color="#FFFFFF" />
+                                ) : null}
+                            </Animated.View>
+                        </Animated.View>
                     )}
 
-                    <View style={[styles.iconContainer, isPending ? styles.pendingIconContainer : isCritical ? styles.iconCriticalBg : styles.iconSuccessBg]}>
+                    <View
+                        style={[
+                            styles.iconContainer,
+                            isPending
+                                ? styles.pendingIconContainer
+                                : isCritical
+                                        ? styles.iconCriticalBg
+                                        : styles.iconSuccessBg,
+                        ]}
+                    >
                         <MaterialCommunityIcons
-                            name={isPending ? 'help-rhombus-outline' : isCritical ? 'alert-circle-outline' : 'check-circle-outline'}
+                            name={
+                                isPending
+                                    ? 'help-rhombus-outline'
+                                    : isCritical
+                                            ? 'alert-circle-outline'
+                                            : 'check-circle-outline'
+                            }
                             size={26}
-                            color={isPending ? '#E65100' : isCritical ? '#D32F2F' : '#2E7D32'}
+                            color={
+                                isPending
+                                    ? '#E65100'
+                                    : isCritical
+                                            ? '#D32F2F'
+                                            : '#2E7D32'
+                            }
                         />
                     </View>
 
@@ -249,6 +323,8 @@ const SwipeableNotificationCard = ({
                             <Text style={[styles.alertTitle, !alert.isRead && styles.unreadText]}>{alert.title}</Text>
                             {isPending ? (
                                 <View style={styles.pendingBadge}><Text style={styles.pendingBadgeText}>Pending</Text></View>
+                            ) : isIdentityResolved ? (
+                                <View style={styles.resolvedBadge}><Text style={styles.resolvedBadgeText}>Identified</Text></View>
                             ) : !alert.isRead ? (
                                 <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>
                             ) : null}
@@ -285,18 +361,19 @@ export default function AlertScreen({ onBack, onNavigate }) {
     const [filterMode, setFilterMode] = useState('all');
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectedIds, setSelectedIds] = useState(new Set());
-    const [isDeleteModalVisible, setDeleteModalVisible] = useState(false);
+    const [confirmModal, setConfirmModal] = useState({
+        visible: false,
+        title: '',
+        message: '',
+        confirmText: 'Delete',
+        onConfirm: null,
+        onCancel: null,
+    });
     const [renderMenu, setRenderMenu] = useState(false);
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const menuAnim = useRef(new Animated.Value(0)).current;
     const menuButtonPressAnim = useRef(new Animated.Value(0)).current;
-    const deleteConfirmActionRef = useRef(null);
-    const deleteConfirmCancelRef = useRef(null);
-    const [deleteConfirmUi, setDeleteConfirmUi] = useState({
-        title: 'Delete Notifications',
-        message: 'Are you sure you want to delete all notifications? This cannot be undone.',
-        confirmText: 'Delete All',
-    });
+    const selectionBarAnim = useRef(new Animated.Value(0)).current;
     const { pushAlert } = useContext(GlobalAlertQueueContext);
 
     useEffect(() => {
@@ -319,6 +396,17 @@ export default function AlertScreen({ onBack, onNavigate }) {
         Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
         return () => AlertEngine.off(AlertEvents.UPDATED, handler);
     }, [filterMode, fadeAnim]);
+
+    useEffect(() => {
+        Animated.spring(selectionBarAnim, {
+            toValue: isSelecting ? 1 : 0,
+            useNativeDriver: true,
+            stiffness: 240,
+            damping: 24,
+            mass: 0.8,
+            overshootClamping: true,
+        }).start();
+    }, [isSelecting, selectionBarAnim]);
 
     const openMenu = () => {
         setRenderMenu(true);
@@ -355,7 +443,8 @@ export default function AlertScreen({ onBack, onNavigate }) {
     };
 
     const handlePressCard = (alert) => {
-        if (alert.pendingIdentityConfirm) pushAlert(alert);
+        const shouldOpenIdentify = alert.pendingIdentityConfirm === true || (alert.type === 'pending_identity' && alert.resolvedBy === 'skipped');
+        if (shouldOpenIdentify) pushAlert(alert);
         else onNavigate('EventDetail', { alertData: alert });
         if (!alert.isRead && AlertEngine.markAsRead) AlertEngine.markAsRead(alert.id);
     };
@@ -368,44 +457,42 @@ export default function AlertScreen({ onBack, onNavigate }) {
         if (AlertEngine.markAllAsRead) AlertEngine.markAllAsRead();
     };
 
-    const openDeleteConfirm = (onConfirm, onCancel, options = {}) => {
-        deleteConfirmActionRef.current = onConfirm || null;
-        deleteConfirmCancelRef.current = onCancel || null;
-        if (options.mode === 'single') {
-            setDeleteConfirmUi({
-                title: 'Delete Notification',
-                message: 'Are you sure you want to delete this notification?',
-                confirmText: 'Delete',
-            });
-        } else {
-            setDeleteConfirmUi({
-                title: 'Delete Notifications',
-                message: 'Are you sure you want to delete all notifications? This cannot be undone.',
-                confirmText: 'Delete All',
-            });
-        }
-        setDeleteModalVisible(true);
+    const openDeleteConfirmModal = ({ title, message, confirmText = 'Delete', onConfirm, onCancel }) => {
+        setConfirmModal({
+            visible: true,
+            title,
+            message,
+            confirmText,
+            onConfirm: typeof onConfirm === 'function' ? onConfirm : null,
+            onCancel: typeof onCancel === 'function' ? onCancel : null,
+        });
     };
 
-    const handleCancelDeleteConfirm = () => {
-        const cancelAction = deleteConfirmCancelRef.current;
-        setDeleteModalVisible(false);
-        deleteConfirmActionRef.current = null;
-        deleteConfirmCancelRef.current = null;
-        if (cancelAction) cancelAction();
+    const closeDeleteConfirmModal = () => {
+        setConfirmModal((prev) => ({ ...prev, visible: false }));
     };
 
-    const handleConfirmDeleteConfirm = () => {
-        const confirmAction = deleteConfirmActionRef.current;
-        setDeleteModalVisible(false);
-        deleteConfirmActionRef.current = null;
-        deleteConfirmCancelRef.current = null;
-        if (confirmAction) confirmAction();
+    const handleConfirmModalCancel = () => {
+        const cancelCallback = confirmModal.onCancel;
+        closeDeleteConfirmModal();
+        if (cancelCallback) cancelCallback();
     };
 
-    const confirmDeleteAll = () => {
-        if (AlertEngine.deleteAllAlerts) AlertEngine.deleteAllAlerts();
-        setDeleteModalVisible(false);
+    const handleConfirmModalConfirm = () => {
+        const confirmCallback = confirmModal.onConfirm;
+        closeDeleteConfirmModal();
+        if (confirmCallback) confirmCallback();
+    };
+
+    const requestDeleteAllConfirm = () => {
+        openDeleteConfirmModal({
+            title: 'Delete Notifications',
+            message: 'Are you sure you want to delete all notifications? This cannot be undone.',
+            confirmText: 'Delete All',
+            onConfirm: () => {
+                if (AlertEngine.deleteAllAlerts) AlertEngine.deleteAllAlerts();
+            },
+        });
     };
 
     const handleSelectionDelete = () => {
@@ -482,7 +569,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
                                     alert={alert}
                                     onPress={handlePressCard}
                                     onDelete={handleDelete}
-                                    onRequestDeleteConfirm={openDeleteConfirm}
+                                    onRequestDeleteConfirm={openDeleteConfirmModal}
                                     onMarkRead={(id) => AlertEngine.markAsRead && AlertEngine.markAsRead(id)}
                                     isSelecting={isSelecting}
                                     isSelected={selectedIds.has(alert.id)}
@@ -499,7 +586,28 @@ export default function AlertScreen({ onBack, onNavigate }) {
                 </ScrollView>
 
                 {isSelecting && (
-                    <View style={styles.selectionBar}>
+                    <Animated.View
+                        style={[
+                            styles.selectionBar,
+                            {
+                                opacity: selectionBarAnim,
+                                transform: [
+                                    {
+                                        translateY: selectionBarAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [20, 0],
+                                        }),
+                                    },
+                                    {
+                                        scale: selectionBarAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [0.97, 1],
+                                        }),
+                                    },
+                                ],
+                            },
+                        ]}
+                    >
                         <TouchableOpacity style={styles.selectionBarBtn} onPress={resetSelectionState}>
                             <Text style={styles.selectionBarText}>Cancel</Text>
                         </TouchableOpacity>
@@ -508,7 +616,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
                                 {filterMode === 'deleted' ? 'Permanently Delete' : `Delete (${selectedIds.size})`}
                             </Text>
                         </TouchableOpacity>
-                    </View>
+                    </Animated.View>
                 )}
 
                 {filterMode === 'deleted' && !isSelecting && (
@@ -516,29 +624,26 @@ export default function AlertScreen({ onBack, onNavigate }) {
                         <TouchableOpacity style={[styles.selectionBarBtn, { flex: 1, marginRight: 8 }]} onPress={() => setFilterMode('all')}>
                             <Text style={styles.selectionBarText}>Back to Messages</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.selectionBarBtn, styles.iosDeleteBarBtn, { flex: 1, marginLeft: 8 }]}
-                            onPress={() => openDeleteConfirm(confirmDeleteAll)}
-                        >
+                        <TouchableOpacity style={[styles.selectionBarBtn, styles.iosDeleteBarBtn, { flex: 1, marginLeft: 8 }]} onPress={requestDeleteAllConfirm}>
                             <Text style={[styles.selectionBarText, styles.iosDeleteBarBtnText]}>Empty Trash</Text>
                         </TouchableOpacity>
                     </View>
                 )}
 
-                <Modal visible={isDeleteModalVisible} transparent animationType="fade">
+                <Modal visible={confirmModal.visible} transparent animationType="fade">
                     <View style={styles.modalOverlay}>
                         <View style={styles.modalContent}>
                             <View style={styles.modalIconCircle}>
                                 <Ionicons name="alert-circle-outline" size={40} color="#2A69C7" />
                             </View>
-                            <Text style={styles.modalTitle}>{deleteConfirmUi.title}</Text>
-                            <Text style={styles.modalText}>{deleteConfirmUi.message}</Text>
+                            <Text style={styles.modalTitle}>{confirmModal.title}</Text>
+                            <Text style={styles.modalText}>{confirmModal.message}</Text>
                             <View style={styles.modalActions}>
-                                <TouchableOpacity style={styles.modalCancel} onPress={handleCancelDeleteConfirm}>
+                                <TouchableOpacity style={styles.modalCancel} onPress={handleConfirmModalCancel}>
                                     <Text style={styles.modalCancelText}>Cancel</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity style={styles.modalDelete} onPress={handleConfirmDeleteConfirm}>
-                                    <Text style={styles.modalDeleteText}>{deleteConfirmUi.confirmText}</Text>
+                                <TouchableOpacity style={styles.modalDelete} onPress={handleConfirmModalConfirm}>
+                                    <Text style={styles.modalDeleteText}>{confirmModal.confirmText}</Text>
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -560,7 +665,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
                             ]}
                         >
                             <Pressable style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]} onPress={() => closeMenu(() => setIsSelecting(true))}>
-                                <Ionicons name="checkmark-circle-outline" size={20} color="#E6EDF7" />
+                                <Ionicons name="checkmark-circle-outline" size={22} color="#EAF2FF" />
                                 <Text style={styles.menuItemText}>Select messages</Text>
                             </Pressable>
 
@@ -571,10 +676,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
                                         <Ionicons name="checkmark-done-outline" size={20} color="#E6EDF7" />
                                         <Text style={styles.menuItemText}>Read All</Text>
                                     </Pressable>
-                                    <Pressable
-                                        style={({ pressed }) => [styles.menuDeletePill, pressed && styles.menuDeletePillPressed]}
-                                        onPress={() => closeMenu(() => openDeleteConfirm(confirmDeleteAll))}
-                                    >
+                                    <Pressable style={({ pressed }) => [styles.menuDeletePill, pressed && styles.menuDeletePillPressed]} onPress={() => closeMenu(requestDeleteAllConfirm)}>
                                         <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
                                         <Text style={styles.menuDeletePillText}>Delete</Text>
                                     </Pressable>
@@ -610,7 +712,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F5FBFB' },
+    container: { flex: 1, backgroundColor: '#f4fdfbff' },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -667,35 +769,35 @@ const styles = StyleSheet.create({
 
     selectionBar: {
         flexDirection: 'row',
-        backgroundColor: '#F9F9FB',
+        backgroundColor: 'rgba(255,255,255,0.94)',
         paddingHorizontal: 16,
         paddingTop: 12,
         paddingBottom: 14,
         borderTopWidth: 1,
-        borderTopColor: '#D8D8DC',
-        justifyContent: 'space-around',
+        borderTopColor: '#E8E8ED',
+        justifyContent: 'space-between',
         gap: 10,
-        shadowColor: '#000',
+        shadowColor: '#1C1C1E',
         shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-        elevation: 4,
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        elevation: 7,
     },
     selectionBarBtn: {
         flex: 1,
-        minHeight: 44,
+        minHeight: 46,
         paddingVertical: 11,
-        paddingHorizontal: 16,
-        borderRadius: 12,
-        backgroundColor: '#FFFFFF',
+        paddingHorizontal: 18,
+        borderRadius: 999,
+        backgroundColor: '#F4F5F8',
+        borderWidth: 1,
+        borderColor: '#E1E3E8',
         justifyContent: 'center',
         alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#D1D1D6',
     },
-    selectionBarText: { color: '#1C1C1E', fontFamily: 'Inter-Bold', textAlign: 'center', fontSize: 14 },
-    iosDeleteBarBtn: { backgroundColor: '#FFF1F0', borderWidth: 1, borderColor: '#FFD3D0' },
-    iosDeleteBarBtnText: { color: '#FF3B30' },
+    selectionBarText: { color: '#3A3A3C', fontFamily: 'Inter-Bold', textAlign: 'center', fontSize: 15 },
+    iosDeleteBarBtn: { backgroundColor: '#E8F0FF', borderWidth: 1, borderColor: '#C8D8FF' },
+    iosDeleteBarBtnText: { color: '#1A56C5' },
 
     cardWrapper: {
         marginBottom: 12,
@@ -756,20 +858,29 @@ const styles = StyleSheet.create({
         width: 34,
         height: 34,
         borderRadius: 17,
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#D1D1D6',
         justifyContent: 'center',
         alignItems: 'center',
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    selectIconCircleIdle: {
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1.5,
+        borderColor: '#C9CDD5',
     },
     selectIconCircleSelected: {
         backgroundColor: '#0A84FF',
+        borderWidth: 1.5,
         borderColor: '#0A84FF',
         shadowColor: '#0A84FF',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.22,
-        shadowRadius: 6,
-        elevation: 3,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.28,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    selectIconFill: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#0A84FF',
     },
     iconContainer: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
     iconCriticalBg: { backgroundColor: '#FFF0F0' },
@@ -783,6 +894,8 @@ const styles = StyleSheet.create({
     newBadgeText: { color: '#FFF', fontSize: 10, fontFamily: 'Inter-Bold' },
     pendingBadge: { backgroundColor: '#FF9800', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
     pendingBadgeText: { color: '#FFF', fontSize: 10, fontFamily: 'Inter-Bold' },
+    resolvedBadge: { backgroundColor: '#D9E8FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
+    resolvedBadgeText: { color: '#1A56C5', fontSize: 10, fontFamily: 'Inter-Bold' },
     alertDesc: { fontSize: 14, color: '#5C706B', lineHeight: 20, fontFamily: 'Inter-Regular' },
     timeText: { fontSize: 12, color: '#8E8E93', fontFamily: 'Inter-Medium', marginTop: 2 },
     chevronButton: { paddingLeft: 8, paddingVertical: 8 },
@@ -837,6 +950,6 @@ const styles = StyleSheet.create({
     modalActions: { flexDirection: 'row', gap: 12, width: '100%' },
     modalCancel: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#F0F4F4', alignItems: 'center' },
     modalCancelText: { color: '#5C706B', fontSize: 15, fontFamily: 'Inter-SemiBold' },
-    modalDelete: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#2A69C7', alignItems: 'center' },
+    modalDelete: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#3c8fddff', alignItems: 'center' },
     modalDeleteText: { color: '#FFFFFF', fontSize: 15, fontFamily: 'Inter-SemiBold' },
 });
