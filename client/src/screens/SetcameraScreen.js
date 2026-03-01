@@ -2,7 +2,7 @@
 // 1. ส่วนการนำเข้า Libraries และ Components (Imports)
 // ==============================================
 import React, { useState } from 'react';
-import { View, Text, SafeAreaView, TouchableOpacity, StyleSheet, ScrollView, Image, TextInput, Animated, LayoutAnimation, UIManager, Platform } from 'react-native';
+import { View, Text, SafeAreaView, TouchableOpacity, StyleSheet, ScrollView, Image, TextInput, Animated, LayoutAnimation, UIManager, Platform, Modal } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import supabase from './config/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
@@ -16,6 +16,15 @@ const CAMERA_BRANDS = [
     { id: 'ezviz', label: 'EZVIZ', icon: 'video-check', api: 'EZVIZ Cloud API' },
     { id: 'custom', label: 'Other (Manual)', icon: 'cog-outline', api: 'Manual API setup' },
 ];
+
+const PREVIEW_FRAMES = [
+    require('../../assets/cioncat.jpg'),
+    require('../../assets/cover-blog-3.jpg'),
+    require('../../assets/ebo-air-2.jpg'),
+    require('../../assets/makky.jpg'),
+];
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -32,10 +41,13 @@ const DecorativeCatEars = () => (
 // 2. Main Component (หน้าจอตั้งค่า)
 // ==============================================
 export default function SetcameraScreen({ onNavigate, session }) {
+    const defaultZoneLabel = 'Litter Box Zone';
     // State simulating connection status
-    const [streamUrl, setStreamUrl] = useState(null);
-    const [lastSignal, setLastSignal] = useState(null);
     const [cameraStatus, setCameraStatus] = useState("disconnected"); // 'disconnected' | 'connecting' | 'connected'
+    const [lastScanAt, setLastScanAt] = useState(null);
+    const [previewFrameIndex, setPreviewFrameIndex] = useState(0);
+    const [zoneLabel, setZoneLabel] = useState(defaultZoneLabel);
+    const [isUpdateMode, setIsUpdateMode] = useState(false);
 
     // Monitoring Mode State
     const [monitoringMode, setMonitoringMode] = useState('multi'); // 'single' | 'multi'
@@ -44,11 +56,15 @@ export default function SetcameraScreen({ onNavigate, session }) {
     const [selectedCats, setSelectedCats] = useState([]);
 
     // Hardware State
-    const [selectedCameraPreset, setSelectedCameraPreset] = useState('tapo');
+    const [selectedCameraPreset, setSelectedCameraPreset] = useState(null);
+    const [committedCameraBrand, setCommittedCameraBrand] = useState(null);
     const [customCameraBrand, setCustomCameraBrand] = useState('');
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
-    const [connected, setConnected] = useState(false);
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [confirmTitle, setConfirmTitle] = useState('Confirm Connection');
+    const [confirmMessage, setConfirmMessage] = useState('Connect or update this camera?');
+    const [isChangingConnectedBrand, setIsChangingConnectedBrand] = useState(false);
 
     // Animation values
     const successAnim = React.useRef(new Animated.Value(0)).current;
@@ -60,9 +76,6 @@ export default function SetcameraScreen({ onNavigate, session }) {
         ezviz: new Animated.Value(1),
         custom: new Animated.Value(1),
     }).current;
-
-    const selectedCameraMeta = CAMERA_BRANDS.find((item) => item.id === selectedCameraPreset);
-    const selectedCameraApi = selectedCameraMeta?.api || 'Manual API setup required';
 
     const animateSelection = (brandId) => {
         Object.keys(brandScales).forEach(id => {
@@ -78,6 +91,28 @@ export default function SetcameraScreen({ onNavigate, session }) {
     React.useEffect(() => {
         const load = async () => {
             try {
+                // Load saved selection settings (always, even before cats are loaded)
+                const mode = await AsyncStorage.getItem('camera_monitoringMode');
+                const savedCatsJson = await AsyncStorage.getItem('camera_selectedCats');
+                const savedStatus = await AsyncStorage.getItem('camera_status');
+                const savedBrand = await AsyncStorage.getItem('camera_brand');
+                const savedZoneLabel = await AsyncStorage.getItem('camera_zone_summary');
+
+                if (mode) setMonitoringMode(mode);
+                if (savedStatus) setCameraStatus(savedStatus);
+                if (savedBrand) {
+                    setSelectedCameraPreset(savedBrand);
+                    setCommittedCameraBrand(savedBrand);
+                    animateSelection(savedBrand);
+                    if (savedStatus === 'connected') {
+                        setIsUpdateMode(true);
+                        successAnim.setValue(1);
+                    }
+                }
+                if (savedZoneLabel) {
+                    setZoneLabel(savedZoneLabel);
+                }
+
                 // Fetch real cats if session exists
                 if (session?.user?.id) {
                     const { data: cats, error } = await supabase
@@ -87,24 +122,6 @@ export default function SetcameraScreen({ onNavigate, session }) {
 
                     if (error) throw error;
                     setMyCats(cats || []);
-
-                    // Load saved selection settings
-                    const mode = await AsyncStorage.getItem('camera_monitoringMode');
-                    const savedCatsJson = await AsyncStorage.getItem('camera_selectedCats');
-                    const savedStatus = await AsyncStorage.getItem('camera_status');
-                    const savedBrand = await AsyncStorage.getItem('camera_brand');
-
-                    if (mode) setMonitoringMode(mode);
-                    if (savedStatus) setCameraStatus(savedStatus);
-                    if (savedBrand) {
-                        setSelectedCameraPreset(savedBrand);
-                        // Trigger pulse for initial selected brand
-                        animateSelection(savedBrand);
-                        if (savedStatus === 'connected') {
-                            setConnected(true);
-                            successAnim.setValue(1);
-                        }
-                    }
 
                     if (savedCatsJson) {
                         setSelectedCats(JSON.parse(savedCatsJson));
@@ -123,6 +140,15 @@ export default function SetcameraScreen({ onNavigate, session }) {
         };
         load();
     }, [session]);
+
+    React.useEffect(() => {
+        if (cameraStatus !== 'connected') return undefined;
+        const timer = setInterval(() => {
+            setPreviewFrameIndex((prev) => (prev + 1) % PREVIEW_FRAMES.length);
+            setLastScanAt(new Date());
+        }, 3500);
+        return () => clearInterval(timer);
+    }, [cameraStatus]);
 
     const updateCameraStatus = async (status) => {
         setCameraStatus(status);
@@ -146,12 +172,16 @@ export default function SetcameraScreen({ onNavigate, session }) {
         }
     };
 
-    const handleLogin = (brandLabel) => {
+    const executeConnectCamera = () => {
         setIsConnecting(true);
         setTimeout(async () => {
             setIsConnecting(false);
-            setConnected(true);
-            updateCameraStatus('connected');
+            setIsUpdateMode(true);
+            setLastScanAt(new Date());
+            await updateCameraStatus('connected');
+            await AsyncStorage.setItem('camera_brand', selectedCameraPreset);
+            await AsyncStorage.setItem('camera_setup_complete', 'true');
+            setCommittedCameraBrand(selectedCameraPreset);
 
             Animated.sequence([
                 Animated.spring(successAnim, {
@@ -174,14 +204,103 @@ export default function SetcameraScreen({ onNavigate, session }) {
         }, 1500);
     };
 
+    const handleConnectCamera = () => {
+        if (!selectedCameraPreset) return;
+
+        const changingConnectedBrand = cameraStatus === 'connected'
+            && committedCameraBrand
+            && selectedCameraPreset !== committedCameraBrand;
+        setIsChangingConnectedBrand(changingConnectedBrand);
+        setConfirmTitle(changingConnectedBrand ? 'Change Camera' : 'Confirm Connection');
+        setConfirmMessage(
+            changingConnectedBrand
+                ? 'This will disconnect the current camera and reset setup.'
+                : 'Connect or update this camera?'
+        );
+        setShowConfirmModal(true);
+    };
+
+    const handleConfirmConnect = async () => {
+        setShowConfirmModal(false);
+        setIsConnecting(true);
+        try {
+            await wait(900);
+            if (isChangingConnectedBrand) {
+                await applyBrandChange(selectedCameraPreset);
+                onNavigate('Phone', {
+                    initialStep: 2,
+                    mode: 'new',
+                    brand: selectedCameraPreset,
+                    returnTo: 'Setcamera',
+                });
+                return;
+            }
+            await updateCameraStatus('connected');
+            await AsyncStorage.setItem('camera_brand', selectedCameraPreset);
+            await AsyncStorage.setItem('camera_setup_complete', 'true');
+            setCommittedCameraBrand(selectedCameraPreset);
+            setIsUpdateMode(true);
+            setLastScanAt(new Date());
+            onNavigate('Phone', {
+                initialStep: 2,
+                mode: 'new',
+                brand: selectedCameraPreset,
+                returnTo: 'Setcamera',
+            });
+        } catch (e) {
+            console.error('Camera connection failed', e);
+        } finally {
+            setIsConnecting(false);
+        }
+    };
+
+    const handleCancelConnect = () => {
+        setShowConfirmModal(false);
+        if (isChangingConnectedBrand && committedCameraBrand) {
+            setSelectedCameraPreset(committedCameraBrand);
+            animateSelection(committedCameraBrand);
+        }
+    };
+
+    const resetSetupForNewCamera = async () => {
+        await AsyncStorage.multiRemove([
+            'camera_monitoringMode',
+            'camera_selectedCats',
+            'camera_setup_complete',
+            'camera_zone_summary',
+            'camera_zone_feeding',
+            'camera_zone_litter',
+        ]);
+        setMonitoringMode('multi');
+        setSelectedCats(myCats.map((cat) => cat.id));
+        setZoneLabel(defaultZoneLabel);
+        setIsUpdateMode(false);
+        setPreviewFrameIndex(0);
+    };
+
+    const applyBrandChange = async (brandId) => {
+        if (brandId === committedCameraBrand) return;
+        animateSelection(brandId);
+        successAnim.setValue(0);
+        await updateCameraStatus("disconnected");
+        await resetSetupForNewCamera();
+        await AsyncStorage.setItem('camera_brand', brandId);
+        setCommittedCameraBrand(brandId);
+    };
+
+    const handleSelectCameraBrand = (brandId) => {
+        if (brandId === selectedCameraPreset) return;
+        setSelectedCameraPreset(brandId);
+        animateSelection(brandId);
+    };
+
     const handleTestConnection = () => {
-        // Here you would eventually add your real frontend fetch/reconnect logic
-        if (cameraStatus === 'disconnected') {
-            updateCameraStatus('connecting');
-            setTimeout(() => updateCameraStatus('connected'), 1500);
-        } else if (cameraStatus === 'connected') {
+        // Test only refreshes an already connected camera. It must not create a new connection.
+        if (cameraStatus === 'connected') {
             updateCameraStatus('connecting');
             setTimeout(() => updateCameraStatus('connected'), 800);
+        } else {
+            updateCameraStatus('disconnected');
         }
     };
 
@@ -243,12 +362,9 @@ export default function SetcameraScreen({ onNavigate, session }) {
                         <View style={styles.connectionHeader}>
                             <View style={styles.statusRow}>
                                 <View style={[styles.statusDot, {
-                                    backgroundColor: cameraStatus === 'connected' ? '#56b059ff' :
-                                        cameraStatus === 'connecting' ? '#FFC107' : '#F44336'
+                                    backgroundColor: cameraStatus === 'connected' ? '#4CAF50' :
+                                        cameraStatus === 'connecting' ? '#FFB300' : '#F44336'
                                 }]} />
-                                <View style={[styles.statusDot,
-                                { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : cameraStatus === 'connecting' ? '#FFB300' : '#F44336' }
-                                ]} />
                                 <Text style={styles.sectionTitleWhite}>
                                     {cameraStatus === 'connected' ? 'Camera Connected' :
                                         cameraStatus === 'connecting' ? 'Connecting...' : 'Camera Disconnected'}
@@ -280,10 +396,11 @@ export default function SetcameraScreen({ onNavigate, session }) {
                             style={[
                                 styles.actionButtonGray,
                                 cameraStatus === 'connected' && { backgroundColor: '#4CAF50', borderColor: '#4CAF50' },
-                                cameraStatus === 'connecting' && { opacity: 0.6 }
+                                cameraStatus === 'connecting' && { opacity: 0.6 },
+                                cameraStatus === 'disconnected' && { opacity: 0.65 }
                             ]}
                             onPress={handleTestConnection}
-                            disabled={cameraStatus === 'connecting'}
+                            disabled={cameraStatus === 'connecting' || cameraStatus !== 'connected'}
                         >
                             <Text style={[
                                 styles.actionButtonText,
@@ -306,8 +423,18 @@ export default function SetcameraScreen({ onNavigate, session }) {
                             <DecorativeCatEars />
                             {/* Placeholder Image or Message */}
                             {cameraStatus === 'connected' ? (
-                                <View style={styles.previewPlaceholder}>
-                                    <Ionicons name="image-outline" size={48} color="#ccc" />
+                                <View style={styles.previewConnectedWrap}>
+                                    <Image
+                                        source={PREVIEW_FRAMES[previewFrameIndex]}
+                                        style={styles.previewImage}
+                                        resizeMode="cover"
+                                    />
+                                    <View style={styles.zoneMarkerFixed}>
+                                        <Text style={styles.zoneMarkerText}>{zoneLabel}</Text>
+                                    </View>
+                                    <Text style={styles.scanUpdateText}>
+                                        Scan updated: {lastScanAt ? lastScanAt.toLocaleTimeString() : '--'}
+                                    </Text>
                                 </View>
                             ) : (
                                 <View style={styles.previewPlaceholder}>
@@ -321,11 +448,32 @@ export default function SetcameraScreen({ onNavigate, session }) {
                             )}
 
                             <TouchableOpacity
-                                style={styles.overlayButton}
-                                onPress={() => onNavigate('Phone', { initialStep: 'zone_setup' })}
+                                style={[
+                                    styles.overlayButton,
+                                    cameraStatus !== 'connected' && styles.overlayButtonDisabled
+                                ]}
+                                disabled={cameraStatus !== 'connected'}
+                                onPress={() => {
+                                    onNavigate('Phone', {
+                                        initialStep: 'zone_setup',
+                                        mode: 'update',
+                                        returnTo: 'Setcamera',
+                                        brand: selectedCameraPreset,
+                                    });
+                                }}
                             >
-                                <MaterialCommunityIcons name="crop-free" size={16} color="#fff" style={{ marginRight: 8 }} />
-                                <Text style={styles.overlayButtonText}>Detection Zone Set</Text>
+                                <MaterialCommunityIcons
+                                    name="crop-free"
+                                    size={16}
+                                    color={cameraStatus === 'connected' ? '#fff' : '#CBD5E1'}
+                                    style={{ marginRight: 8 }}
+                                />
+                                <Text style={[
+                                    styles.overlayButtonText,
+                                    cameraStatus !== 'connected' && styles.overlayButtonTextDisabled
+                                ]}>
+                                    {cameraStatus === 'connected' ? 'Edit Label Zones' : 'Detection locked'}
+                                </Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -395,7 +543,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
 
                         {isDropdownOpen && (
                             <Animated.View style={styles.accordionContent}>
-                                <Text style={styles.label}>Select API compatible camera brand</Text>
+                                <Text style={styles.label}>Select camera brand</Text>
 
                                 <View style={styles.brandCardStack}>
                                     {CAMERA_BRANDS.map((brand) => {
@@ -404,14 +552,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
                                             <Animated.View key={brand.id} style={{ transform: [{ scale: brandScales[brand.id] || 1 }] }}>
                                                 <TouchableOpacity
                                                     activeOpacity={0.9}
-                                                    onPress={async () => {
-                                                        setSelectedCameraPreset(brand.id);
-                                                        animateSelection(brand.id);
-                                                        setConnected(false);
-                                                        successAnim.setValue(0);
-                                                        updateCameraStatus("disconnected");
-                                                        await AsyncStorage.setItem('camera_brand', brand.id);
-                                                    }}
+                                                    onPress={() => handleSelectCameraBrand(brand.id)}
                                                     style={[
                                                         styles.brandCardSmall,
                                                         isSelected && styles.brandCardSelected,
@@ -429,40 +570,12 @@ export default function SetcameraScreen({ onNavigate, session }) {
                                                             <Text style={[styles.brandNameTitle, isSelected && { color: '#004D40' }]}>
                                                                 {brand.label}
                                                             </Text>
-                                                            <Text style={styles.brandApiSub}>{brand.api}</Text>
+                                                            <Text style={styles.brandApiSub}>Connect to app</Text>
                                                         </View>
                                                         {isSelected && (
                                                             <Ionicons name="checkmark-circle" size={20} color="#00695C" />
                                                         )}
                                                     </View>
-
-                                                    {isSelected && (
-                                                        <View style={styles.brandActionLinks}>
-                                                            <TouchableOpacity
-                                                                style={styles.brandActionLink}
-                                                                onPress={() => onNavigate('Phone', { initialStep: 2, brand: brand.id })}
-                                                            >
-                                                                <Ionicons name="lock-closed" size={14} color="#00695C" />
-                                                                <Text style={styles.brandActionText}>Cloud Login</Text>
-                                                            </TouchableOpacity>
-
-                                                            <TouchableOpacity
-                                                                style={styles.brandActionLink}
-                                                                onPress={() => onNavigate('Phone', { initialStep: 3, brand: brand.id })}
-                                                            >
-                                                                <Ionicons name="videocam" size={14} color="#00695C" />
-                                                                <Text style={styles.brandActionText}>Test Live</Text>
-                                                            </TouchableOpacity>
-
-                                                            <TouchableOpacity
-                                                                style={styles.brandActionLink}
-                                                                onPress={() => onNavigate('Phone', { initialStep: 4, brand: brand.id })}
-                                                            >
-                                                                <Ionicons name="grid" size={14} color="#00695C" />
-                                                                <Text style={styles.brandActionText}>Zones</Text>
-                                                            </TouchableOpacity>
-                                                        </View>
-                                                    )}
                                                 </TouchableOpacity>
                                             </Animated.View>
                                         );
@@ -482,56 +595,81 @@ export default function SetcameraScreen({ onNavigate, session }) {
                                     </View>
                                 )}
 
-                                <View style={styles.infoRow}>
-                                    <Ionicons name="link-outline" size={14} color="#555" />
-                                    <Text style={styles.infoText}>API profile: {selectedCameraApi}</Text>
-                                </View>
-                                <Text style={styles.label}>Webhook Configuration</Text>
-                                <View style={styles.inputRow}>
-                                    <Ionicons name="lock-closed-outline" size={16} color="#aaa" style={{ marginRight: 8 }} />
-                                    <TextInput
-                                        style={styles.input}
-                                        value="https://api.7917&t=URRbNgm9U8Q9IPFj-0"
-                                        editable={false}
-                                    />
-                                    <TouchableOpacity style={styles.copyButton}>
-                                        <Text style={styles.copyText}>COPY</Text>
-                                    </TouchableOpacity>
-                                </View>
-
                                 <TouchableOpacity
-                                    style={[styles.actionButtonGray, { backgroundColor: '#00897B', borderColor: '#00897B' }]}
-                                    onPress={() => onNavigate('Phone', { initialStep: 5, brand: selectedCameraPreset })}
+                                    style={[
+                                        styles.actionButtonGray,
+                                        { backgroundColor: '#00897B', borderColor: '#00897B' },
+                                        !selectedCameraPreset && { backgroundColor: '#9CA3AF', borderColor: '#9CA3AF' }
+                                    ]}
+                                    onPress={handleConnectCamera}
+                                    disabled={isConnecting || !selectedCameraPreset}
                                 >
-                                    <Text style={[styles.actionButtonText, { color: '#fff' }]}>Finish All Setup</Text>
+                                    <Text style={[styles.actionButtonText, { color: '#fff' }]}>
+                                        {isConnecting
+                                            ? 'Connecting...'
+                                            : !selectedCameraPreset
+                                                ? 'Select Camera First'
+                                            : isUpdateMode
+                                                ? 'Update Connection'
+                                                : 'Connect Camera'}
+                                    </Text>
                                 </TouchableOpacity>
 
                                 <View style={styles.infoRow}>
                                     <Ionicons name="information-circle" size={14} color="#555" />
-                                    <Text style={styles.infoText}>Used for receiving camera events and AI detection signals</Text>
+                                    <Text style={styles.infoText}>
+                                        {cameraStatus === 'connected'
+                                            ? 'Connected. If you change camera, setup will reset and camera signal will disconnect automatically.'
+                                            : !selectedCameraPreset
+                                                ? 'Please select a camera hardware first.'
+                                                : 'Choose camera and connect with app. No API setup required.'}
+                                    </Text>
                                 </View>
                             </Animated.View>
                         )}
                     </View>
 
-                    {/* 5. Setup & Guide */}
+                    {/* 5. Usage Note */}
                     <View style={styles.card}>
-                        <Text style={styles.sectionTitle}>Help & Guide</Text>
+                        <Text style={styles.sectionTitle}>How To Use</Text>
                         <Text style={styles.statusDesc}>
-                            Need help connecting your camera or want to learn how the tracking zones work? View the interactive setup guide again.
+                            1. Select your camera hardware in the Hardware section.
+                            {'\n'}2. Tap Connect to open setup flow and verify live feed.
+                            {'\n'}3. After connection, edit and update detection zones.
+                            {'\n'}4. Use Test Connection only to refresh an already connected camera.
                         </Text>
-                        <TouchableOpacity
-                            style={{ paddingVertical: 8, alignItems: 'flex-start' }}
-                            onPress={() => onNavigate('Phone', { initialStep: 'guide' })}
-                        >
-                            <Text style={{ color: '#00695C', fontWeight: '500', fontSize: 13, textDecorationLine: 'underline' }}>
-                                View Camera Setup Instructions
-                            </Text>
-                        </TouchableOpacity>
                     </View>
 
                     <View style={{ height: 40 }} />
                 </ScrollView>
+
+                <Modal
+                    transparent
+                    visible={showConfirmModal}
+                    animationType="fade"
+                    onRequestClose={handleCancelConnect}
+                >
+                    <View style={styles.confirmOverlay}>
+                        <View style={styles.confirmCard}>
+                            <Text style={styles.confirmTitle}>{confirmTitle}</Text>
+                            <Text style={styles.confirmMessage}>{confirmMessage}</Text>
+                            <View style={styles.confirmActions}>
+                                <TouchableOpacity
+                                    style={styles.confirmCancelBtn}
+                                    onPress={handleCancelConnect}
+                                >
+                                    <Text style={styles.confirmCancelText}>Cancel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.confirmPrimaryBtn}
+                                    onPress={handleConfirmConnect}
+                                >
+                                    <Text style={styles.confirmPrimaryText}>Confirm</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
             </SafeAreaView>
         </LinearGradient>
     );
@@ -700,6 +838,93 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: 20,
     },
+    previewConnectedWrap: {
+        width: '100%',
+        height: '100%',
+    },
+    previewImage: {
+        width: '100%',
+        height: '100%',
+    },
+    zoneMarkerFixed: {
+        position: 'absolute',
+        top: 24,
+        left: 18,
+        backgroundColor: 'rgba(0, 105, 92, 0.9)',
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+    },
+    zoneMarkerText: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    scanUpdateText: {
+        position: 'absolute',
+        right: 12,
+        bottom: 56,
+        color: '#FFFFFF',
+        fontSize: 10,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 10,
+    },
+    confirmOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.28)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+    },
+    confirmCard: {
+        width: '100%',
+        backgroundColor: '#FFFFFF',
+        borderRadius: 20,
+        paddingHorizontal: 18,
+        paddingTop: 18,
+        paddingBottom: 14,
+    },
+    confirmTitle: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: '#1C1C1E',
+        marginBottom: 8,
+    },
+    confirmMessage: {
+        fontSize: 13,
+        color: '#4B5563',
+        lineHeight: 19,
+        marginBottom: 16,
+    },
+    confirmActions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        gap: 10,
+    },
+    confirmCancelBtn: {
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: '#F5F5F5',
+    },
+    confirmCancelText: {
+        color: '#374151',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    confirmPrimaryBtn: {
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: '#111827',
+    },
+    confirmPrimaryText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
+    },
     errorText: {
         color: '#374151',
         textAlign: 'center',
@@ -722,11 +947,16 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
     },
+    overlayButtonDisabled: {
+        backgroundColor: '#9CA3AF',
+    },
     overlayButtonText: {
         color: '#fff',
         fontSize: 12,
     },
-
+    overlayButtonTextDisabled: {
+        color: '#E5E7EB',
+    },
     // Monitoring Mode
     toggleContainer: {
         flexDirection: 'row',

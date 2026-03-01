@@ -314,8 +314,10 @@ export default function App() {
           <Phone
             session={session}
             initialStep={screenParams?.initialStep}
-            onBack={() => setAuthScreen('Setting')}
-            onConfirm={() => setAuthScreen('Camera')}
+            brand={screenParams?.brand}
+            mode={screenParams?.mode}
+            onBack={() => setAuthScreen(screenParams?.returnTo || 'Setting')}
+            onConfirm={() => setAuthScreen(screenParams?.returnTo || 'Camera')}
           />
         );
       }

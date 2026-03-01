@@ -44,6 +44,8 @@ const SwipeableNotificationCard = ({
     isSelected,
     onToggleSelect,
     onRequestDeleteConfirm,
+    activeSwipeId,
+    setActiveSwipeId,
 }) => {
     const pan = useRef(new Animated.ValueXY()).current;
     const deleteProgress = useRef(new Animated.Value(0)).current;
@@ -146,6 +148,12 @@ const SwipeableNotificationCard = ({
         }).start();
     }, [isSelected, selectedAnim]);
 
+    useEffect(() => {
+        if (activeSwipeId !== alert.id) {
+            animateToX(0, 0);
+        }
+    }, [activeSwipeId, alert.id]);
+
     const panResponder = useRef(
         PanResponder.create({
             onMoveShouldSetPanResponderCapture: (evt, gestureState) => {
@@ -166,11 +174,17 @@ const SwipeableNotificationCard = ({
                 if (isHardSwipe) {
                     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch (e) { }
                     animateToX(HARD_SWIPE_X, gestureState.vx);
-                    showDeleteConfirm(() => animateToX(0, gestureState.vx));
+                    if (setActiveSwipeId) setActiveSwipeId(alert.id);
+                    showDeleteConfirm(() => {
+                        if (setActiveSwipeId) setActiveSwipeId(null);
+                        animateToX(0, gestureState.vx);
+                    });
                 } else if (gestureState.dx < SWIPE_TRIGGER_X) {
                     animateToX(SWIPE_OPEN_X, gestureState.vx);
+                    if (setActiveSwipeId) setActiveSwipeId(alert.id);
                 } else {
                     animateToX(0, gestureState.vx);
+                    if (setActiveSwipeId) setActiveSwipeId(null);
                 }
             },
         })
@@ -223,8 +237,20 @@ const SwipeableNotificationCard = ({
                     style={styles.cardMainContent}
                     activeOpacity={isSelecting ? 1 : 0.85}
                     onPress={() => {
-                        if (isSelecting) onToggleSelect(alert.id);
-                        else onPress(alert);
+                        if (isSelecting) {
+                            onToggleSelect(alert.id);
+                            return;
+                        }
+                        if (activeSwipeId && activeSwipeId !== alert.id) {
+                            if (setActiveSwipeId) setActiveSwipeId(null);
+                            return;
+                        }
+                        if (activeSwipeId === alert.id) {
+                            animateToX(0, 0);
+                            if (setActiveSwipeId) setActiveSwipeId(null);
+                            return;
+                        }
+                        onPress(alert);
                     }}
                 >
                     {isSelecting && (
@@ -361,6 +387,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
     const [filterMode, setFilterMode] = useState('all');
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectedIds, setSelectedIds] = useState(new Set());
+    const [activeSwipeId, setActiveSwipeId] = useState(null);
     const [confirmModal, setConfirmModal] = useState({
         visible: false,
         title: '',
@@ -549,7 +576,11 @@ export default function AlertScreen({ onBack, onNavigate }) {
                     </TouchableOpacity>
                 </View>
 
-                <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                    contentContainerStyle={styles.content}
+                    showsVerticalScrollIndicator={false}
+                    onScrollBeginDrag={() => setActiveSwipeId(null)}
+                >
                     {(filterMode === 'unread' ? alerts.filter((a) => !a.isRead) : alerts).length === 0 ? (
                         <View style={styles.emptyState}>
                             <MaterialCommunityIcons name="bell-sleep-outline" size={64} color="#E0E0E0" />
@@ -573,6 +604,8 @@ export default function AlertScreen({ onBack, onNavigate }) {
                                     onMarkRead={(id) => AlertEngine.markAsRead && AlertEngine.markAsRead(id)}
                                     isSelecting={isSelecting}
                                     isSelected={selectedIds.has(alert.id)}
+                                    activeSwipeId={activeSwipeId}
+                                    setActiveSwipeId={setActiveSwipeId}
                                     onToggleSelect={(id) => {
                                         const next = new Set(selectedIds);
                                         if (next.has(id)) next.delete(id);
