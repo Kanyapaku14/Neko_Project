@@ -8,6 +8,7 @@ import supabase from './config/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { StatusBar } from 'expo-status-bar';
 import AlertEngine from '../services/AlertEngine'; // Global Alert Manager
 
 const CAMERA_BRANDS = [
@@ -65,6 +66,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
     const [confirmTitle, setConfirmTitle] = useState('Confirm Connection');
     const [confirmMessage, setConfirmMessage] = useState('Connect or update this camera?');
     const [isChangingConnectedBrand, setIsChangingConnectedBrand] = useState(false);
+    const [isDuplicateConnectAttempt, setIsDuplicateConnectAttempt] = useState(false);
 
     // Animation values
     const successAnim = React.useRef(new Animated.Value(0)).current;
@@ -207,9 +209,22 @@ export default function SetcameraScreen({ onNavigate, session }) {
     const handleConnectCamera = () => {
         if (!selectedCameraPreset) return;
 
+        const duplicateConnectedBrand = cameraStatus === 'connected'
+            && committedCameraBrand
+            && selectedCameraPreset === committedCameraBrand;
+        if (duplicateConnectedBrand) {
+            setIsDuplicateConnectAttempt(true);
+            setIsChangingConnectedBrand(false);
+            setConfirmTitle('Camera Already Connected');
+            setConfirmMessage('This camera is already connected. Select another brand if you want to replace the current connection.');
+            setShowConfirmModal(true);
+            return;
+        }
+
         const changingConnectedBrand = cameraStatus === 'connected'
             && committedCameraBrand
             && selectedCameraPreset !== committedCameraBrand;
+        setIsDuplicateConnectAttempt(false);
         setIsChangingConnectedBrand(changingConnectedBrand);
         setConfirmTitle(changingConnectedBrand ? 'Change Camera' : 'Confirm Connection');
         setConfirmMessage(
@@ -222,6 +237,10 @@ export default function SetcameraScreen({ onNavigate, session }) {
 
     const handleConfirmConnect = async () => {
         setShowConfirmModal(false);
+        if (isDuplicateConnectAttempt) {
+            setIsDuplicateConnectAttempt(false);
+            return;
+        }
         setIsConnecting(true);
         try {
             await wait(900);
@@ -232,6 +251,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
                     mode: 'new',
                     brand: selectedCameraPreset,
                     returnTo: 'Setcamera',
+                    isHideSkipButton: true,
                 });
                 return;
             }
@@ -246,6 +266,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
                 mode: 'new',
                 brand: selectedCameraPreset,
                 returnTo: 'Setcamera',
+                isHideSkipButton: true,
             });
         } catch (e) {
             console.error('Camera connection failed', e);
@@ -256,6 +277,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
 
     const handleCancelConnect = () => {
         setShowConfirmModal(false);
+        setIsDuplicateConnectAttempt(false);
         if (isChangingConnectedBrand && committedCameraBrand) {
             setSelectedCameraPreset(committedCameraBrand);
             animateSelection(committedCameraBrand);
@@ -337,341 +359,341 @@ export default function SetcameraScreen({ onNavigate, session }) {
     };
 
     return (
-        <LinearGradient
-            colors={['#F5FBFB', '#E8F5E9']}
-            style={{ flex: 1 }}
-        >
-            <SafeAreaView style={styles.container}>
-                {/* Header */}
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => onNavigate('Camera')} style={styles.backBtnStyle} activeOpacity={0.85}>
-                        <Ionicons name="chevron-back" size={22} color="#1C1C1E" />
-                    </TouchableOpacity>
-                    <View style={styles.titleContainer}>
-                        <Text style={styles.titleLogo}>NEK</Text>
-                        <Ionicons name="paw" size={18} color="#4FD1C5" />
-                        <Text style={styles.titleLogo}>CARE</Text>
-                    </View>
-                    <View style={styles.headerIconBtn} />
-                </View>
-
-                <ScrollView contentContainerStyle={styles.content}>
-
-                    {/* 1. Connection Status Banner */}
-                    <View style={styles.card}>
-                        <View style={styles.connectionHeader}>
-                            <View style={styles.statusRow}>
-                                <View style={[styles.statusDot, {
-                                    backgroundColor: cameraStatus === 'connected' ? '#4CAF50' :
-                                        cameraStatus === 'connecting' ? '#FFB300' : '#F44336'
-                                }]} />
-                                <Text style={styles.sectionTitleWhite}>
-                                    {cameraStatus === 'connected' ? 'Camera Connected' :
-                                        cameraStatus === 'connecting' ? 'Connecting...' : 'Camera Disconnected'}
-                                </Text>
-                            </View>
-                            {/* Status Icon Top Right */}
-                            <View style={[styles.statusIconBg, {
-                                backgroundColor: cameraStatus === 'connected' ? '#75c776ff' :
-                                    cameraStatus === 'connecting' ? '#FFB300' : '#F44336'
-                            }]}>
-                                <View style={[styles.statusIconBg,
-                                { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : cameraStatus === 'connecting' ? '#FFB300' : '#F44336' }
-                                ]}>
-                                    <Ionicons name={cameraStatus === 'connected' ? "checkmark" : cameraStatus === "connecting" ? "sync" : "alert-outline"} size={16} color="#fff" />
-                                </View>
-                            </View>
-                        </View>
-
-                        <Text style={styles.statusDesc}>
-                            {cameraStatus === 'connected'
-                                ? 'Connection Health: Excellent \nSignal Strength: Strong'
-                                : cameraStatus === 'connecting'
-                                    ? 'Establishing secure connection...'
-                                    : 'No signal received from this camera\nPlease check the camera power and internet connection'
-                            }
-                        </Text>
-
-                        <TouchableOpacity
-                            style={[
-                                styles.actionButtonGray,
-                                cameraStatus === 'connected' && { backgroundColor: '#4CAF50', borderColor: '#4CAF50' },
-                                cameraStatus === 'connecting' && { opacity: 0.6 },
-                                cameraStatus === 'disconnected' && { opacity: 0.65 }
-                            ]}
-                            onPress={handleTestConnection}
-                            disabled={cameraStatus === 'connecting' || cameraStatus !== 'connected'}
-                        >
-                            <Text style={[
-                                styles.actionButtonText,
-                                cameraStatus === 'connected' && { color: '#fff' }
-                            ]}>
-                                {cameraStatus === 'connected' ? 'Refresh Signal' :
-                                    cameraStatus === 'connecting' ? 'Connecting...' : 'Test Connection'}
-                            </Text>
+        <View style={{ flex: 1, backgroundColor: '#f5fffdff' }}>
+            <StatusBar style="dark" translucent backgroundColor="transparent" />
+            <LinearGradient
+                colors={['#f5fffdff', '#f5fffdff']}
+                style={{ flex: 1 }}
+            >
+                <SafeAreaView style={styles.container}>
+                    {/* Header */}
+                    <View style={styles.header}>
+                        <TouchableOpacity onPress={() => onNavigate('Camera')} style={styles.backBtnStyle} activeOpacity={0.85}>
+                            <Ionicons name="chevron-back" size={28} color="#333" />
                         </TouchableOpacity>
+                        <View style={styles.titleContainer}>
+                            <Text style={styles.headerTitle}>Camera Settings</Text>
+                        </View>
+                        <View style={styles.headerIconBtn} />
                     </View>
 
-                    {/* 2. Live Preview */}
-                    <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>
-                        <View style={styles.previewHeader}>
-                            <Ionicons name="videocam-outline" size={18} color="#1C1C1E" style={{ marginRight: 8 }} />
-                            <Text style={styles.sectionTitleWhite}>Live Preview</Text>
-                        </View>
-
-                        <View style={styles.previewContent}>
-                            <DecorativeCatEars />
-                            {/* Placeholder Image or Message */}
-                            {cameraStatus === 'connected' ? (
-                                <View style={styles.previewConnectedWrap}>
-                                    <Image
-                                        source={PREVIEW_FRAMES[previewFrameIndex]}
-                                        style={styles.previewImage}
-                                        resizeMode="cover"
-                                    />
-                                    <View style={styles.zoneMarkerFixed}>
-                                        <Text style={styles.zoneMarkerText}>{zoneLabel}</Text>
+                    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+                        {/* 1. Connection Status Banner */}
+                        <View style={styles.card}>
+                            <View style={styles.connectionHeader}>
+                                <View style={styles.statusRow}>
+                                    <View style={[styles.statusDot, {
+                                        backgroundColor: cameraStatus === 'connected' ? '#4CAF50' :
+                                            cameraStatus === 'connecting' ? '#FFB300' : '#F44336'
+                                    }]} />
+                                    <Text style={styles.sectionTitleWhite}>
+                                        {cameraStatus === 'connected' ? 'Camera Connected' :
+                                            cameraStatus === 'connecting' ? 'Connecting...' : 'Camera Disconnected'}
+                                    </Text>
+                                </View>
+                                {/* Status Icon Top Right */}
+                                <View style={[styles.statusIconBg, {
+                                    backgroundColor: cameraStatus === 'connected' ? '#75c776ff' :
+                                        cameraStatus === 'connecting' ? '#FFB300' : '#F44336'
+                                }]}>
+                                    <View style={[styles.statusIconBg,
+                                    { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : cameraStatus === 'connecting' ? '#FFB300' : '#F44336' }
+                                    ]}>
+                                        <Ionicons name={cameraStatus === 'connected' ? "checkmark" : cameraStatus === "connecting" ? "sync" : "alert-outline"} size={16} color="#fff" />
                                     </View>
-                                    <Text style={styles.scanUpdateText}>
-                                        Scan updated: {lastScanAt ? lastScanAt.toLocaleTimeString() : '--'}
-                                    </Text>
                                 </View>
-                            ) : (
-                                <View style={styles.previewPlaceholder}>
-                                    <Text style={styles.errorText}>
-                                        {cameraStatus === 'connecting' ? 'Connecting to camera...' : 'The camera in the litter box area has lost connection.'}
-                                    </Text>
-                                    <Text style={styles.errorSubText}>
-                                        {cameraStatus === 'connecting' ? 'Please wait' : 'Health monitoring is temporarily paused.'}
-                                    </Text>
-                                </View>
-                            )}
+                            </View>
+
+                            <Text style={styles.statusDesc}>
+                                {cameraStatus === 'connected'
+                                    ? 'Connection Health: Excellent \nSignal Strength: Strong'
+                                    : cameraStatus === 'connecting'
+                                        ? 'Establishing secure connection...'
+                                        : 'No signal received from this camera\nPlease check the camera power and internet connection'
+                                }
+                            </Text>
 
                             <TouchableOpacity
                                 style={[
-                                    styles.overlayButton,
-                                    cameraStatus !== 'connected' && styles.overlayButtonDisabled
+                                    styles.actionButtonGray,
+                                    cameraStatus === 'connected' && { backgroundColor: '#4CAF50', borderColor: '#4CAF50' },
+                                    cameraStatus === 'connecting' && { opacity: 0.6 },
+                                    cameraStatus === 'disconnected' && { opacity: 0.65 }
                                 ]}
-                                disabled={cameraStatus !== 'connected'}
-                                onPress={() => {
-                                    onNavigate('Phone', {
-                                        initialStep: 'zone_setup',
-                                        mode: 'update',
-                                        returnTo: 'Setcamera',
-                                        brand: selectedCameraPreset,
-                                    });
-                                }}
+                                onPress={handleTestConnection}
+                                disabled={cameraStatus === 'connecting' || cameraStatus !== 'connected'}
                             >
-                                <MaterialCommunityIcons
-                                    name="crop-free"
-                                    size={16}
-                                    color={cameraStatus === 'connected' ? '#fff' : '#CBD5E1'}
-                                    style={{ marginRight: 8 }}
-                                />
                                 <Text style={[
-                                    styles.overlayButtonText,
-                                    cameraStatus !== 'connected' && styles.overlayButtonTextDisabled
+                                    styles.actionButtonText,
+                                    cameraStatus === 'connected' && { color: '#fff' }
                                 ]}>
-                                    {cameraStatus === 'connected' ? 'Edit Label Zones' : 'Detection locked'}
+                                    {cameraStatus === 'connected' ? 'Refresh Signal' :
+                                        cameraStatus === 'connecting' ? 'Connecting...' : 'Test Connection'}
                                 </Text>
                             </TouchableOpacity>
                         </View>
-                    </View>
 
-                    {/* 3. Monitoring Mode */}
-                    <View style={styles.card}>
-                        <Text style={styles.sectionTitle}>Monitoring Mode</Text>
-
-                        {/* Toggle Switch */}
-                        <View style={styles.toggleContainer}>
-                            <TouchableOpacity
-                                style={[styles.toggleBtn, monitoringMode === 'single' && styles.toggleBtnActive]}
-                                onPress={() => handleModeChange('single')}
-                            >
-                                <Text style={[styles.toggleText, monitoringMode === 'single' && styles.toggleTextActive]}>Single Cat</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.toggleBtn, monitoringMode === 'multi' && styles.toggleBtnActive]}
-                                onPress={() => handleModeChange('multi')}
-                            >
-                                <Text style={[styles.toggleText, monitoringMode === 'multi' && styles.toggleTextActive]}>Multi cat mode</Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Cat Selection */}
-                        <View style={styles.catSelectionRow}>
-                            {myCats.map((cat) => (
-                                <TouchableOpacity
-                                    key={cat.id}
-                                    style={[styles.catItem, selectedCats.includes(cat.id) ? {} : { opacity: 0.5 }]}
-                                    onPress={() => toggleCatSelection(cat.id)}
-                                >
-                                    <View style={[styles.catAvatar, selectedCats.includes(cat.id) && styles.catAvatarSelected]}>
-                                        {cat.image_url ? (
-                                            <Image source={{ uri: cat.image_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                                        ) : (
-                                            <Image source={require('../../assets/cioncat.jpg')} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                                        )}
-                                    </View>
-                                    <Text style={styles.catName}>{cat.name}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-
-                        <View style={styles.infoRow}>
-                            <Ionicons name="information-circle" size={14} color="#555" />
-                            <Text style={styles.infoText}>Used when {monitoringMode} cats share the same camera</Text>
-                        </View>
-                    </View>
-
-                    {/* 4. Camera Hardware Accordion */}
-                    <View style={styles.card}>
-                        <TouchableOpacity
-                            style={styles.accordionHeader}
-                            onPress={() => {
-                                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                                setIsDropdownOpen(!isDropdownOpen);
-                            }}
-                            activeOpacity={0.7}
-                        >
-                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                <MaterialCommunityIcons name="webcam" size={22} color="#26A69A" style={{ marginRight: 10 }} />
-                                <Text style={styles.sectionTitle}>Camera Hardware & Brand</Text>
+                        {/* 2. Live Preview */}
+                        <View style={[styles.card, { padding: 0, overflow: 'hidden' }]}>
+                            <View style={styles.previewHeader}>
+                                <Ionicons name="videocam-outline" size={18} color="#1C1C1E" style={{ marginRight: 8 }} />
+                                <Text style={styles.sectionTitleWhite}>Live Preview</Text>
                             </View>
-                            <Ionicons name={isDropdownOpen ? "chevron-up" : "chevron-down"} size={20} color="#00695C" />
-                        </TouchableOpacity>
 
-                        {isDropdownOpen && (
-                            <Animated.View style={styles.accordionContent}>
-                                <Text style={styles.label}>Select camera brand</Text>
-
-                                <View style={styles.brandCardStack}>
-                                    {CAMERA_BRANDS.map((brand) => {
-                                        const isSelected = selectedCameraPreset === brand.id;
-                                        return (
-                                            <Animated.View key={brand.id} style={{ transform: [{ scale: brandScales[brand.id] || 1 }] }}>
-                                                <TouchableOpacity
-                                                    activeOpacity={0.9}
-                                                    onPress={() => handleSelectCameraBrand(brand.id)}
-                                                    style={[
-                                                        styles.brandCardSmall,
-                                                        isSelected && styles.brandCardSelected,
-                                                    ]}
-                                                >
-                                                    <View style={styles.brandHeader}>
-                                                        <View style={[styles.brandIconBg, isSelected && { backgroundColor: '#B2DFDB' }]}>
-                                                            <MaterialCommunityIcons
-                                                                name={brand.icon}
-                                                                size={20}
-                                                                color={isSelected ? "#004D40" : "#90A4AE"}
-                                                            />
-                                                        </View>
-                                                        <View style={{ flex: 1, marginLeft: 12 }}>
-                                                            <Text style={[styles.brandNameTitle, isSelected && { color: '#004D40' }]}>
-                                                                {brand.label}
-                                                            </Text>
-                                                            <Text style={styles.brandApiSub}>Connect to app</Text>
-                                                        </View>
-                                                        {isSelected && (
-                                                            <Ionicons name="checkmark-circle" size={20} color="#00695C" />
-                                                        )}
-                                                    </View>
-                                                </TouchableOpacity>
-                                            </Animated.View>
-                                        );
-                                    })}
-                                </View>
-
-                                {selectedCameraPreset === 'custom' && (
-                                    <View style={styles.inputRow}>
-                                        <MaterialCommunityIcons name="webcam" size={16} color="#555" style={{ marginRight: 8 }} />
-                                        <TextInput
-                                            style={styles.input}
-                                            value={customCameraBrand}
-                                            onChangeText={setCustomCameraBrand}
-                                            placeholder="Type camera brand/model..."
-                                            placeholderTextColor="#999"
+                            <View style={styles.previewContent}>
+                                <DecorativeCatEars />
+                                {/* Placeholder Image or Message */}
+                                {cameraStatus === 'connected' ? (
+                                    <View style={styles.previewConnectedWrap}>
+                                        <Image
+                                            source={PREVIEW_FRAMES[previewFrameIndex]}
+                                            style={styles.previewImage}
+                                            resizeMode="cover"
                                         />
+                                        <View style={styles.zoneMarkerFixed}>
+                                            <Text style={styles.zoneMarkerText}>{zoneLabel}</Text>
+                                        </View>
+                                        <Text style={styles.scanUpdateText}>
+                                            Scan updated: {lastScanAt ? lastScanAt.toLocaleTimeString() : '--'}
+                                        </Text>
+                                    </View>
+                                ) : (
+                                    <View style={styles.previewPlaceholder}>
+                                        <Text style={styles.errorText}>
+                                            {cameraStatus === 'connecting' ? 'Connecting to camera...' : 'The camera in the litter box area has lost connection.'}
+                                        </Text>
+                                        <Text style={styles.errorSubText}>
+                                            {cameraStatus === 'connecting' ? 'Please wait' : 'Health monitoring is temporarily paused.'}
+                                        </Text>
                                     </View>
                                 )}
 
                                 <TouchableOpacity
                                     style={[
-                                        styles.actionButtonGray,
-                                        { backgroundColor: '#00897B', borderColor: '#00897B' },
-                                        !selectedCameraPreset && { backgroundColor: '#9CA3AF', borderColor: '#9CA3AF' }
+                                        styles.overlayButton,
+                                        cameraStatus !== 'connected' && styles.overlayButtonDisabled
                                     ]}
-                                    onPress={handleConnectCamera}
-                                    disabled={isConnecting || !selectedCameraPreset}
+                                    disabled={cameraStatus !== 'connected'}
+                                    onPress={() => {
+                                        onNavigate('Phone', {
+                                            initialStep: 'zone_setup',
+                                            mode: 'update',
+                                            returnTo: 'Setcamera',
+                                            brand: selectedCameraPreset,
+                                        });
+                                    }}
                                 >
-                                    <Text style={[styles.actionButtonText, { color: '#fff' }]}>
-                                        {isConnecting
-                                            ? 'Connecting...'
-                                            : !selectedCameraPreset
-                                                ? 'Select Camera First'
-                                            : isUpdateMode
-                                                ? 'Update Connection'
-                                                : 'Connect Camera'}
+                                    <MaterialCommunityIcons
+                                        name="crop-free"
+                                        size={16}
+                                        color={cameraStatus === 'connected' ? '#fff' : '#CBD5E1'}
+                                        style={{ marginRight: 8 }}
+                                    />
+                                    <Text style={[
+                                        styles.overlayButtonText,
+                                        cameraStatus !== 'connected' && styles.overlayButtonTextDisabled
+                                    ]}>
+                                        {cameraStatus === 'connected' ? 'Edit Label Zones' : 'Detection locked'}
                                     </Text>
-                                </TouchableOpacity>
-
-                                <View style={styles.infoRow}>
-                                    <Ionicons name="information-circle" size={14} color="#555" />
-                                    <Text style={styles.infoText}>
-                                        {cameraStatus === 'connected'
-                                            ? 'Connected. If you change camera, setup will reset and camera signal will disconnect automatically.'
-                                            : !selectedCameraPreset
-                                                ? 'Please select a camera hardware first.'
-                                                : 'Choose camera and connect with app. No API setup required.'}
-                                    </Text>
-                                </View>
-                            </Animated.View>
-                        )}
-                    </View>
-
-                    {/* 5. Usage Note */}
-                    <View style={styles.card}>
-                        <Text style={styles.sectionTitle}>How To Use</Text>
-                        <Text style={styles.statusDesc}>
-                            1. Select your camera hardware in the Hardware section.
-                            {'\n'}2. Tap Connect to open setup flow and verify live feed.
-                            {'\n'}3. After connection, edit and update detection zones.
-                            {'\n'}4. Use Test Connection only to refresh an already connected camera.
-                        </Text>
-                    </View>
-
-                    <View style={{ height: 40 }} />
-                </ScrollView>
-
-                <Modal
-                    transparent
-                    visible={showConfirmModal}
-                    animationType="fade"
-                    onRequestClose={handleCancelConnect}
-                >
-                    <View style={styles.confirmOverlay}>
-                        <View style={styles.confirmCard}>
-                            <Text style={styles.confirmTitle}>{confirmTitle}</Text>
-                            <Text style={styles.confirmMessage}>{confirmMessage}</Text>
-                            <View style={styles.confirmActions}>
-                                <TouchableOpacity
-                                    style={styles.confirmCancelBtn}
-                                    onPress={handleCancelConnect}
-                                >
-                                    <Text style={styles.confirmCancelText}>Cancel</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.confirmPrimaryBtn}
-                                    onPress={handleConfirmConnect}
-                                >
-                                    <Text style={styles.confirmPrimaryText}>Confirm</Text>
                                 </TouchableOpacity>
                             </View>
                         </View>
-                    </View>
-                </Modal>
-            </SafeAreaView>
-        </LinearGradient>
+
+                        {/* 3. Monitoring Mode */}
+                        <View style={styles.card}>
+                            <Text style={styles.sectionTitle}>Monitoring Mode</Text>
+
+                            {/* Toggle Switch */}
+                            <View style={styles.toggleContainer}>
+                                <TouchableOpacity
+                                    style={[styles.toggleBtn, monitoringMode === 'single' && styles.toggleBtnActive]}
+                                    onPress={() => handleModeChange('single')}
+                                >
+                                    <Text style={[styles.toggleText, monitoringMode === 'single' && styles.toggleTextActive]}>Single Cat</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.toggleBtn, monitoringMode === 'multi' && styles.toggleBtnActive]}
+                                    onPress={() => handleModeChange('multi')}
+                                >
+                                    <Text style={[styles.toggleText, monitoringMode === 'multi' && styles.toggleTextActive]}>Multi cat mode</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Cat Selection */}
+                            <View style={styles.catSelectionRow}>
+                                {myCats.map((cat) => (
+                                    <TouchableOpacity
+                                        key={cat.id}
+                                        style={[styles.catItem, selectedCats.includes(cat.id) ? {} : { opacity: 0.5 }]}
+                                        onPress={() => toggleCatSelection(cat.id)}
+                                    >
+                                        <View style={[styles.catAvatar, selectedCats.includes(cat.id) && styles.catAvatarSelected]}>
+                                            {cat.image_url ? (
+                                                <Image source={{ uri: cat.image_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                                            ) : (
+                                                <Image source={require('../../assets/cioncat.jpg')} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                                            )}
+                                        </View>
+                                        <Text style={styles.catName}>{cat.name}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+
+                            <View style={styles.infoRow}>
+                                <Ionicons name="information-circle" size={14} color="#555" />
+                                <Text style={styles.infoText}>Used when {monitoringMode} cats share the same camera</Text>
+                            </View>
+                        </View>
+
+                        {/* 4. Camera Hardware Accordion */}
+                        <View style={styles.card}>
+                            <TouchableOpacity
+                                style={styles.accordionHeader}
+                                onPress={() => {
+                                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                                    setIsDropdownOpen(!isDropdownOpen);
+                                }}
+                                activeOpacity={0.7}
+                            >
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <MaterialCommunityIcons name="webcam" size={22} color="#26A69A" style={{ marginRight: 10 }} />
+                                    <Text style={styles.sectionTitle}>Camera Hardware & Brand</Text>
+                                </View>
+                                <Ionicons name={isDropdownOpen ? "chevron-up" : "chevron-down"} size={20} color="#00695C" />
+                            </TouchableOpacity>
+
+                            {isDropdownOpen && (
+                                <Animated.View style={styles.accordionContent}>
+                                    <Text style={styles.label}>Select camera brand</Text>
+
+                                    <View style={styles.brandCardStack}>
+                                        {CAMERA_BRANDS.map((brand) => {
+                                            const isSelected = selectedCameraPreset === brand.id;
+                                            return (
+                                                <Animated.View key={brand.id} style={{ transform: [{ scale: brandScales[brand.id] || 1 }] }}>
+                                                    <TouchableOpacity
+                                                        activeOpacity={0.9}
+                                                        onPress={() => handleSelectCameraBrand(brand.id)}
+                                                        style={[
+                                                            styles.brandCardSmall,
+                                                            isSelected && styles.brandCardSelected,
+                                                        ]}
+                                                    >
+                                                        <View style={styles.brandHeader}>
+                                                            <View style={[styles.brandIconBg, isSelected && { backgroundColor: '#B2DFDB' }]}>
+                                                                <MaterialCommunityIcons
+                                                                    name={brand.icon}
+                                                                    size={20}
+                                                                    color={isSelected ? "#004D40" : "#90A4AE"}
+                                                                />
+                                                            </View>
+                                                            <View style={{ flex: 1, marginLeft: 12 }}>
+                                                                <Text style={[styles.brandNameTitle, isSelected && { color: '#004D40' }]}>
+                                                                    {brand.label}
+                                                                </Text>
+                                                                <Text style={styles.brandApiSub}>Connect to app</Text>
+                                                            </View>
+                                                            {isSelected && (
+                                                                <Ionicons name="checkmark-circle" size={20} color="#00695C" />
+                                                            )}
+                                                        </View>
+                                                    </TouchableOpacity>
+                                                </Animated.View>
+                                            );
+                                        })}
+                                    </View>
+
+                                    {selectedCameraPreset === 'custom' && (
+                                        <View style={styles.inputRow}>
+                                            <MaterialCommunityIcons name="webcam" size={16} color="#555" style={{ marginRight: 8 }} />
+                                            <TextInput
+                                                style={styles.input}
+                                                value={customCameraBrand}
+                                                onChangeText={setCustomCameraBrand}
+                                                placeholder="Type camera brand/model..."
+                                                placeholderTextColor="#999"
+                                            />
+                                        </View>
+                                    )}
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.actionButtonGray,
+                                            { backgroundColor: '#00897B', borderColor: '#00897B' },
+                                            !selectedCameraPreset && { backgroundColor: '#9CA3AF', borderColor: '#9CA3AF' }
+                                        ]}
+                                        onPress={handleConnectCamera}
+                                        disabled={isConnecting || !selectedCameraPreset}
+                                    >
+                                        <Text style={[styles.actionButtonText, { color: '#fff' }]}>
+                                            {isConnecting
+                                                ? 'Connecting...'
+                                                : !selectedCameraPreset
+                                                    ? 'Select Camera First'
+                                                    : isUpdateMode
+                                                        ? 'Update Connection'
+                                                        : 'Connect Camera'}
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    <View style={styles.infoRow}>
+                                        <Ionicons name="information-circle" size={14} color="#555" />
+                                        <Text style={styles.infoText}>
+                                            {cameraStatus === 'connected'
+                                                ? 'Connected. If you change camera, setup will reset and camera signal will disconnect automatically.'
+                                                : !selectedCameraPreset
+                                                    ? 'Please select a camera hardware first.'
+                                                    : 'Choose camera and connect with app. No API setup required.'}
+                                        </Text>
+                                    </View>
+                                </Animated.View>
+                            )}
+                        </View>
+
+                        {/* 5. Usage Note */}
+                        <View style={styles.card}>
+                            <Text style={styles.sectionTitle}>How To Use</Text>
+                            <Text style={styles.statusDesc}>
+                                1. Select your camera hardware in the Hardware section.
+                                {'\n'}2. Tap Connect to open setup flow and verify live feed.
+                                {'\n'}3. After connection, edit and update detection zones.
+                                {'\n'}4. Use Test Connection only to refresh an already connected camera.
+                            </Text>
+                        </View>
+
+                        <View style={{ height: 40 }} />
+                    </ScrollView>
+
+                    <Modal
+                        transparent
+                        visible={showConfirmModal}
+                        animationType="fade"
+                        onRequestClose={handleCancelConnect}
+                    >
+                        <View style={styles.confirmOverlay}>
+                            <View style={styles.confirmCard}>
+                                <Text style={styles.confirmTitle}>{confirmTitle}</Text>
+                                <Text style={styles.confirmMessage}>{confirmMessage}</Text>
+                                <View style={styles.confirmActions}>
+                                    <TouchableOpacity
+                                        style={styles.confirmCancelBtn}
+                                        onPress={handleCancelConnect}
+                                    >
+                                        <Text style={styles.confirmCancelText}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.confirmPrimaryBtn}
+                                        onPress={handleConfirmConnect}
+                                    >
+                                        <Text style={styles.confirmPrimaryText}>Confirm</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </View>
+                    </Modal>
+                </SafeAreaView>
+            </LinearGradient>
+        </View>
     );
 }
 
@@ -681,15 +703,16 @@ export default function SetcameraScreen({ onNavigate, session }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#F5FBFB',
+        backgroundColor: '#f5fffdff',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingTop: 8,
-        paddingBottom: 12,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: 10,
+        backgroundColor: 'transparent',
     },
     backButton: {
         width: 36,
@@ -702,25 +725,16 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     headerIconBtn: {
-        width: 42,
-        height: 42,
+        width: 40,
+        height: 40,
         justifyContent: 'center',
-        alignItems: 'center',
+        alignItems: 'flex-end',
     },
     backBtnStyle: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
+        width: 40,
+        height: 40,
         justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#E5E5EA',
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 6,
-        elevation: 2,
+        alignItems: 'flex-start',
     },
     titleContainer: {
         flexDirection: 'row',
@@ -735,9 +749,9 @@ const styles = StyleSheet.create({
         marginHorizontal: 2,
     },
     headerTitle: {
-        fontSize: 22,
-        fontWeight: '700',
-        color: '#1C1C1E',
+        fontSize: 18,
+        fontFamily: 'Inter-Bold',
+        color: '#2F6A62',
         textAlign: 'center',
         flex: 1,
     },
@@ -748,8 +762,6 @@ const styles = StyleSheet.create({
     // Cards
     card: {
         backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#E5E5EA',
         borderWidth: 1.5,
         borderColor: '#E0F2F1',
         borderRadius: 16,
@@ -757,11 +769,10 @@ const styles = StyleSheet.create({
         marginBottom: 16,
         overflow: 'hidden',
         shadowColor: '#0F172A',
-        shadowColor: '#546E7A',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-        elevation: 3,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
     },
     sectionTitle: {
         color: '#1C1C1E',
@@ -1124,6 +1135,11 @@ const styles = StyleSheet.create({
         padding: 12,
         borderWidth: 1.5,
         borderColor: "rgba(0,0,0,0.05)",
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+        elevation: 1,
     },
     brandCardSelected: {
         borderColor: "#00897B",

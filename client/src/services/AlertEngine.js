@@ -271,17 +271,19 @@ class AlertEngineService {
      * @param {string} catId - The cat_id selected by the user
      * @param {'user'|'auto'|'skipped'} [resolvedBy='user']
      */
-    async resolveIdentity(alertId, catId, resolvedBy = 'user') {
+    async resolveIdentity(alertId, catId, resolvedBy = 'user', resolvedCatName = null) {
         let resolved = null;
         const targetId = String(alertId);
 
         this.alerts = this.alerts.map(a => {
-            if (String(a.id) === targetId && a.pendingIdentityConfirm === true) {
+            const canResolveSkipped = a.type === 'pending_identity' && a.resolvedBy === 'skipped';
+            if (String(a.id) === targetId && (a.pendingIdentityConfirm === true || canResolveSkipped)) {
                 resolved = {
                     ...a,
                     pendingIdentityConfirm: false,
                     isRead: true, // Mark as read since user interacted with it
                     resolvedCatId: catId,
+                    resolvedCatName: resolvedCatName || a.resolvedCatName || null,
                     resolvedAt: new Date().toISOString(),
                     resolvedBy
                 };

@@ -17,6 +17,8 @@ import {
     View,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import AlertEngine, { AlertEvents } from '../services/AlertEngine';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
@@ -54,9 +56,9 @@ const SwipeableNotificationCard = ({
     const isDeletingRef = useRef(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const HARD_SWIPE_THRESHOLD_X = -(Dimensions.get('window').width * 0.5);
-    const SWIPE_OPEN_X = -176;
-    const HARD_SWIPE_X = -198;
-    const SWIPE_TRIGGER_X = -42;
+    const SWIPE_OPEN_X = -122;
+    const HARD_SWIPE_X = -144;
+    const SWIPE_TRIGGER_X = -34;
     const SWIPE_OVERSHOOT_RESISTANCE = 0.22;
     const isSkippedUnfilled = alert.type === 'pending_identity' && alert.resolvedBy === 'skipped';
     const isPending = alert.pendingIdentityConfirm === true || isSkippedUnfilled;
@@ -102,6 +104,7 @@ const SwipeableNotificationCard = ({
     const performDelete = () => {
         if (isDeletingRef.current) return;
         isDeletingRef.current = true;
+        if (setActiveSwipeId) setActiveSwipeId(null);
         Animated.timing(deleteProgress, {
             toValue: 1,
             duration: 190,
@@ -156,9 +159,10 @@ const SwipeableNotificationCard = ({
 
     const panResponder = useRef(
         PanResponder.create({
+            onPanResponderTerminationRequest: () => false,
             onMoveShouldSetPanResponderCapture: (evt, gestureState) => {
                 if (isSelecting) return false;
-                return Math.abs(gestureState.dx) > 20 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+                return Math.abs(gestureState.dx) > 22 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) + 4;
             },
             onPanResponderMove: (evt, gestureState) => {
                 if (gestureState.dx < 0) {
@@ -187,6 +191,10 @@ const SwipeableNotificationCard = ({
                     if (setActiveSwipeId) setActiveSwipeId(null);
                 }
             },
+            onPanResponderTerminate: () => {
+                animateToX(0, 0);
+                if (setActiveSwipeId) setActiveSwipeId(null);
+            },
         })
     ).current;
 
@@ -205,7 +213,10 @@ const SwipeableNotificationCard = ({
                     style={styles.deleteButton}
                     onPress={() => {
                         try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch (e) { }
-                        showDeleteConfirm(() => animateToX(0, 0));
+                        showDeleteConfirm(() => {
+                            if (setActiveSwipeId) setActiveSwipeId(null);
+                            animateToX(0, 0);
+                        });
                     }}
                 >
                     <Animated.View
@@ -321,8 +332,8 @@ const SwipeableNotificationCard = ({
                             isPending
                                 ? styles.pendingIconContainer
                                 : isCritical
-                                        ? styles.iconCriticalBg
-                                        : styles.iconSuccessBg,
+                                    ? styles.iconCriticalBg
+                                    : styles.iconSuccessBg,
                         ]}
                     >
                         <MaterialCommunityIcons
@@ -330,16 +341,16 @@ const SwipeableNotificationCard = ({
                                 isPending
                                     ? 'help-rhombus-outline'
                                     : isCritical
-                                            ? 'alert-circle-outline'
-                                            : 'check-circle-outline'
+                                        ? 'alert-circle-outline'
+                                        : 'check-circle-outline'
                             }
                             size={26}
                             color={
                                 isPending
                                     ? '#E65100'
                                     : isCritical
-                                            ? '#D32F2F'
-                                            : '#2E7D32'
+                                        ? '#D32F2F'
+                                        : '#2E7D32'
                             }
                         />
                     </View>
@@ -436,6 +447,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
     }, [isSelecting, selectionBarAnim]);
 
     const openMenu = () => {
+        setActiveSwipeId(null);
         setRenderMenu(true);
         Animated.timing(menuAnim, { toValue: 1, duration: 180, useNativeDriver: true }).start();
     };
@@ -470,6 +482,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
     };
 
     const handlePressCard = (alert) => {
+        setActiveSwipeId(null);
         const shouldOpenIdentify = alert.pendingIdentityConfirm === true || (alert.type === 'pending_identity' && alert.resolvedBy === 'skipped');
         if (shouldOpenIdentify) pushAlert(alert);
         else onNavigate('EventDetail', { alertData: alert });
@@ -477,6 +490,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
     };
 
     const handleDelete = (id) => {
+        setActiveSwipeId(null);
         if (AlertEngine.deleteAlert) AlertEngine.deleteAlert(id);
     };
 
@@ -500,12 +514,14 @@ export default function AlertScreen({ onBack, onNavigate }) {
     };
 
     const handleConfirmModalCancel = () => {
+        setActiveSwipeId(null);
         const cancelCallback = confirmModal.onCancel;
         closeDeleteConfirmModal();
         if (cancelCallback) cancelCallback();
     };
 
     const handleConfirmModalConfirm = () => {
+        setActiveSwipeId(null);
         const confirmCallback = confirmModal.onConfirm;
         closeDeleteConfirmModal();
         if (confirmCallback) confirmCallback();
@@ -523,6 +539,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
     };
 
     const handleSelectionDelete = () => {
+        setActiveSwipeId(null);
         const ids = Array.from(selectedIds);
         if (filterMode === 'deleted' && AlertEngine.permanentlyDeleteMultipleAlerts) {
             AlertEngine.permanentlyDeleteMultipleAlerts(ids);
@@ -534,218 +551,222 @@ export default function AlertScreen({ onBack, onNavigate }) {
 
     return (
         <View style={styles.container}>
-            <SafeAreaView style={styles.container}>
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                        <Ionicons name="chevron-back" size={28} color="#333" />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Notifications</Text>
-                    <TouchableOpacity
-                        onPress={() => {
-                            if (isSelecting) resetSelectionState();
-                            else openMenu();
-                        }}
-                        onPressIn={animateMenuButtonPressIn}
-                        onPressOut={animateMenuButtonPressOut}
-                        style={[styles.backButton, { alignItems: 'flex-end' }]}
-                    >
-                        <Animated.View
-                            style={{
-                                transform: [
-                                    {
-                                        scale: menuButtonPressAnim.interpolate({
-                                            inputRange: [0, 1],
-                                            outputRange: [1, 0.88],
-                                        }),
-                                    },
-                                    {
-                                        rotate: menuButtonPressAnim.interpolate({
-                                            inputRange: [0, 1],
-                                            outputRange: ['0deg', '-7deg'],
-                                        }),
-                                    },
-                                ],
-                                opacity: menuButtonPressAnim.interpolate({
-                                    inputRange: [0, 1],
-                                    outputRange: [1, 0.8],
-                                }),
+            <StatusBar style="dark" translucent backgroundColor="transparent" />
+            <LinearGradient colors={['#f5fffdff', '#f5fffdff']} style={{ flex: 1 }}>
+                <SafeAreaView style={styles.container}>
+                    <View style={styles.header}>
+                        <TouchableOpacity onPress={onBack} style={styles.backButton}>
+                            <Ionicons name="chevron-back" size={28} color="#333" />
+                        </TouchableOpacity>
+                        <Text style={styles.headerTitle}>Notifications</Text>
+                        <TouchableOpacity
+                            onPress={() => {
+                                if (isSelecting) resetSelectionState();
+                                else openMenu();
                             }}
+                            onPressIn={animateMenuButtonPressIn}
+                            onPressOut={animateMenuButtonPressOut}
+                            style={[styles.backButton, { alignItems: 'flex-end' }]}
                         >
-                            <Ionicons name={isSelecting ? 'close' : 'ellipsis-vertical'} size={24} color="#333" />
-                        </Animated.View>
-                    </TouchableOpacity>
-                </View>
-
-                <ScrollView
-                    contentContainerStyle={styles.content}
-                    showsVerticalScrollIndicator={false}
-                    onScrollBeginDrag={() => setActiveSwipeId(null)}
-                >
-                    {(filterMode === 'unread' ? alerts.filter((a) => !a.isRead) : alerts).length === 0 ? (
-                        <View style={styles.emptyState}>
-                            <MaterialCommunityIcons name="bell-sleep-outline" size={64} color="#E0E0E0" />
-                            <Text style={styles.emptyTitle}>All caught up!</Text>
-                            <Text style={styles.emptyDesc}>You have no new notifications.</Text>
-                        </View>
-                    ) : (
-                        (filterMode === 'unread' ? alerts.filter((a) => !a.isRead) : alerts).map((alert) => (
                             <Animated.View
-                                key={alert.id}
                                 style={{
-                                    opacity: fadeAnim,
-                                    transform: [{ translateY: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+                                    transform: [
+                                        {
+                                            scale: menuButtonPressAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: [1, 0.88],
+                                            }),
+                                        },
+                                        {
+                                            rotate: menuButtonPressAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: ['0deg', '-7deg'],
+                                            }),
+                                        },
+                                    ],
+                                    opacity: menuButtonPressAnim.interpolate({
+                                        inputRange: [0, 1],
+                                        outputRange: [1, 0.8],
+                                    }),
                                 }}
                             >
-                                <SwipeableNotificationCard
-                                    alert={alert}
-                                    onPress={handlePressCard}
-                                    onDelete={handleDelete}
-                                    onRequestDeleteConfirm={openDeleteConfirmModal}
-                                    onMarkRead={(id) => AlertEngine.markAsRead && AlertEngine.markAsRead(id)}
-                                    isSelecting={isSelecting}
-                                    isSelected={selectedIds.has(alert.id)}
-                                    activeSwipeId={activeSwipeId}
-                                    setActiveSwipeId={setActiveSwipeId}
-                                    onToggleSelect={(id) => {
-                                        const next = new Set(selectedIds);
-                                        if (next.has(id)) next.delete(id);
-                                        else next.add(id);
-                                        setSelectedIds(next);
-                                    }}
-                                />
+                                <Ionicons name={isSelecting ? 'close' : 'ellipsis-vertical'} size={24} color="#333" />
                             </Animated.View>
-                        ))
-                    )}
-                </ScrollView>
+                        </TouchableOpacity>
+                    </View>
 
-                {isSelecting && (
-                    <Animated.View
-                        style={[
-                            styles.selectionBar,
-                            {
-                                opacity: selectionBarAnim,
-                                transform: [
-                                    {
-                                        translateY: selectionBarAnim.interpolate({
-                                            inputRange: [0, 1],
-                                            outputRange: [20, 0],
-                                        }),
-                                    },
-                                    {
-                                        scale: selectionBarAnim.interpolate({
-                                            inputRange: [0, 1],
-                                            outputRange: [0.97, 1],
-                                        }),
-                                    },
-                                ],
-                            },
-                        ]}
+                    <ScrollView
+                        contentContainerStyle={styles.content}
+                        showsVerticalScrollIndicator={false}
+                        onTouchStart={() => setActiveSwipeId(null)}
+                        onScrollBeginDrag={() => setActiveSwipeId(null)}
                     >
-                        <TouchableOpacity style={styles.selectionBarBtn} onPress={resetSelectionState}>
-                            <Text style={styles.selectionBarText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.selectionBarBtn, styles.iosDeleteBarBtn]} onPress={handleSelectionDelete}>
-                            <Text style={[styles.selectionBarText, styles.iosDeleteBarBtnText]}>
-                                {filterMode === 'deleted' ? 'Permanently Delete' : `Delete (${selectedIds.size})`}
-                            </Text>
-                        </TouchableOpacity>
-                    </Animated.View>
-                )}
-
-                {filterMode === 'deleted' && !isSelecting && (
-                    <View style={styles.selectionBar}>
-                        <TouchableOpacity style={[styles.selectionBarBtn, { flex: 1, marginRight: 8 }]} onPress={() => setFilterMode('all')}>
-                            <Text style={styles.selectionBarText}>Back to Messages</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.selectionBarBtn, styles.iosDeleteBarBtn, { flex: 1, marginLeft: 8 }]} onPress={requestDeleteAllConfirm}>
-                            <Text style={[styles.selectionBarText, styles.iosDeleteBarBtnText]}>Empty Trash</Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
-
-                <Modal visible={confirmModal.visible} transparent animationType="fade">
-                    <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                            <View style={styles.modalIconCircle}>
-                                <Ionicons name="alert-circle-outline" size={40} color="#2A69C7" />
+                        {(filterMode === 'unread' ? alerts.filter((a) => !a.isRead) : alerts).length === 0 ? (
+                            <View style={styles.emptyState}>
+                                <MaterialCommunityIcons name="bell-sleep-outline" size={64} color="#E0E0E0" />
+                                <Text style={styles.emptyTitle}>All caught up!</Text>
+                                <Text style={styles.emptyDesc}>You have no new notifications.</Text>
                             </View>
-                            <Text style={styles.modalTitle}>{confirmModal.title}</Text>
-                            <Text style={styles.modalText}>{confirmModal.message}</Text>
-                            <View style={styles.modalActions}>
-                                <TouchableOpacity style={styles.modalCancel} onPress={handleConfirmModalCancel}>
-                                    <Text style={styles.modalCancelText}>Cancel</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.modalDelete} onPress={handleConfirmModalConfirm}>
-                                    <Text style={styles.modalDeleteText}>{confirmModal.confirmText}</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </View>
-                </Modal>
+                        ) : (
+                            (filterMode === 'unread' ? alerts.filter((a) => !a.isRead) : alerts).map((alert) => (
+                                <Animated.View
+                                    key={alert.id}
+                                    style={{
+                                        opacity: fadeAnim,
+                                        transform: [{ translateY: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+                                    }}
+                                >
+                                    <SwipeableNotificationCard
+                                        alert={alert}
+                                        onPress={handlePressCard}
+                                        onDelete={handleDelete}
+                                        onRequestDeleteConfirm={openDeleteConfirmModal}
+                                        onMarkRead={(id) => AlertEngine.markAsRead && AlertEngine.markAsRead(id)}
+                                        isSelecting={isSelecting}
+                                        isSelected={selectedIds.has(alert.id)}
+                                        activeSwipeId={activeSwipeId}
+                                        setActiveSwipeId={setActiveSwipeId}
+                                        onToggleSelect={(id) => {
+                                            const next = new Set(selectedIds);
+                                            if (next.has(id)) next.delete(id);
+                                            else next.add(id);
+                                            setSelectedIds(next);
+                                        }}
+                                    />
+                                </Animated.View>
+                            ))
+                        )}
+                    </ScrollView>
 
-                <Modal visible={renderMenu} transparent animationType="none" onRequestClose={() => closeMenu()}>
-                    <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPressOut={() => closeMenu()}>
+                    {isSelecting && (
                         <Animated.View
                             style={[
-                                styles.menuContainer,
+                                styles.selectionBar,
                                 {
-                                    opacity: menuAnim,
+                                    opacity: selectionBarAnim,
                                     transform: [
-                                        { translateY: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) },
-                                        { scale: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) },
+                                        {
+                                            translateY: selectionBarAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: [20, 0],
+                                            }),
+                                        },
+                                        {
+                                            scale: selectionBarAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: [0.97, 1],
+                                            }),
+                                        },
                                     ],
                                 },
                             ]}
                         >
-                            <Pressable style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]} onPress={() => closeMenu(() => setIsSelecting(true))}>
-                                <Ionicons name="checkmark-circle-outline" size={22} color="#EAF2FF" />
-                                <Text style={styles.menuItemText}>Select messages</Text>
-                            </Pressable>
-
-                            {alerts.length > 0 && (
-                                <>
-                                    <View style={styles.menuDivider} />
-                                    <Pressable style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]} onPress={() => closeMenu(handleReadAll)}>
-                                        <Ionicons name="checkmark-done-outline" size={20} color="#E6EDF7" />
-                                        <Text style={styles.menuItemText}>Read All</Text>
-                                    </Pressable>
-                                    <Pressable style={({ pressed }) => [styles.menuDeletePill, pressed && styles.menuDeletePillPressed]} onPress={() => closeMenu(requestDeleteAllConfirm)}>
-                                        <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
-                                        <Text style={styles.menuDeletePillText}>Delete</Text>
-                                    </Pressable>
-                                </>
-                            )}
-
-                            <View style={styles.menuDivider} />
-                            {filterMode !== 'all' && (
-                                <Pressable style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]} onPress={() => closeMenu(() => setFilterMode('all'))}>
-                                    <Ionicons name="chatbubbles-outline" size={20} color="#E6EDF7" />
-                                    <Text style={styles.menuItemText}>All messages</Text>
-                                </Pressable>
-                            )}
-                            <Pressable style={({ pressed }) => [styles.menuItem, filterMode === 'deleted' && styles.menuItemActive, pressed && styles.menuItemPressed]} onPress={() => closeMenu(() => setFilterMode('deleted'))}>
-                                <Ionicons name="trash-outline" size={20} color={filterMode === 'deleted' ? '#8FB8FF' : '#E6EDF7'} />
-                                <Text style={[styles.menuItemText, filterMode === 'deleted' && styles.menuItemTextActive]}>Recently Deleted</Text>
-                            </Pressable>
-
-                            <View style={styles.menuDivider} />
-                            <View style={styles.menuSectionHeader}>
-                                <Text style={styles.menuSectionHeaderText}>Filter by</Text>
-                            </View>
-                            <Pressable style={({ pressed }) => [styles.menuItem, filterMode === 'unread' && styles.menuItemActive, pressed && styles.menuItemPressed]} onPress={() => closeMenu(() => setFilterMode('unread'))}>
-                                <Ionicons name="mail-unread-outline" size={20} color={filterMode === 'unread' ? '#8FB8FF' : '#E6EDF7'} />
-                                <Text style={[styles.menuItemText, filterMode === 'unread' && styles.menuItemTextActive]}>Unread</Text>
-                            </Pressable>
+                            <TouchableOpacity style={styles.selectionBarBtn} onPress={resetSelectionState}>
+                                <Text style={styles.selectionBarText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.selectionBarBtn, styles.iosDeleteBarBtn]} onPress={handleSelectionDelete}>
+                                <Text style={[styles.selectionBarText, styles.iosDeleteBarBtnText]}>
+                                    {filterMode === 'deleted' ? 'Permanently Delete' : `Delete (${selectedIds.size})`}
+                                </Text>
+                            </TouchableOpacity>
                         </Animated.View>
-                    </TouchableOpacity>
-                </Modal>
-            </SafeAreaView>
+                    )}
+
+                    {filterMode === 'deleted' && !isSelecting && (
+                        <View style={styles.selectionBar}>
+                            <TouchableOpacity style={[styles.selectionBarBtn, { flex: 1, marginRight: 8 }]} onPress={() => setFilterMode('all')}>
+                                <Text style={styles.selectionBarText}>Back to Messages</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.selectionBarBtn, styles.iosDeleteBarBtn, { flex: 1, marginLeft: 8 }]} onPress={requestDeleteAllConfirm}>
+                                <Text style={[styles.selectionBarText, styles.iosDeleteBarBtnText]}>Empty Trash</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
+                    <Modal visible={confirmModal.visible} transparent animationType="fade">
+                        <View style={styles.modalOverlay}>
+                            <View style={styles.modalContent}>
+                                <View style={styles.modalIconCircle}>
+                                    <Ionicons name="alert-circle-outline" size={40} color="#2A69C7" />
+                                </View>
+                                <Text style={styles.modalTitle}>{confirmModal.title}</Text>
+                                <Text style={styles.modalText}>{confirmModal.message}</Text>
+                                <View style={styles.modalActions}>
+                                    <TouchableOpacity style={styles.modalCancel} onPress={handleConfirmModalCancel}>
+                                        <Text style={styles.modalCancelText}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={styles.modalDelete} onPress={handleConfirmModalConfirm}>
+                                        <Text style={styles.modalDeleteText}>{confirmModal.confirmText}</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </View>
+                    </Modal>
+
+                    <Modal visible={renderMenu} transparent animationType="none" onRequestClose={() => closeMenu()}>
+                        <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPressOut={() => closeMenu()}>
+                            <Animated.View
+                                style={[
+                                    styles.menuContainer,
+                                    {
+                                        opacity: menuAnim,
+                                        transform: [
+                                            { translateY: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) },
+                                            { scale: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) },
+                                        ],
+                                    },
+                                ]}
+                            >
+                                <Pressable style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]} onPress={() => closeMenu(() => setIsSelecting(true))}>
+                                    <Ionicons name="checkmark-circle-outline" size={22} color="#EAF2FF" />
+                                    <Text style={styles.menuItemText}>Select messages</Text>
+                                </Pressable>
+
+                                {alerts.length > 0 && (
+                                    <>
+                                        <View style={styles.menuDivider} />
+                                        <Pressable style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]} onPress={() => closeMenu(handleReadAll)}>
+                                            <Ionicons name="checkmark-done-outline" size={20} color="#E6EDF7" />
+                                            <Text style={styles.menuItemText}>Read All</Text>
+                                        </Pressable>
+                                        <Pressable style={({ pressed }) => [styles.menuDeletePill, pressed && styles.menuDeletePillPressed]} onPress={() => closeMenu(requestDeleteAllConfirm)}>
+                                            <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
+                                            <Text style={styles.menuDeletePillText}>Delete</Text>
+                                        </Pressable>
+                                    </>
+                                )}
+
+                                <View style={styles.menuDivider} />
+                                {filterMode !== 'all' && (
+                                    <Pressable style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]} onPress={() => closeMenu(() => setFilterMode('all'))}>
+                                        <Ionicons name="chatbubbles-outline" size={20} color="#E6EDF7" />
+                                        <Text style={styles.menuItemText}>All messages</Text>
+                                    </Pressable>
+                                )}
+                                <Pressable style={({ pressed }) => [styles.menuItem, filterMode === 'deleted' && styles.menuItemActive, pressed && styles.menuItemPressed]} onPress={() => closeMenu(() => setFilterMode('deleted'))}>
+                                    <Ionicons name="trash-outline" size={20} color={filterMode === 'deleted' ? '#8FB8FF' : '#E6EDF7'} />
+                                    <Text style={[styles.menuItemText, filterMode === 'deleted' && styles.menuItemTextActive]}>Recently Deleted</Text>
+                                </Pressable>
+
+                                <View style={styles.menuDivider} />
+                                <View style={styles.menuSectionHeader}>
+                                    <Text style={styles.menuSectionHeaderText}>Filter by</Text>
+                                </View>
+                                <Pressable style={({ pressed }) => [styles.menuItem, filterMode === 'unread' && styles.menuItemActive, pressed && styles.menuItemPressed]} onPress={() => closeMenu(() => setFilterMode('unread'))}>
+                                    <Ionicons name="mail-unread-outline" size={20} color={filterMode === 'unread' ? '#8FB8FF' : '#E6EDF7'} />
+                                    <Text style={[styles.menuItemText, filterMode === 'unread' && styles.menuItemTextActive]}>Unread</Text>
+                                </Pressable>
+                            </Animated.View>
+                        </TouchableOpacity>
+                    </Modal>
+                </SafeAreaView>
+            </LinearGradient>
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f4fdfbff' },
+    container: { flex: 1, backgroundColor: '#f5fffdff' },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -753,10 +774,10 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         paddingTop: 12,
         paddingBottom: 10,
-        backgroundColor: '#F5FBFB',
+        backgroundColor: 'transparent',
     },
     backButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'flex-start' },
-    headerTitle: { fontSize: 22, fontFamily: 'Inter-Bold', color: '#1C1C1E', textAlign: 'center', flex: 1 },
+    headerTitle: { fontSize: 18, fontFamily: 'Inter-Bold', color: '#2F6A62', textAlign: 'center', flex: 1 },
     content: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 40 },
 
     menuOverlay: { flex: 1, backgroundColor: 'rgba(28,28,30,0.12)' },
@@ -835,7 +856,7 @@ const styles = StyleSheet.create({
     cardWrapper: {
         marginBottom: 12,
         borderRadius: 16,
-        backgroundColor: '#F5FBFB',
+        backgroundColor: '#f5fffdff',
         position: 'relative',
         overflow: 'hidden',
     },
@@ -844,13 +865,13 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'flex-end',
         paddingRight: 12,
-        backgroundColor: 'transparent',
+        backgroundColor: '#f5fffdff',
         borderRadius: 16,
     },
     deleteButton: { height: '100%', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 0 },
     deleteCapsule: {
-        width: 160,
-        height: 44,
+        width: 108,
+        height: 36,
         borderRadius: 999,
         backgroundColor: '#FF3B30',
         borderWidth: 1,
@@ -863,7 +884,7 @@ const styles = StyleSheet.create({
         shadowRadius: 6,
         elevation: 2,
     },
-    deleteCapsuleText: { color: '#FFFFFF', fontSize: 16, fontFamily: 'Inter-Bold' },
+    deleteCapsuleText: { color: '#FFFFFF', fontSize: 13, fontFamily: 'Inter-Bold' },
 
     alertCard: {
         backgroundColor: '#FFFFFF',
@@ -871,10 +892,10 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#E5E5EA',
         shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.08,
-        shadowRadius: 10,
-        elevation: 3,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
     },
     unreadCard: {
         backgroundColor: '#FFFFFF',

@@ -36,10 +36,10 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
                 <SafeAreaView style={styles.container}>
                     <View style={styles.header}>
                         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                            <Ionicons name="chevron-back" size={28} color="#00695C" />
+                            <Ionicons name="chevron-back" size={28} color="#333" />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle}>Event Detail</Text>
-                        <View style={styles.backButton} />
+                        <View style={styles.headerRightSpacer} />
                     </View>
                     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                         <MaterialCommunityIcons name="alert-circle-outline" size={64} color="#BDBDBD" />
@@ -125,11 +125,11 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
                                 ],
                             }}
                         >
-                            <Ionicons name="chevron-back" size={22} color="#1C1C1E" />
+                            <Ionicons name="chevron-back" size={28} color="#333" />
                         </Animated.View>
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Event Detail</Text>
-                    <View style={styles.backButton} />
+                    <View style={styles.headerRightSpacer} />
                 </View>
 
                 <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -271,32 +271,25 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
+        paddingHorizontal: 20,
         paddingTop: 12,
         paddingBottom: 10,
-        backgroundColor: '#F5FBFB',
-        borderBottomWidth: 1,
-        borderBottomColor: '#E8EEF0',
+        backgroundColor: 'transparent',
     },
     backButton: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
+        width: 40,
+        height: 40,
         justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#E5E5EA',
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 6,
-        elevation: 2,
+        alignItems: 'flex-start',
+    },
+    headerRightSpacer: {
+        width: 40,
+        height: 40,
     },
     headerTitle: {
-        fontSize: 22,
+        fontSize: 18,
         fontFamily: 'Inter-Bold',
-        color: '#1C1C1E',
+        color: '#2F6A62',
         textAlign: 'center',
         flex: 1,
     },
@@ -323,10 +316,10 @@ const styles = StyleSheet.create({
         padding: 20,
         marginBottom: 14,
         shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.08,
-        shadowRadius: 10,
-        elevation: 3,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
         borderWidth: 1,
         borderColor: '#E5E5EA',
     },
