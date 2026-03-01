@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+// ลบบรรทัด useFocusEffect ออกไปแล้วครับ
 import BottomNav from "../components/BottomNav";
 import supabase from "./config/supabaseClient";
 
@@ -21,7 +22,7 @@ const MONTHS = [
 ];
 
 export default function CalendarScreen({ onNavigate, session }) {
-  const [currentDate, setCurrentDate] = useState(new Date()); 
+  const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [dailyLog, setDailyLog] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -37,34 +38,36 @@ export default function CalendarScreen({ onNavigate, session }) {
         .eq('owner_id', session.user.id)
         .limit(1)
         .single();
-      
+
       if (data) setCatId(data.id);
     };
     fetchCat();
   }, [session]);
 
-  // Fetch Log on date change
+  // กลับมาใช้ useEffect ธรรมดาแบบเดิม
   useEffect(() => {
     const fetchLog = async () => {
       if (!catId || !selectedDate) return;
-      
+
       setLoading(true);
       const year = selectedDate.getFullYear();
       const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
       const day = String(selectedDate.getDate()).padStart(2, '0');
       const dateString = `${year}-${month}-${day}`;
-      
+
       const { data, error } = await supabase
         .from('daily_logs')
         .select('*, normal_logs(*), something_off_logs(*)')
         .eq('cat_id', catId)
         .eq('log_date', dateString)
-        .maybeSingle(); 
-      
+        .maybeSingle();
+
       if (error) console.error("Error fetching calendar log:", error);
       setDailyLog(data || null);
-      
-      setLoading(false);    };
+
+      setLoading(false);
+    };
+
     fetchLog();
   }, [selectedDate, catId]);
 
@@ -112,7 +115,6 @@ export default function CalendarScreen({ onNavigate, session }) {
           onPress={() => setSelectedDate(date)}
         >
           <Text style={[styles.dayText, isSelected && styles.selectedDayText]}>{d}</Text>
-          {/* Green dash removed as requested */}
         </TouchableOpacity>
       );
     }
@@ -151,7 +153,7 @@ export default function CalendarScreen({ onNavigate, session }) {
       </View>
 
       {/* Details Section */}
-      <ScrollView 
+      <ScrollView
         style={styles.detailsContainer}
         contentContainerStyle={{ paddingBottom: 150 }}
         showsVerticalScrollIndicator={false}
@@ -172,84 +174,110 @@ export default function CalendarScreen({ onNavigate, session }) {
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>FOOD</Text>
                 <Text style={styles.summaryValue}>
-                  {dailyLog.normal_logs?.total_food_grams ?? '-'} g
+                  {dailyLog.normal_logs?.[0]?.total_food_grams ?? dailyLog.normal_logs?.total_food_grams ?? '-'} g
                 </Text>
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>WATER</Text>
                 <Text style={styles.summaryValue}>
-                  {dailyLog.normal_logs?.water_ml_per_day ?? '-'} ml
+                  {dailyLog.normal_logs?.[0]?.water_ml_per_day ?? dailyLog.normal_logs?.water_ml_per_day ?? '-'} ml
                 </Text>
               </View>
             </View>
 
-            {/* Detailed List (Optional: keeping it for completeness but styled less prominently if needed, or just below) */}
+            {/* Detailed List */}
             <View style={styles.textLogContainer}>
-             <View style={styles.textLogRow}>
+              <View style={styles.textLogRow}>
                 <MaterialCommunityIcons name="water-percent" size={18} color="#147C78" />
                 <Text style={styles.textLogLabel}>Urine: </Text>
                 <Text style={styles.textLogValue}>
-                   {dailyLog.normal_logs?.urine_level?.replace(/_/g, ' ') || '-'}
+                  {dailyLog.normal_logs?.[0]?.urine_level?.replace(/_/g, ' ') ?? dailyLog.normal_logs?.urine_level?.replace(/_/g, ' ') ?? '-'}
                 </Text>
-             </View>
+              </View>
 
-             <View style={styles.textLogRow}>
+              <View style={styles.textLogRow}>
                 <MaterialCommunityIcons name="emoticon-poop" size={18} color="#147C78" />
                 <Text style={styles.textLogLabel}>Stool: </Text>
                 <Text style={styles.textLogValue}>
-                   {dailyLog.normal_logs?.stool_level?.replace(/_/g, ' ') || '-'}
+                  {dailyLog.normal_logs?.[0]?.stool_level?.replace(/_/g, ' ') ?? dailyLog.normal_logs?.stool_level?.replace(/_/g, ' ') ?? '-'}
                 </Text>
-             </View>
+              </View>
 
               {/* something_off_logs section */}
-              {dailyLog.something_off_logs && (
+              {(dailyLog.something_off_logs?.[0] || dailyLog.something_off_logs) && (
                 <>
                   <View style={{ height: 1.5, backgroundColor: 'rgba(20, 124, 120, 0.2)', marginVertical: 10 }} />
-                  
-                  {dailyLog.something_off_logs.has_vomit && (
-                    <View style={styles.textLogRow}>
-                      <MaterialCommunityIcons name="alert-circle" size={18} color="#D32F2F" />
-                      <Text style={[styles.textLogLabel, { color: '#D32F2F' }]}>Vomit: </Text>
-                      <Text style={[styles.textLogValue, { color: '#D32F2F' }]}>
-                        {dailyLog.something_off_logs.vomit_type?.replace(/_/g, ' ') || 'Yes'}
-                      </Text>
-                    </View>
-                  )}
 
-                  {dailyLog.something_off_logs.has_diarrhea && (
-                    <View style={styles.textLogRow}>
-                      <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#D32F2F" />
-                      <Text style={[styles.textLogLabel, { color: '#D32F2F' }]}>Diarrhea: </Text>
-                      <Text style={[styles.textLogValue, { color: '#D32F2F' }]}>
-                        {dailyLog.something_off_logs.diarrhea_type?.replace(/_/g, ' ') || 'Yes'}
-                      </Text>
-                    </View>
-                  )}
+                  {(() => {
+                    const offLog = Array.isArray(dailyLog.something_off_logs) ? dailyLog.something_off_logs[0] : dailyLog.something_off_logs;
+                    return (
+                      <>
+                        {offLog?.has_vomit && (
+                          <View style={styles.textLogRow}>
+                            <MaterialCommunityIcons name="alert-circle" size={18} color="#D32F2F" />
+                            <Text style={[styles.textLogLabel, { color: '#D32F2F' }]}>Vomit: </Text>
+                            <Text style={[styles.textLogValue, { color: '#D32F2F' }]}>
+                              {offLog.vomit_type?.replace(/_/g, ' ') || 'Yes'}
+                            </Text>
+                          </View>
+                        )}
 
-                  {dailyLog.something_off_logs.behavior_energy && (
-                    <View style={styles.textLogRow}>
-                      <MaterialCommunityIcons name="cat" size={18} color="#147C78" />
-                      <Text style={styles.textLogLabel}>Behavior: </Text>
-                      <Text style={[styles.textLogValue, { flex: 1 }]}>
-                        {Array.isArray(dailyLog.something_off_logs.behavior_energy) 
-                          ? dailyLog.something_off_logs.behavior_energy.join(', ')
-                          : dailyLog.something_off_logs.behavior_energy}
-                      </Text>
-                    </View>
-                  )}
+                        {offLog?.has_diarrhea && (
+                          <View style={styles.textLogRow}>
+                            <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#D32F2F" />
+                            <Text style={[styles.textLogLabel, { color: '#D32F2F' }]}>Diarrhea: </Text>
+                            <Text style={[styles.textLogValue, { color: '#D32F2F' }]}>
+                              {offLog.diarrhea_type?.replace(/_/g, ' ') || 'Yes'}
+                            </Text>
+                          </View>
+                        )}
 
-                  {dailyLog.something_off_logs.notes && (
-                    <View style={[styles.textLogRow, { alignItems: 'flex-start' }]}>
-                      <MaterialCommunityIcons name="note-text" size={18} color="#147C78" />
-                      <Text style={styles.textLogLabel}>Notes: </Text>
-                      <Text style={[styles.textLogValue, { flex: 1 }]}>{dailyLog.something_off_logs.notes}</Text>
-                    </View>
-                  )}
+                        {offLog?.behavior_energy && (
+                          <View style={styles.textLogRow}>
+                            <MaterialCommunityIcons name="cat" size={18} color="#147C78" />
+                            <Text style={styles.textLogLabel}>Behavior: </Text>
+                            <Text style={[styles.textLogValue, { flex: 1 }]}>
+                              {Array.isArray(offLog.behavior_energy)
+                                ? offLog.behavior_energy.join(', ')
+                                : offLog.behavior_energy}
+                            </Text>
+                          </View>
+                        )}
+
+                        {offLog?.notes && (
+                          <View style={[styles.textLogRow, { alignItems: 'flex-start' }]}>
+                            <MaterialCommunityIcons name="note-text" size={18} color="#147C78" />
+                            <Text style={styles.textLogLabel}>Notes: </Text>
+                            <Text style={[styles.textLogValue, { flex: 1 }]}>{offLog.notes}</Text>
+                          </View>
+                        )}
+                      </>
+                    );
+                  })()}
                 </>
               )}
+            </View>
+
+            {/* Edit Recorded Log Button */}
+            <TouchableOpacity
+              style={[styles.editButton, { marginTop: 0, marginBottom: 20 }]}
+              onPress={() => {
+                const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+                onNavigate({
+                  screen: 'LogDaily',
+                  initialDate: dateStr,
+                  params: { date: dateStr }
+                });
+              }}
+            >
+              <Feather name="edit-2" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+              <Text style={styles.editButtonText}>
+                Edit Log for {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
+              </Text>
+            </TouchableOpacity>
+
           </View>
-        </View>
         ) : (
           <Text style={styles.noRecordText}>There is no record for this day.</Text>
         )}
@@ -259,16 +287,25 @@ export default function CalendarScreen({ onNavigate, session }) {
           <Ionicons name="camera" size={32} color="#147C78" />
         </TouchableOpacity>
 
-        {/* Backdated Edit Button */}
-        <TouchableOpacity 
-            style={styles.editButton} 
-            onPress={() => onNavigate({ screen: 'LogDaily', params: { date: selectedDate.toISOString() } })}
-        >
-          <Feather name="plus-circle" size={18} color="#147C78" style={{ marginRight: 8 }} />
-          <Text style={styles.editButtonText}>
-            Add Log for {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
-          </Text>
-        </TouchableOpacity>
+        {/* Backdated Add Button */}
+        {!dailyLog && (
+          <TouchableOpacity
+            style={styles.editButton}
+            onPress={() => {
+              const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+              onNavigate({
+                screen: 'LogDaily',
+                initialDate: dateStr,
+                params: { date: dateStr }
+              });
+            }}
+          >
+            <Feather name="plus-circle" size={18} color="#147C78" style={{ marginRight: 8 }} />
+            <Text style={styles.editButtonText}>
+              Add Log for {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
+            </Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
       <BottomNav current="Calendar" onNavigate={onNavigate} />
@@ -279,7 +316,7 @@ export default function CalendarScreen({ onNavigate, session }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#B2E1DB", // Teal background
+    backgroundColor: "#B2E1DB",
     alignItems: "center",
   },
   calendarCard: {
@@ -289,14 +326,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 16,
     paddingBottom: 24,
-    // Shadow
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 5,
     borderWidth: 2,
-    borderColor: "#8A2BE2", // Purple border from mockup
+    borderColor: "#8A2BE2",
     zIndex: 10,
   },
   header: {
@@ -307,7 +343,7 @@ const styles = StyleSheet.create({
   },
   monthTitle: {
     fontSize: 20,
-    fontFamily: "Poppins-SemiBold", // Assuming font exists
+    fontFamily: "Poppins-SemiBold",
     color: "#147C78",
     fontWeight: "600",
   },
@@ -353,8 +389,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#1FB3A8",
     marginTop: 2,
   },
-
-  // Details Section
   detailsContainer: {
     flex: 1,
     width: "100%",
@@ -364,10 +398,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   detailsHeader: {
-    marginBottom: 16, // Increased
+    marginBottom: 16,
   },
   dateTitle: {
-    fontSize: 24, // Larger
+    fontSize: 24,
     color: "#147C78",
     fontWeight: "bold",
   },
@@ -378,20 +412,20 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: "row",
-    marginBottom: 30, // Increased
-    justifyContent: 'flex-start', // Keep start but with specific margins
+    marginBottom: 30,
+    justifyContent: 'flex-start',
   },
   statItem: {
-    marginRight: 60, // Increased spacing
+    marginRight: 60,
   },
   statLabel: {
-    fontSize: 14, // Larger
+    fontSize: 14,
     color: "#147C78",
     fontWeight: "bold",
     marginBottom: 8,
   },
   statValue: {
-    fontSize: 24, // Much larger
+    fontSize: 24,
     color: "#FFFFFF",
     fontWeight: "bold",
   },
@@ -399,10 +433,9 @@ const styles = StyleSheet.create({
     width: 2,
     height: "100%",
     backgroundColor: "#147C78",
-    marginRight: 60, // Match statItem
+    marginRight: 60,
     opacity: 0.3,
   },
-  // Text-based Log Display
   textLogContainer: {
     backgroundColor: "rgba(255,255,255,0.4)",
     borderRadius: 16,
@@ -426,30 +459,28 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textTransform: 'capitalize',
   },
-
-  // Photos
   photosLabel: {
-    fontSize: 16, // Larger
+    fontSize: 16,
     color: "#147C78",
     fontWeight: "bold",
     marginBottom: 12,
   },
   photoPlaceholder: {
-    width: "100%", // Full width
-    height: 140, // Taller
+    width: "100%",
+    height: 140,
     backgroundColor: "#9ACBC7",
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2, // Thicker border
+    borderWidth: 2,
     borderColor: "#88BDB9",
     borderStyle: "dashed",
     marginBottom: 20,
   },
   editButton: {
-    backgroundColor: "#3FA8A4", // Slightly more opaque
+    backgroundColor: "#3FA8A4",
     paddingVertical: 16,
-    width: "100%", // Full width
+    width: "100%",
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
@@ -459,25 +490,23 @@ const styles = StyleSheet.create({
   },
   editButtonText: {
     color: "#FFFFFF",
-    fontWeight: "bold", // Bolder
-    fontSize: 18, // Larger
+    fontWeight: "bold",
+    fontSize: 18,
   },
-  
-  /* ====== Summary Card Styles ====== */
   summaryCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.5)', // Semi-transparent like the example
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
     borderRadius: 12,
     paddingVertical: 15,
     paddingHorizontal: 10,
     marginBottom: 20,
     borderLeftWidth: 4,
-    borderLeftColor: '#147C78', // Accent border like the example
+    borderLeftColor: '#147C78',
   },
   summaryItem: {
     flex: 1,
-    alignItems: 'flex-start', // Align left like example
+    alignItems: 'flex-start',
     paddingLeft: 10,
   },
   summaryLabel: {
@@ -491,7 +520,7 @@ const styles = StyleSheet.create({
   summaryValue: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFFFFF', // White text like the example
+    color: '#FFFFFF',
     textShadowColor: 'rgba(0, 0, 0, 0.1)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
