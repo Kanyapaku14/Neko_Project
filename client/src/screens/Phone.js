@@ -102,22 +102,15 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
         };
 
         const appUrl = brandApps[selectedBrand];
-        if (appUrl) {
-            try {
-                const supported = await Linking.canOpenURL(appUrl);
-                if (supported) {
-                    await Linking.openURL(appUrl);
-                } else {
-                    console.log("App not installed, opening Play Store/App Store...");
-                }
-            } catch (err) {
-                console.error("Deep link error:", err);
-            }
-        }
 
-        setTimeout(() => {
+        // Mocking: Always assume success for now as requested
+        console.log("Mocking connection for:", selectedBrand);
+
+        setTimeout(async () => {
             setIsConnecting(false);
             setConnected(true);
+            await AsyncStorage.setItem('camera_status', 'connected');
+            await AsyncStorage.setItem('camera_brand', selectedBrand);
             setCurrentStep(2); // Move to Step 2: Live Feed
 
             Animated.sequence([
@@ -139,6 +132,13 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
                 })
             ]).start();
         }, 1500);
+    };
+
+    const handleSkip = async () => {
+        await AsyncStorage.setItem('camera_status', 'disconnected');
+        await AsyncStorage.setItem('camera_brand', '');
+        await AsyncStorage.setItem('camera_setup_complete', 'true');
+        onConfirm();
     };
 
     const handleNextStep = () => {
@@ -296,6 +296,8 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
                                         </View>
                                     )}
                                 </Animated.View>
+
+                                {/* Skip button moved outside ScrollView to be fixed at the bottom */}
                             </View>
                         )}
 
@@ -344,7 +346,7 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
                                                 style={[styles.tabBtn, activeZoneType === 'litter' && styles.tabActive]}
                                                 onPress={() => setActiveZoneType('litter')}
                                             >
-                                                <MaterialCommunityIcons name="litter-box" size={18} color={activeZoneType === 'litter' ? '#00695C' : '#90A4AE'} />
+                                                <MaterialCommunityIcons name="delete-outline" size={18} color={activeZoneType === 'litter' ? '#00695C' : '#90A4AE'} />
                                                 <Text style={[styles.tabText, activeZoneType === 'litter' && styles.tabTextActive]}>Litter Box</Text>
                                             </TouchableOpacity>
                                         </View>
@@ -404,7 +406,10 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
                                         Your AI health monitoring system is active and ready to keep an eye on your cat 🐾
                                     </Text>
                                 </View>
-                                <TouchableOpacity style={[styles.nextButton, { width: '100%' }]} onPress={onConfirm}>
+                                <TouchableOpacity style={[styles.nextButton, { width: '100%' }]} onPress={async () => {
+                                    await AsyncStorage.setItem('camera_setup_complete', 'true');
+                                    onConfirm();
+                                }}>
                                     <LinearGradient colors={["#A5D6A7", "#4CAF50"]} style={styles.gradientNext}>
                                         <Text style={styles.nextText}>Start Monitoring</Text>
                                     </LinearGradient>
@@ -413,6 +418,13 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
                         )}
                     </ScrollView>
                 </Animated.View>
+
+                {/* Fixed Skip Button for Step 1 */}
+                {currentStep === 1 && !isConnecting && (
+                    <TouchableOpacity style={styles.fixedBottomButton} onPress={handleSkip}>
+                        <Text style={styles.skipButtonText}>Skip for now</Text>
+                    </TouchableOpacity>
+                )}
             </SafeAreaView>
         </LinearGradient>
     );
@@ -709,6 +721,17 @@ const styles = StyleSheet.create({
         fontWeight: "700",
         fontSize: 15,
     },
+    skipButton: {
+        marginTop: 12,
+        paddingVertical: 10,
+        alignItems: "center",
+    },
+    skipButtonText: {
+        color: "#90A4AE",
+        fontSize: 14,
+        fontWeight: "600",
+        textDecorationLine: "underline",
+    },
     connectedBox: {
         marginTop: 20,
         padding: 16,
@@ -780,5 +803,14 @@ const styles = StyleSheet.create({
         color: "#fff",
         fontSize: 18,
         fontWeight: "800",
+    },
+    fixedBottomButton: {
+        position: 'absolute',
+        bottom: 40, // Adjust for safe area and visual preference
+        left: 20,
+        right: 20,
+        paddingVertical: 10,
+        alignItems: "center",
+        zIndex: 10,
     },
 });
