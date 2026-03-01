@@ -35,7 +35,7 @@ export default function HomeHeader({
         {centerComponent ? centerComponent : (
           <>
             <Text style={styles.title}>NEK</Text>
-            <Ionicons name="paw" size={18} color="#4FD1C5" />
+            <Ionicons name="paw" size={14} color="#4FD1C5" />
             <Text style={styles.title}>CARE</Text>
           </>
         )}
@@ -46,10 +46,10 @@ export default function HomeHeader({
         {rightComponent ? rightComponent : (
           <View style={styles.iconGroup}>
             <TouchableOpacity style={styles.iconBtn} onPress={onNotify}>
-              <Ionicons name="notifications-outline" size={24} color="#718096" />
+              <Ionicons name="notifications-outline" size={20} color="#718096" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconBtn} onPress={onSetting}>
-              <Ionicons name="settings-outline" size={24} color="#718096" />
+              <Ionicons name="settings-outline" size={20} color="#718096" />
             </TouchableOpacity>
           </View>
         )}

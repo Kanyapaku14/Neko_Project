@@ -164,7 +164,7 @@ export default function App() {
 
   if (!fontsLoaded || loading || (session && profileLoading)) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5fffdff' }}>
         <ActivityIndicator size="large" color="#00695C" />
       </View>
     );
@@ -349,7 +349,7 @@ export default function App() {
 
   // Wrap everything with SafeAreaProvider here
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#f5fffdff' }}>
       <SafeAreaProvider>
         <GlobalAlertQueueProvider session={session}>
           {renderScreen()}

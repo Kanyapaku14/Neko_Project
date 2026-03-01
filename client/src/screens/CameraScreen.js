@@ -2,7 +2,6 @@
 import {
   View,
   Text,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Dimensions,
@@ -16,6 +15,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient';
@@ -280,7 +280,7 @@ export default function CameraScreen({ onNavigate, session }) {
 
     return (
       <LinearGradient colors={['#F5FBFB', '#E8F5E9']} style={styles.introContainer}>
-        <SafeAreaView style={{ flex: 1 }}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={{ flex: 1 }}>
           <View style={styles.introHeader}>
             <TouchableOpacity onPress={onMaybeLater} style={styles.introBackButton}>
               <Ionicons name="close" size={24} color="#2F6A62" />
@@ -423,74 +423,73 @@ export default function CameraScreen({ onNavigate, session }) {
     <View style={{ flex: 1, backgroundColor: '#f5fffdff' }}>
       <StatusBar style="dark" translucent backgroundColor="transparent" />
       <LinearGradient colors={['#f5fffdff', '#f5fffdff']} style={{ flex: 1 }}>
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
+          {isConnectedSignalLost && <OfflineBanner />}
+
+          <HomeHeader
+            leftComponent={
+              <TouchableOpacity
+                style={styles.catProfileCard}
+                onPress={() => setShowCatSwitcher(!showCatSwitcher)}
+                activeOpacity={0.8}
+              >
+                <View style={styles.catAvatarContainer}>
+                  <Image
+                    source={selectedCat?.image_url ? { uri: selectedCat.image_url } : require('../../assets/cioncat.jpg')}
+                    style={styles.catAvatar}
+                  />
+                  <View style={[styles.onlineIndicator, { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : '#B0BEC5' }]} />
+                </View>
+              </TouchableOpacity>
+            }
+            rightComponent={
+              <TouchableOpacity onPress={() => onNavigate('Alert')} style={styles.bellButton}>
+                <Ionicons name="notifications-outline" size={26} color="#00695C" />
+                {unreadAlerts > 0 ? <View style={styles.notificationDot} /> : null}
+              </TouchableOpacity>
+            }
+          />
+
+          {showCameraIssueBanner ? (
+            <Animated.View style={[
+              styles.overlayBannerWrapper,
+              {
+                opacity: bannerAnim,
+                transform: [{
+                  translateY: bannerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-20, 0]
+                  })
+                }, {
+                  scale: bannerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.95, 1]
+                  })
+                }]
+              }
+            ]}>
+              <TouchableOpacity
+                style={styles.overlayBanner}
+                activeOpacity={0.8}
+                onPress={() => onNavigate('Alert')}
+              >
+                <Ionicons name="warning" size={20} color="#fff" />
+                <View style={styles.overlayTextContainer}>
+                  <Text style={styles.overlayTitle}>Camera Issue Detected</Text>
+                  <Text style={styles.overlayDesc}>Litter Box camera is offline.</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#fff" />
+              </TouchableOpacity>
+            </Animated.View>
+          ) : null}
+
+          {/* Pending Identity Banner for normal behaviors (or missed popups) */}
+          <PendingIdentityBanner
+            count={pendingIdentityCount}
+            onPress={openPendingQueue}
+          />
+
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
-            {isConnectedSignalLost && <OfflineBanner />}
-
-            {/* Header */}
-            <HomeHeader
-              leftComponent={
-                <TouchableOpacity
-                  style={styles.catProfileCard}
-                  onPress={() => setShowCatSwitcher(!showCatSwitcher)}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.catAvatarContainer}>
-                    <Image
-                      source={selectedCat?.image_url ? { uri: selectedCat.image_url } : require('../../assets/cioncat.jpg')}
-                      style={styles.catAvatar}
-                    />
-                    <View style={[styles.onlineIndicator, { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : '#B0BEC5' }]} />
-                  </View>
-                </TouchableOpacity>
-              }
-              rightComponent={
-                <TouchableOpacity onPress={() => onNavigate('Alert')} style={styles.bellButton}>
-                  <Ionicons name="notifications-outline" size={26} color="#00695C" />
-                  {unreadAlerts > 0 ? <View style={styles.notificationDot} /> : null}
-                </TouchableOpacity>
-              }
-            />
-
-            {showCameraIssueBanner ? (
-              <Animated.View style={[
-                styles.overlayBannerWrapper,
-                {
-                  opacity: bannerAnim,
-                  transform: [{
-                    translateY: bannerAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-20, 0]
-                    })
-                  }, {
-                    scale: bannerAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0.95, 1]
-                    })
-                  }]
-                }
-              ]}>
-                <TouchableOpacity
-                  style={styles.overlayBanner}
-                  activeOpacity={0.8}
-                  onPress={() => onNavigate('Alert')}
-                >
-                  <Ionicons name="warning" size={20} color="#fff" />
-                  <View style={styles.overlayTextContainer}>
-                    <Text style={styles.overlayTitle}>Camera Issue Detected</Text>
-                    <Text style={styles.overlayDesc}>Litter Box camera is offline.</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="#fff" />
-                </TouchableOpacity>
-              </Animated.View>
-            ) : null}
-
-            {/* Pending Identity Banner for normal behaviors (or missed popups) */}
-            <PendingIdentityBanner
-              count={pendingIdentityCount}
-              onPress={openPendingQueue}
-            />
 
             {cameraStatus === 'disconnected' && <SetupPromptCard />}
 
@@ -801,7 +800,9 @@ export default function CameraScreen({ onNavigate, session }) {
             </Animated.View>
           </ScrollView>
 
-          <BottomNav current="Camera" onNavigate={onNavigate} />
+          <View style={styles.footerBar}>
+            <BottomNav current="Camera" onNavigate={onNavigate} />
+          </View>
 
           {/* Cat Switcher Modal */}
           <Modal
@@ -854,8 +855,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5fffdff',
   },
   scrollContent: {
-    padding: 16,
-    paddingBottom: 80,
+    padding: 14,
+    paddingBottom: 68,
+  },
+  footerBar: {
+    backgroundColor: '#FFFFFF',
   },
   headerContainer: {
     flexDirection: 'row',
@@ -1102,18 +1106,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sectionTitle: {
-    fontSize: 18,
-    marginTop: 20,
-    marginBottom: 12,
+    fontSize: 15,
+    marginTop: 16,
+    marginBottom: 10,
     fontWeight: '700',
     color: '#37474F',
     marginLeft: 4,
   },
   cardContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 16,
+    borderRadius: 15,
+    padding: 13,
+    marginBottom: 10,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -1124,28 +1128,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
     color: '#37474F',
     marginBottom: 4,
   },
   cardSubtitle: {
-    fontSize: 13,
+    fontSize: 11,
     color: '#78909C',
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   statCard: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 24,
+    padding: 11,
+    borderRadius: 14,
     alignItems: 'center',
     flexDirection: 'row', // Horizontal layout for better premium feel
     shadowColor: '#0F172A',
@@ -1165,7 +1169,7 @@ const styles = StyleSheet.create({
   statCardGlowFood: {
     flex: 1,
     marginRight: 6,
-    borderRadius: 24,
+    borderRadius: 18,
     shadowColor: '#FF6D00',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
@@ -1175,7 +1179,7 @@ const styles = StyleSheet.create({
   statCardGlowLitter: {
     flex: 1,
     marginLeft: 6,
-    borderRadius: 24,
+    borderRadius: 18,
     shadowColor: '#0288D1',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
@@ -1187,9 +1191,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1208,12 +1212,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '800',
     color: '#37474F',
   },
   statLabel: {
-    fontSize: 10,
+    fontSize: 8,
     color: '#78909C',
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -1222,13 +1226,13 @@ const styles = StyleSheet.create({
   postureGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
-    gap: 12,
+    marginTop: 6,
+    gap: 10,
   },
   postureCard: {
     flex: 1,
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: 16,
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -1239,18 +1243,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFEBEE', // Light Red
   },
   postureIconBgNormal: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   postureIconBgAbnormal: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
@@ -1260,37 +1264,37 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   postureValueNormal: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: '800',
     color: '#00695C',
   },
   postureValueAbnormal: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: '800',
     color: '#D32F2F',
   },
   postureLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#546E7A',
   },
   postureContext: {
-    marginTop: 16,
-    paddingTop: 12,
+    marginTop: 12,
+    paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: '#ECEFF1',
   },
   postureContextText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#78909C',
   },
   actionButton: {
     backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 18,
-    borderRadius: 24,
-    marginBottom: 16,
+    padding: 11,
+    borderRadius: 14,
+    marginBottom: 10,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -1299,8 +1303,8 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     flex: 1,
-    marginLeft: 16,
-    fontSize: 16,
+    marginLeft: 10,
+    fontSize: 13,
     color: '#37474F',
     fontWeight: '700',
   },
@@ -1309,9 +1313,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   weatherWidget: {
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    borderRadius: 15,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -1332,7 +1336,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   weatherCity: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '800',
     color: '#3D4A80',
     marginTop: 2,
@@ -1356,7 +1360,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   weatherTemp: {
-    fontSize: 20,
+    fontSize: 17,
     color: '#3D4A80',
     fontWeight: '800',
     marginTop: 6,
@@ -1390,9 +1394,9 @@ const styles = StyleSheet.create({
   },
   recentItem: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 10,
-    paddingRight: 16,
+    borderRadius: 14,
+    padding: 8,
+    paddingRight: 12,
     marginRight: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1403,15 +1407,15 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   recentIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 11,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10,
   },
   recentType: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#37474F',
   },

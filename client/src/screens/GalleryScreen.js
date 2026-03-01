@@ -330,15 +330,15 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     }
 
     return (
-        <View style={{ flex: 1, backgroundColor: '#F5FBFB' }}>
+        <View style={{ flex: 1, backgroundColor: '#f5fffdff' }}>
             <StatusBar style="dark" translucent backgroundColor="transparent" />
-            <LinearGradient colors={['#F4FAF9', '#E0F2F1']} style={{ flex: 1 }}>
-                <SafeAreaView style={styles.container}>
+            <LinearGradient colors={['#f5fffdff', '#f5fffdff']} style={{ flex: 1 }}>
+                <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
                     {/* Header */}
                     <HomeHeader
                         leftComponent={
                             <TouchableOpacity onPress={onBack} style={styles.backButton} activeOpacity={0.85}>
-                                <Ionicons name="chevron-back" size={22} color="#1C1C1E" />
+                                <Ionicons name="chevron-back" size={28} color="#333" />
                             </TouchableOpacity>
                         }
                         rightComponent={
@@ -597,31 +597,23 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: 'transparent',
+        backgroundColor: '#f5fffdff',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
+        paddingHorizontal: 14,
         paddingTop: 8,
-        paddingBottom: 12,
-        marginBottom: 4,
+        paddingBottom: 8,
+        marginBottom: 2,
+        backgroundColor: '#f5fffdff',
     },
     backButton: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
+        width: 40,
+        height: 40,
         justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#E5E5EA',
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 6,
-        elevation: 2,
+        alignItems: 'flex-start',
     },
     brandContainer: {
         flexDirection: 'row',
@@ -629,19 +621,21 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     brandText: {
-        fontSize: 20,
+        fontSize: 16,
         color: '#00695C',
         fontFamily: 'Inter-Bold',
         marginHorizontal: 3,
     },
     headerRight: {
-        width: 42,
+        width: 40,
+        height: 40,
         alignItems: 'flex-end',
+        justifyContent: 'center',
     },
     headerPill: {
-        minWidth: 38,
-        height: 26,
-        borderRadius: 13,
+        minWidth: 34,
+        height: 22,
+        borderRadius: 11,
         backgroundColor: '#E0F2F1',
         flexDirection: 'row',
         alignItems: 'center',
@@ -650,7 +644,7 @@ const styles = StyleSheet.create({
         gap: 4,
     },
     headerPillText: {
-        fontSize: 12,
+        fontSize: 10,
         color: '#0C5A58',
         fontFamily: 'Inter-Bold',
     },
@@ -668,14 +662,14 @@ const styles = StyleSheet.create({
     },
     zoneSwitchWrap: {
         flexDirection: 'row',
-        paddingHorizontal: 16,
-        marginBottom: 10,
+        paddingHorizontal: 14,
+        marginBottom: 8,
         gap: 8,
     },
     zoneChip: {
         flex: 1,
-        height: 38,
-        borderRadius: 19,
+        height: 32,
+        borderRadius: 16,
         backgroundColor: '#EAF4F4',
         borderWidth: 1,
         borderColor: '#D2E7E6',
@@ -690,7 +684,7 @@ const styles = StyleSheet.create({
     },
     zoneChipText: {
         color: '#0C5A58',
-        fontSize: 12,
+        fontSize: 10,
         fontFamily: 'Inter-Bold',
     },
     zoneChipTextActive: {
@@ -703,15 +697,15 @@ const styles = StyleSheet.create({
     },
     gridContent: {
         paddingHorizontal: GRID_PADDING,
-        paddingBottom: 24,
+        paddingBottom: 18,
     },
     galleryIntroCard: {
         backgroundColor: '#FFFFFF',
-        borderRadius: 14,
+        borderRadius: 10,
         borderWidth: 1,
         borderColor: '#E5E5EA',
-        padding: 12,
-        marginBottom: 14,
+        padding: 8,
+        marginBottom: 8,
         flexDirection: 'row',
         alignItems: 'center',
         shadowColor: '#0F172A',
@@ -721,9 +715,9 @@ const styles = StyleSheet.create({
         elevation: 1,
     },
     galleryIntroIconWrap: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
         backgroundColor: '#E6F5F5',
         justifyContent: 'center',
         alignItems: 'center',
@@ -732,12 +726,12 @@ const styles = StyleSheet.create({
     galleryIntroText: {
         flex: 1,
         color: '#1F2937',
-        fontSize: 14,
+        fontSize: 13,
         fontFamily: 'Inter-Bold',
     },
     galleryIntroSubText: {
         color: '#6B7280',
-        fontSize: 12,
+        fontSize: 11,
         fontFamily: 'Inter-Medium',
     },
     columnWrapper: {
@@ -821,14 +815,14 @@ const styles = StyleSheet.create({
     statBox: {
         flex: 1,
         backgroundColor: '#F8FAFC',
-        borderRadius: 16,
-        padding: 16,
+        borderRadius: 13,
+        padding: 12,
         alignItems: 'center',
         borderWidth: 1,
         borderColor: '#F1F5F9',
     },
     statNum: {
-        fontSize: 24,
+        fontSize: 20,
         fontFamily: 'Inter-Bold',
         color: '#0C5A58',
         marginBottom: 4,
@@ -860,10 +854,10 @@ const styles = StyleSheet.create({
     },
     previewCard: {
         backgroundColor: '#FFFFFF',
-        borderRadius: 24,
+        borderRadius: 20,
         borderWidth: 1,
         borderColor: '#E6EDF2',
-        padding: 14,
+        padding: 12,
         shadowColor: '#0F172A',
         shadowOffset: { width: 0, height: 10 },
         shadowOpacity: 0.18,
@@ -920,7 +914,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     actionContainer: {
-        marginTop: 14,
+        marginTop: 12,
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 8,
@@ -932,11 +926,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: '#0C5A58',
-        paddingVertical: 10,
-        paddingHorizontal: 10,
-        borderRadius: 25,
+        paddingVertical: 8,
+        paddingHorizontal: 8,
+        borderRadius: 20,
         gap: 6,
-        minWidth: 100,
+        minWidth: 90,
         justifyContent: 'center',
     },
     deleteButton: {
@@ -970,7 +964,7 @@ const styles = StyleSheet.create({
     },
     actionText: {
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: 13,
         fontFamily: 'Inter-Bold',
     },
     imageTitle: {
@@ -994,10 +988,10 @@ const styles = StyleSheet.create({
     },
     confirmContent: {
         width: '100%',
-        maxWidth: 360,
+        maxWidth: 340,
         backgroundColor: '#FFFFFF',
-        borderRadius: 24,
-        padding: 24,
+        borderRadius: 20,
+        padding: 20,
         alignItems: 'center',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 10 },
