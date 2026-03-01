@@ -29,7 +29,7 @@ export default function PendingIdentityBanner({ count, onPress }) {
             accessibilityRole="button"
         >
             <View style={styles.iconContainer}>
-                <MaterialCommunityIcons name="help-rhombus-outline" size={20} color="#FFFFFF" />
+                <MaterialCommunityIcons name="cat" size={24} color="#FFFFFF" />
             </View>
             <View style={styles.textContainer}>
                 <Text style={styles.title} numberOfLines={1}>{label}</Text>

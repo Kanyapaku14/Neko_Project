@@ -40,6 +40,7 @@ class AlertEngineService {
         this.alerts = [];
         this.unreadCount = 0;
         this.activeCriticalAlerts = false;
+        this.pendingIdentityCount = 0;
         this.isReady = false;
         this.emitter = new SimpleEmitter();
 
@@ -66,17 +67,18 @@ class AlertEngineService {
     }
 
     async _saveAlerts() {
+        this._recalculateState(); // Emit UI update immediately before slow disk I/O
         try {
             await AsyncStorage.setItem(ALERT_STORAGE_KEY, JSON.stringify(this.alerts));
-            this._recalculateState();
         } catch (e) {
             console.error("AlertEngine: Failed to save alerts", e);
         }
     }
 
     _recalculateState() {
-        this.unreadCount = this.alerts.filter(a => !a.isRead).length;
-        this.activeCriticalAlerts = this.alerts.some(a => a.severity === 'critical' && !a.resolved);
+        this.unreadCount = this.alerts.filter(a => !a.isRead && !a.isDeleted).length;
+        this.activeCriticalAlerts = this.alerts.some(a => a.severity === 'critical' && !a.resolved && !a.isDeleted);
+        this.pendingIdentityCount = this.alerts.filter(a => a.pendingIdentityConfirm === true && !a.isDeleted).length;
         this._emitUpdate();
     }
 
@@ -85,6 +87,7 @@ class AlertEngineService {
             alerts: this.alerts,
             unreadCount: this.unreadCount,
             hasCritical: this.activeCriticalAlerts,
+            pendingIdentityCount: this.pendingIdentityCount
         });
     }
 
@@ -222,14 +225,14 @@ class AlertEngineService {
      * Get all alerts currently waiting for identity confirmation.
      */
     getPendingIdentities() {
-        return this.alerts.filter(a => a.pendingIdentityConfirm === true);
+        return this.alerts.filter(a => a.pendingIdentityConfirm === true && !a.isDeleted);
     }
 
     /**
      * Get count of pending identity confirmations.
      */
     getPendingIdentityCount() {
-        return this.getPendingIdentities().length;
+        return this.pendingIdentityCount;
     }
 
     /**
@@ -270,15 +273,25 @@ class AlertEngineService {
      */
     async resolveIdentity(alertId, catId, resolvedBy = 'user') {
         let resolved = null;
+        const targetId = String(alertId);
+
         this.alerts = this.alerts.map(a => {
-            if (a.id === alertId && a.pendingIdentityConfirm === true) {
-                resolved = { ...a, pendingIdentityConfirm: false, resolvedCatId: catId, resolvedAt: new Date().toISOString(), resolvedBy };
+            if (String(a.id) === targetId && a.pendingIdentityConfirm === true) {
+                resolved = {
+                    ...a,
+                    pendingIdentityConfirm: false,
+                    isRead: true, // Mark as read since user interacted with it
+                    resolvedCatId: catId,
+                    resolvedAt: new Date().toISOString(),
+                    resolvedBy
+                };
                 return resolved;
             }
             return a;
         });
 
         if (resolved) {
+            this._recalculateState(); // Emit UI update immediately
             await this._saveAlerts();
             this.emitter.emit(AlertEvents.IDENTITY_RESOLVED, resolved);
             console.log(`AlertEngine: Identity resolved for alert [${alertId}] -> cat [${catId}]`);

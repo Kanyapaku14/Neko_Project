@@ -30,6 +30,13 @@ const { width } = Dimensions.get('window');
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
+const DecorativeCatEars = () => (
+  <View style={styles.earContainer} pointerEvents="none">
+    <View style={[styles.ear, styles.earLeft]} />
+    <View style={[styles.ear, styles.earRight]} />
+  </View>
+);
+
 export default function CameraScreen({ onNavigate, session }) {
   const [showSetupIntro, setShowSetupIntro] = useState(null); // null | true | false
   const [cameraStatus, setCameraStatus] = useState('disconnected');
@@ -100,7 +107,7 @@ export default function CameraScreen({ onNavigate, session }) {
     const handler = (data) => {
       setUnreadAlerts(data.unreadCount);
       setHasCriticalAlert(data.hasCritical);
-      setPendingIdentityCount(AlertEngine.getPendingIdentityCount());
+      setPendingIdentityCount(data.pendingIdentityCount);
     };
 
     AlertEngine.on(AlertEvents.UPDATED, handler);
@@ -223,48 +230,65 @@ export default function CameraScreen({ onNavigate, session }) {
   // --- Render Functions ---
 
   const CameraSetupIntro = ({ onSetup, onMaybeLater }) => {
-    const FeatureItem = ({ icon, title, subtitle }) => (
-      <View style={styles.introFeatureItem}>
+    const FeatureCard = ({ icon, title, subtitle }) => (
+      <View style={styles.introFeatureCard}>
         <View style={styles.introFeatureIcon}>
-          <MaterialCommunityIcons name={icon} size={24} color="#0C5A58" />
+          <MaterialCommunityIcons name={icon} size={28} color="#00695C" />
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.introFeatureTitle}>{title}</Text>
-          <Text style={styles.introFeatureSubtitle}>{subtitle}</Text>
-        </View>
+        <Text style={styles.introFeatureTitle}>{title}</Text>
+        <Text style={styles.introFeatureSubtitle}>{subtitle}</Text>
       </View>
     );
 
     return (
-      <LinearGradient colors={['#F4FAF9', '#E0F2F1']} style={styles.introContainer}>
+      <LinearGradient colors={['#F5FBFB', '#E8F5E9']} style={styles.introContainer}>
         <SafeAreaView style={{ flex: 1 }}>
           <View style={styles.introHeader}>
             <TouchableOpacity onPress={onMaybeLater} style={styles.introBackButton}>
-              <Ionicons name="chevron-back" size={24} color="#2F6A62" />
+              <Ionicons name="close" size={24} color="#2F6A62" />
             </TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={styles.introScrollContent}>
-            <View style={styles.introHero}>
-              <Image
-                source={require('../../assets/cover-blog-3.jpg')}
-                style={styles.introImage}
-                resizeMode="cover"
-              />
+            <View style={styles.introHeroIcon}>
+              <MaterialCommunityIcons name="camera-plus-outline" size={64} color="#00695C" />
             </View>
             <Text style={styles.introTitle}>Connect Your Camera</Text>
-            <Text style={styles.introSubtitle}>Unlock AI-powered insights into your cat's health, behavior, and daily routines.</Text>
+            <Text style={styles.introSubtitle}>
+              Turn your home camera into a smart health monitor for your cat.
+            </Text>
 
-            <View style={[styles.introFeatureList, { marginTop: 20 }]}>
-              <FeatureItem icon="run-fast" title="Activity Tracking" subtitle="Know when they eat, drink, or use the litter box." />
-              <FeatureItem icon="shield-check-outline" title="Health Alerts" subtitle="Get notified of unusual patterns or potential issues." />
+            <View style={styles.introFeatureGrid}>
+              <FeatureCard
+                icon="video-check-outline"
+                title="AI Detection"
+                subtitle="Tracks eating, drinking, and litter box visits."
+              />
+              <FeatureCard
+                icon="chart-bell-curve-cumulative"
+                title="Health Trends"
+                subtitle="Identifies changes in behavior over time."
+              />
+              <FeatureCard
+                icon="shield-alert-outline"
+                title="Smart Alerts"
+                subtitle="Notifies you of potential health issues."
+              />
+              <FeatureCard
+                icon="image-multiple-outline"
+                title="Activity Gallery"
+                subtitle="Creates a visual diary of your cat's day."
+              />
             </View>
 
-            <TouchableOpacity style={styles.introPrimaryButton} onPress={onSetup}>
-              <Text style={styles.introPrimaryButtonText}>Start Setup</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onMaybeLater} style={{ marginTop: 16 }}>
-              <Text style={styles.introSkipText}>Maybe Later</Text>
-            </TouchableOpacity>
+            <View style={styles.introButtonContainer}>
+              <TouchableOpacity style={styles.introPrimaryButton} onPress={onSetup}>
+                <Text style={styles.introPrimaryButtonText}>Start Camera Setup</Text>
+                <Ionicons name="arrow-forward" size={20} color="#FFF" style={{ marginLeft: 8 }} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onMaybeLater} style={styles.introSkipButton}>
+                <Text style={styles.introSkipText}>I'll do this later</Text>
+              </TouchableOpacity>
+            </View>
           </ScrollView>
         </SafeAreaView>
       </LinearGradient>
@@ -306,7 +330,7 @@ export default function CameraScreen({ onNavigate, session }) {
             {/* Cat Profile Summary Card (Switcher) */}
             <TouchableOpacity
               style={styles.catProfileCard}
-              onPress={() => setShowCatSwitcher(true)}
+              onPress={() => setShowCatSwitcher(!showCatSwitcher)}
               activeOpacity={0.8}
             >
               <View style={styles.catAvatarContainer}>
@@ -322,7 +346,12 @@ export default function CameraScreen({ onNavigate, session }) {
                   {cameraStatus === 'connected' ? '● Active' : '○ Offline'}
                 </Text>
               </View>
-              <Ionicons name="chevron-down" size={18} color="#00695C" style={{ marginLeft: 8 }} />
+              <Ionicons
+                name={showCatSwitcher ? "chevron-up" : "chevron-down"}
+                size={18}
+                color="#00695C"
+                style={{ marginLeft: 8 }}
+              />
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => onNavigate('Alert')} style={styles.bellButton}>
@@ -378,7 +407,7 @@ export default function CameraScreen({ onNavigate, session }) {
               <View style={styles.cameraFrame}>
                 <View style={styles.videoPlaceholder}>
                   <MaterialCommunityIcons
-                    name={currentCamera === 1 ? "videocam" : "camera-account"}
+                    name={currentCamera === 1 ? "video" : "camera-account"}
                     size={64}
                     color="#B0BEC5"
                   />
@@ -475,20 +504,26 @@ export default function CameraScreen({ onNavigate, session }) {
               </View>
             </View>
 
-            {/* Environment Status Bar */}
+            {/* Environment Status Bar - Redesigned as Capsules */}
             <View style={styles.envContainer}>
-              <View style={styles.envItem}>
-                <MaterialCommunityIcons name="thermometer" size={20} color={cameraStatus === 'connected' ? "#FF8A65" : "#B0BEC5"} />
-                <Text style={[styles.envText, { color: cameraStatus === 'connected' ? '#37474F' : '#90A4AE' }]}>
+              <View style={[styles.envCapsule, { backgroundColor: '#FFF3E0' }]}>
+                <View style={[styles.envIconCircle, { backgroundColor: '#FF8A65' }]}>
+                  <MaterialCommunityIcons name="thermometer" size={14} color="#FFF" />
+                </View>
+                <Text style={styles.envValue}>
                   {cameraStatus === 'connected' ? `${environment.temperature.toFixed(1)}°C` : '--°C'}
                 </Text>
+                <MaterialCommunityIcons name="paw" size={10} color="rgba(255, 138, 101, 0.3)" />
               </View>
-              <View style={styles.envDivider} />
-              <View style={styles.envItem}>
-                <MaterialCommunityIcons name="water-percent" size={20} color={cameraStatus === 'connected' ? "#4FC3F7" : "#B0BEC5"} />
-                <Text style={[styles.envText, { color: cameraStatus === 'connected' ? '#37474F' : '#90A4AE' }]}>
+
+              <View style={[styles.envCapsule, { backgroundColor: '#E1F5FE' }]}>
+                <View style={[styles.envIconCircle, { backgroundColor: '#4FC3F7' }]}>
+                  <MaterialCommunityIcons name="water-percent" size={14} color="#FFF" />
+                </View>
+                <Text style={styles.envValue}>
                   {cameraStatus === 'connected' ? `${environment.humidity}%` : '--%'}
                 </Text>
+                <MaterialCommunityIcons name="paw" size={10} color="rgba(79, 195, 247, 0.3)" />
               </View>
             </View>
 
@@ -522,21 +557,22 @@ export default function CameraScreen({ onNavigate, session }) {
 
             {/* Activity Chart Card */}
             <View style={styles.cardContainer}>
+              <DecorativeCatEars />
               <View style={styles.cardHeader}>
                 <View>
                   <Text style={styles.cardTitle}>Activity Level</Text>
                   <Text style={styles.cardSubtitle}>
-                    Status: <Text style={{ color: '#00695C', fontWeight: 'bold' }}>{data.posture.normal.name === 'Active' ? 'Active' : 'Moderate'}</Text>
+                    Status: <Text style={{ color: '#FF6D00', fontWeight: 'bold' }}>{data.posture.normal.name === 'Active' ? 'Active' : 'Moderate'}</Text>
                   </Text>
                 </View>
                 <View style={styles.iconCircleSmall}>
-                  <MaterialCommunityIcons name="chart-bar" size={20} color="#00695C" />
+                  <MaterialCommunityIcons name="chart-bar" size={20} color="#FF6D00" />
                 </View>
               </View>
 
               <ActivityLevelChart
                 data={{
-                  labels: ['6AM', '12AM', '6PM', 'NOW'],
+                  labels: ['00:00', '06:00', '12:00', '18:00', '24:00'],
                   activity: data.activity
                 }}
               />
@@ -544,25 +580,32 @@ export default function CameraScreen({ onNavigate, session }) {
 
             {/* Stats Grid */}
             <View style={styles.statsRow}>
-              <View style={[styles.statCard, { marginRight: 8 }]}>
-                <View style={[styles.iconCircle, { backgroundColor: '#E0F2F1' }]}>
-                  <MaterialCommunityIcons name="food-apple" size={24} color="#00695C" />
+              <View style={[styles.statCard, styles.statCardFood]}>
+                <MaterialCommunityIcons name="paw" size={80} color="rgba(255, 109, 0, 0.05)" style={styles.statWatermark} />
+                <View style={[styles.iconCircle, styles.iconCircleFood]}>
+                  <MaterialCommunityIcons name="food-apple" size={26} color="#FF6D00" />
                 </View>
-                <Text style={styles.statValue}>{data.food}g</Text>
-                <Text style={styles.statLabel}>Food Consumed</Text>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{data.food}g</Text>
+                  <Text style={styles.statLabel}>Food Consumed</Text>
+                </View>
               </View>
 
-              <View style={[styles.statCard, { marginLeft: 8 }]}>
-                <View style={[styles.iconCircle, { backgroundColor: '#E0F2F1' }]}>
-                  <MaterialCommunityIcons name="litter-box" size={24} color="#00695C" />
+              <View style={[styles.statCard, styles.statCardLitter]}>
+                <MaterialCommunityIcons name="paw" size={80} color="rgba(2, 136, 209, 0.05)" style={styles.statWatermark} />
+                <View style={[styles.iconCircle, styles.iconCircleLitter]}>
+                  <MaterialCommunityIcons name="litter-box" size={26} color="#0288D1" />
                 </View>
-                <Text style={styles.statValue}>{data.litter}</Text>
-                <Text style={styles.statLabel}>Litter Visits</Text>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{data.litter}</Text>
+                  <Text style={styles.statLabel}>Litter Visits</Text>
+                </View>
               </View>
             </View>
 
             {/* Posture Card */}
             <View style={styles.cardContainer}>
+              <DecorativeCatEars />
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Posture & Behavior</Text>
                 <MaterialCommunityIcons name="dots-horizontal" size={20} color="#B0BEC5" />
@@ -583,7 +626,7 @@ export default function CameraScreen({ onNavigate, session }) {
                 {/* Abnormal Card */}
                 <View style={[styles.postureCard, styles.postureCardAbnormal]}>
                   <View style={styles.postureIconBgAbnormal}>
-                    <MaterialCommunityIcons name="alert-circle-outline" size={28} color="#D32F2F" />
+                    <MaterialCommunityIcons name="medical-bag" size={28} color="#D32F2F" />
                   </View>
                   <View style={styles.postureContent}>
                     <Text style={styles.postureValueAbnormal}>{data.posture.abnormal.percent}%</Text>
@@ -617,16 +660,23 @@ export default function CameraScreen({ onNavigate, session }) {
                 {/* Energy Distribution */}
                 <View style={styles.insightRow}>
                   <View style={styles.insightHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                       <MaterialCommunityIcons name="lightning-bolt-circle" size={16} color="#FF9800" style={{ marginRight: 6 }} />
-                      <Text style={styles.insightLabel}>Energy Distribution</Text>
+                      <Text style={styles.insightLabel} numberOfLines={1}>Energy Distribution</Text>
                     </View>
-                    <Text style={styles.insightValue}>{data.behaviorAnalytics?.energy?.active || 0}% Active</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                      <MaterialCommunityIcons name="paw" size={12} color="#FF9800" style={{ marginRight: 4 }} />
+                      <Text style={styles.insightValue} numberOfLines={1}>{data.behaviorAnalytics?.energy?.active || 0}% Active</Text>
+                    </View>
                   </View>
-                  <View style={[styles.progressBarBg, { backgroundColor: '#EEEEEE' }]}>
-                    <Animated.View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.energy?.active || 0}%`, backgroundColor: '#FF9800' }]} />
+                  <View style={styles.progressBarBg}>
+                    <View style={styles.progressBarGray} />
+                    <Animated.View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.energy?.active || 0}%` }]}>
+                      <View style={[styles.progressBarColor, { backgroundColor: '#FFAB40' }]} />
+                      <MaterialCommunityIcons name="paw" size={24} color="#FF6D00" style={styles.progressPaw} />
+                    </Animated.View>
                   </View>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
                     <Text style={styles.insightSubtextLeft}>High (Playing)</Text>
                     <Text style={styles.insightSubtext}>Low (Resting)</Text>
                   </View>
@@ -635,31 +685,45 @@ export default function CameraScreen({ onNavigate, session }) {
                 {/* Routine Consistency */}
                 <View style={[styles.insightRow, { marginTop: 12 }]}>
                   <View style={styles.insightHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                       <MaterialCommunityIcons name="calendar-check" size={16} color="#2196F3" style={{ marginRight: 6 }} />
-                      <Text style={styles.insightLabel}>Routine Consistency</Text>
+                      <Text style={styles.insightLabel} numberOfLines={1}>Routine Consistency</Text>
                     </View>
-                    <Text style={[styles.insightValue, { color: '#2196F3' }]}>{data.behaviorAnalytics?.routine?.status || 'No Data'}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                      <MaterialCommunityIcons name="paw" size={12} color="#2196F3" style={{ marginRight: 4 }} />
+                      <Text style={[styles.insightValue, { color: '#2196F3' }]} numberOfLines={1}>{data.behaviorAnalytics?.routine?.status || 'No Data'}</Text>
+                    </View>
                   </View>
                   <View style={styles.progressBarBg}>
-                    <Animated.View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.routine?.score || 0}%`, backgroundColor: '#2196F3' }]} />
+                    <View style={styles.progressBarGray} />
+                    <Animated.View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.routine?.score || 0}%` }]}>
+                      <View style={[styles.progressBarColor, { backgroundColor: '#64B5F6' }]} />
+                      <MaterialCommunityIcons name="paw" size={24} color="#0D47A1" style={styles.progressPaw} />
+                    </Animated.View>
                   </View>
-                  <Text style={styles.insightSubtextLeft}>Consistent feeding and litter habits</Text>
+                  <Text style={[styles.insightSubtextLeft, { marginTop: 0 }]}>Consistent feeding and litter habits</Text>
                 </View>
 
                 {/* Wellness Index */}
                 <View style={[styles.insightRow, { marginTop: 12 }]}>
                   <View style={styles.insightHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                       <MaterialCommunityIcons name="heart-pulse" size={16} color="#4CAF50" style={{ marginRight: 6 }} />
-                      <Text style={styles.insightLabel}>Wellness Index</Text>
+                      <Text style={styles.insightLabel} numberOfLines={1}>Wellness Index</Text>
                     </View>
-                    <Text style={[styles.insightValue, { color: '#4CAF50' }]}>{data.behaviorAnalytics?.wellness?.status || 'No Data'}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                      <MaterialCommunityIcons name="paw" size={12} color="#4CAF50" style={{ marginRight: 4 }} />
+                      <Text style={[styles.insightValue, { color: '#4CAF50' }]} numberOfLines={1}>{data.behaviorAnalytics?.wellness?.status || 'No Data'}</Text>
+                    </View>
                   </View>
                   <View style={styles.progressBarBg}>
-                    <Animated.View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.wellness?.score || 0}%`, backgroundColor: '#4CAF50' }]} />
+                    <View style={styles.progressBarGray} />
+                    <Animated.View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.wellness?.score || 0}%` }]}>
+                      <View style={[styles.progressBarColor, { backgroundColor: '#81C784' }]} />
+                      <MaterialCommunityIcons name="paw" size={24} color="#1B5E20" style={styles.progressPaw} />
+                    </Animated.View>
                   </View>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
                     <Text style={styles.insightSubtextLeft}>Relaxed</Text>
                     <Text style={styles.insightSubtext}>Stressed</Text>
                   </View>
@@ -1051,37 +1115,58 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 24,
     alignItems: 'center',
+    flexDirection: 'row', // Horizontal layout for better premium feel
     shadowColor: '#90A4AE',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 4,
   },
+  statCardFood: {
+    marginRight: 6,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF6D00',
+  },
+  statCardLitter: {
+    marginLeft: 6,
+    borderLeftWidth: 4,
+    borderLeftColor: '#0288D1',
+  },
+  statContent: {
+    marginLeft: 12,
+    flex: 1,
+  },
   iconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 8,
+  },
+  iconCircleFood: {
+    backgroundColor: '#FFF3E0',
+  },
+  iconCircleLitter: {
+    backgroundColor: '#E1F5FE',
   },
   iconCircleSmall: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#E0F2F1',
+    backgroundColor: '#FFF3E0', // Match chart card
     justifyContent: 'center',
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
     color: '#37474F',
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 10,
     color: '#78909C',
-    marginTop: 2,
+    fontWeight: '600',
+    textTransform: 'uppercase',
   },
   // Posture Redesign
   postureGrid: {
@@ -1172,39 +1257,39 @@ const styles = StyleSheet.create({
   // Environment Styles
   envContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF', // White background for contrast
-    borderRadius: 20,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 8,
-    shadowColor: '#B0BEC5',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    marginBottom: 16,
+    gap: 12,
   },
-  envItem: {
+  envCapsule: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    padding: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.8)',
+    justifyContent: 'space-between',
   },
-  envText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#37474F',
-  },
-  envLabel: {
-    fontSize: 11,
-    color: '#90A4AE',
-    fontWeight: '500',
-    marginLeft: 2,
-  },
-  envDivider: {
-    width: 1,
+  envIconCircle: {
+    width: 24,
     height: 24,
-    backgroundColor: '#ECEFF1',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  envValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#37474F',
+    marginHorizontal: 8,
+  },
+  statWatermark: {
+    position: 'absolute',
+    right: -10,
+    bottom: -10,
+    opacity: 0.5,
   },
   // Recent Activity Styles
   recentScroll: {
@@ -1319,14 +1404,37 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   progressBarBg: {
+    height: 24, // Enough height to not clip the paw
+    justifyContent: 'center',
+    overflow: 'visible',
+    marginVertical: 4,
+  },
+  progressBarGray: {
     height: 8,
     backgroundColor: '#ECEFF1',
     borderRadius: 5,
-    overflow: 'hidden',
+    width: '100%',
+    position: 'absolute',
   },
   progressBarFill: {
-    height: '100%',
+    height: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    overflow: 'visible',
+  },
+  progressBarColor: {
+    height: 8,
     borderRadius: 5,
+    width: '100%',
+    position: 'absolute',
+  },
+  progressPaw: {
+    marginRight: -12,
+    textShadowColor: 'rgba(0,0,0,0.15)',
+    textShadowOffset: { width: 0, height: 1.5 },
+    textShadowRadius: 3,
+    zIndex: 10,
   },
   insightSubtext: {
     fontSize: 11,
@@ -1345,81 +1453,82 @@ const styles = StyleSheet.create({
   },
   introHeader: {
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 16,
   },
   introBackButton: {
-    padding: 5,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    borderRadius: 12,
-    width: 40,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    justifyContent: 'center',
     alignItems: 'center',
   },
   introScrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 40,
-    alignItems: 'center',
   },
-  introHero: {
+  introHeroIcon: {
     alignItems: 'center',
-    marginBottom: 30,
     marginTop: 20,
-  },
-  introImage: {
-    width: width * 0.5,
-    height: width * 0.5,
-    borderRadius: (width * 0.5) / 2,
-    borderWidth: 4,
-    borderColor: '#FFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    marginBottom: 24,
   },
   introTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 28,
+    fontFamily: 'Inter-Bold',
     color: '#0C5A58',
     textAlign: 'center',
     marginBottom: 10,
   },
   introSubtitle: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#285855',
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 20,
+    lineHeight: 22,
     paddingHorizontal: 10,
   },
-  introFeatureList: {
+  introFeatureGrid: {
     width: '100%',
-    marginBottom: 30,
-    gap: 12,
-  },
-  introFeatureItem: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
-    borderRadius: 16,
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 14,
+  },
+  introFeatureCard: {
+    width: `48%`,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 20,
     padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.9)',
   },
   introFeatureIcon: {
-    marginRight: 16,
+    marginBottom: 12,
   },
   introFeatureTitle: {
-    fontWeight: 'bold',
+    fontFamily: 'Inter-Bold',
     color: '#0C5A58',
-    fontSize: 16,
+    fontSize: 14,
+    textAlign: 'center',
   },
   introFeatureSubtitle: {
-    color: '#333',
-    fontSize: 12,
+    color: '#285855',
+    fontSize: 11,
     marginTop: 2,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  introButtonContainer: {
+    marginTop: 32,
   },
   introPrimaryButton: {
     backgroundColor: '#147C78',
     paddingVertical: 18,
-    borderRadius: 16,
+    borderRadius: 20,
     alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
     width: '100%',
   },
   introPrimaryButtonText: {
@@ -1427,9 +1536,45 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  introSkipButton: {
+    marginTop: 16,
+    padding: 10,
+    alignItems: 'center',
+  },
   introSkipText: {
     color: '#285855',
     fontSize: 14,
     fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  statWatermark: {
+    position: 'absolute',
+    right: -10,
+    bottom: -10,
+    opacity: 0.5,
+  },
+  // Cat Ear Decorative Styles
+  earContainer: {
+    position: 'absolute',
+    top: -8,
+    left: 12,
+    right: 12,
+    height: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    zIndex: -1,
+  },
+  ear: {
+    width: 20,
+    height: 16,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+  },
+  earLeft: {
+    transform: [{ rotate: '-15deg' }],
+  },
+  earRight: {
+    transform: [{ rotate: '15deg' }],
   },
 });

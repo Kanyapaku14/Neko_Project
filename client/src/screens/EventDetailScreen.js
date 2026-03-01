@@ -125,7 +125,7 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
                                 ],
                             }}
                         >
-                            <Ionicons name="chevron-back" size={24} color="#1C1C1E" />
+                            <Ionicons name="chevron-back" size={22} color="#1C1C1E" />
                         </Animated.View>
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Event Detail</Text>
@@ -282,11 +282,16 @@ const styles = StyleSheet.create({
         width: 42,
         height: 42,
         borderRadius: 21,
-        backgroundColor: '#FFFFFF',
         justifyContent: 'center',
         alignItems: 'center',
+        backgroundColor: '#FFFFFF',
         borderWidth: 1,
         borderColor: '#E5E5EA',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 6,
+        elevation: 2,
     },
     headerTitle: {
         fontSize: 22,

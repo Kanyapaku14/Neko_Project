@@ -41,6 +41,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     const [nowTs, setNowTs] = useState(Date.now());
     const pageAnim = useRef(new Animated.Value(0)).current;
     const headerAnim = useRef(new Animated.Value(0)).current;
+    const [showStatsModal, setShowStatsModal] = useState(false);
 
     useEffect(() => {
         loadSavedSnapshots();
@@ -356,10 +357,14 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                         <Text style={styles.brandText}>CARE</Text>
                     </View>
                     <View style={styles.headerRight}>
-                        <View style={styles.headerPill}>
+                        <TouchableOpacity
+                            style={styles.headerPill}
+                            onPress={() => setShowStatsModal(true)}
+                            activeOpacity={0.7}
+                        >
                             <MaterialCommunityIcons name="cat" size={14} color="#0C5A58" />
                             <Text style={styles.headerPillText}>{images.length}</Text>
-                        </View>
+                        </TouchableOpacity>
                     </View>
                 </Animated.View>
 
@@ -415,12 +420,29 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                                     <View style={styles.galleryIntroIconWrap}>
                                         <Ionicons name="images-outline" size={18} color="#0C5A58" />
                                     </View>
-                                    <Text style={styles.galleryIntroText}>{activeZone === 'live' ? 'Live Activity Feed' : 'Your Saved Cat Moments'}</Text>
-                                    <Text style={styles.galleryIntroSubText}>
-                                        {activeZone === 'live'
-                                            ? 'Auto-updates from recent detections'
-                                            : 'Only snapshots you kept'}
-                                    </Text>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.galleryIntroText}>{activeZone === 'live' ? 'Live Activity Feed' : 'Your Saved Cat Moments'}</Text>
+                                        <Text style={styles.galleryIntroSubText}>
+                                            {activeZone === 'live'
+                                                ? 'Auto-updates from recent detections'
+                                                : 'Only snapshots you kept'}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={styles.simulateButton}
+                                        onPress={() => {
+                                            AlertEngine.logPendingIdentity({
+                                                behaviorLabel: Math.random() > 0.5 ? 'eating' : 'grooming',
+                                                confidence: 0.92,
+                                                cropSnapshot: 'https://placekitten.com/g/200/300',
+                                                sessionId: 'test_' + Date.now(),
+                                                source: 'Manual Simulator',
+                                                isAbnormal: false
+                                            });
+                                        }}
+                                    >
+                                        <Text style={styles.simulateText}>TEST</Text>
+                                    </TouchableOpacity>
                                 </View>
                             }
                             ListEmptyComponent={
@@ -545,6 +567,40 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                     </View>
                 </Modal>
 
+                <Modal visible={showStatsModal} transparent animationType="slide">
+                    <View style={styles.statsModalOverlay}>
+                        <View style={styles.statsModalContent}>
+                            <View style={styles.statsHeader}>
+                                <Text style={styles.statsTitle}>Capture Statistics</Text>
+                                <TouchableOpacity onPress={() => setShowStatsModal(false)}>
+                                    <Ionicons name="close" size={24} color="#1F2937" />
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.statsGrid}>
+                                <View style={styles.statBox}>
+                                    <Text style={styles.statNum}>{images.length}</Text>
+                                    <Text style={styles.statLabel}>Total Captures</Text>
+                                </View>
+                                <View style={styles.statBox}>
+                                    <Text style={styles.statNum}>{liveImages.length}</Text>
+                                    <Text style={styles.statLabel}>Recent Live</Text>
+                                </View>
+                                <View style={styles.statBox}>
+                                    <Text style={styles.statNum}>{savedSnapshots.length}</Text>
+                                    <Text style={styles.statLabel}>Saved Moments</Text>
+                                </View>
+                            </View>
+
+                            <TouchableOpacity
+                                style={styles.closeStatsBtn}
+                                onPress={() => setShowStatsModal(false)}
+                            >
+                                <Text style={styles.closeStatsText}>Dismiss</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </Modal>
             </SafeAreaView>
         </LinearGradient>
     );
@@ -609,6 +665,18 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#0C5A58',
         fontFamily: 'Inter-Bold',
+    },
+    simulateButton: {
+        backgroundColor: '#E6F5F5',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+        marginLeft: 8,
+    },
+    simulateText: {
+        fontSize: 10,
+        fontFamily: 'Inter-Bold',
+        color: '#0C5A58',
     },
     zoneSwitchWrap: {
         flexDirection: 'row',
@@ -732,6 +800,68 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#B0BEC5',
         fontFamily: 'Inter-Medium',
+    },
+    // Stats Modal Styles
+    statsModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'flex-end',
+    },
+    statsModalContent: {
+        backgroundColor: '#FFFFFF',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        padding: 24,
+        paddingBottom: 40,
+    },
+    statsHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 20,
+    },
+    statsTitle: {
+        fontSize: 18,
+        fontFamily: 'Inter-Bold',
+        color: '#1F2937',
+    },
+    statsGrid: {
+        flexDirection: 'row',
+        gap: 12,
+        marginBottom: 24,
+    },
+    statBox: {
+        flex: 1,
+        backgroundColor: '#F8FAFC',
+        borderRadius: 16,
+        padding: 16,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#F1F5F9',
+    },
+    statNum: {
+        fontSize: 24,
+        fontFamily: 'Inter-Bold',
+        color: '#0C5A58',
+        marginBottom: 4,
+    },
+    statLabel: {
+        fontSize: 10,
+        fontFamily: 'Inter-Medium',
+        color: '#64748B',
+        textAlign: 'center',
+    },
+    closeStatsBtn: {
+        backgroundColor: '#0C5A58',
+        borderRadius: 14,
+        height: 50,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    closeStatsText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontFamily: 'Inter-Bold',
     },
     modalContainer: {
         flex: 1,

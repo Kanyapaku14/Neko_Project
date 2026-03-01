@@ -13,7 +13,7 @@ export default function useCameraData(session, cameraStatus) {
       cats: 0,
       food: 0,
       litter: 0,
-      activity: [20, 45, 10, 80], // Mock graph data (DB lacks hourly activity)
+      activity: [20, 45, 10, 80, 50], // Mock graph data (5 points for 6h intervals)
       posture: {
         abnormal: { percent: 0, name: 'None' },
         normal: { percent: 100, name: 'Normal' }
@@ -177,9 +177,9 @@ export default function useCameraData(session, cameraStatus) {
         const newFood = prev.food + (Math.random() > 0.8 ? 1 : 0);
         const newLitter = prev.litter + (Math.random() > 0.95 ? 1 : 0);
 
-        const act = [...(prev.activity || [20, 45, 10, 80])];
+        const act = [...(prev.activity || [20, 45, 10, 80, 50])];
         if (Math.random() > 0.3) {
-          act[3] = Math.min(100, Math.max(0, act[3] + (Math.floor(Math.random() * 11) - 5)));
+          act[4] = Math.min(100, Math.max(0, act[4] + (Math.floor(Math.random() * 11) - 5)));
         }
 
         let norm = prev.posture.normal.percent;

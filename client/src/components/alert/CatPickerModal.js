@@ -47,6 +47,16 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
         if (onSelect) onSelect(catId);
     };
 
+    const handleDismiss = () => {
+        setDropdownOpen(false);
+        if (onDismiss) onDismiss();
+    };
+
+    const handleSkip = () => {
+        setDropdownOpen(false);
+        if (onSkip) onSkip();
+    };
+
     return (
         <Modal
             visible={visible}
@@ -55,8 +65,16 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
             onRequestClose={onDismiss}
             statusBarTranslucent
         >
-            <View style={styles.backdrop}>
-                <View style={styles.modalContainer}>
+            <TouchableOpacity
+                style={styles.backdrop}
+                activeOpacity={1}
+                onPress={handleDismiss}
+            >
+                <TouchableOpacity
+                    style={styles.modalContainer}
+                    activeOpacity={1}
+                    onPress={() => setDropdownOpen(false)}
+                >
                     <View style={styles.header}>
                         <View style={styles.headerLeft}>
                             <Text style={styles.headerTitle}>Identify Cat</Text>
@@ -66,7 +84,7 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                                 </View>
                             )}
                         </View>
-                        <TouchableOpacity onPress={onDismiss} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <TouchableOpacity onPress={handleDismiss} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                             <Ionicons name="close" size={24} color="#546E7A" />
                         </TouchableOpacity>
                     </View>
@@ -123,12 +141,12 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                     <View style={{ height: dropdownOpen ? (cats.length * 45) + 10 : 20 }} />
 
                     <View style={styles.actionRow}>
-                        <TouchableOpacity style={styles.skipButton} onPress={onSkip} activeOpacity={0.7}>
+                        <TouchableOpacity style={styles.skipButton} onPress={handleSkip} activeOpacity={0.7}>
                             <Text style={styles.skipText}>Skip for now</Text>
                         </TouchableOpacity>
                     </View>
-                </View>
-            </View>
+                </TouchableOpacity>
+            </TouchableOpacity>
         </Modal>
     );
 }

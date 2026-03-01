@@ -2,7 +2,7 @@
 // 1. ส่วนการนำเข้า Libraries และ Components (Imports)
 // ==============================================
 import React, { useState } from 'react';
-import { View, Text, SafeAreaView, TouchableOpacity, StyleSheet, ScrollView, Image, TextInput } from 'react-native';
+import { View, Text, SafeAreaView, TouchableOpacity, StyleSheet, ScrollView, Image, TextInput, Animated, LayoutAnimation, UIManager, Platform } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import supabase from './config/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
@@ -11,12 +11,23 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import AlertEngine from '../services/AlertEngine'; // Global Alert Manager
 
 const CAMERA_BRANDS = [
-    { label: 'TP-Link Tapo C200', value: 'tapo_c200', api: 'Tapo Cloud API' },
-    { label: 'Reolink E1 Pro', value: 'reolink_e1_pro', api: 'Reolink Local API' },
-    { label: 'Hikvision DS-2CD', value: 'hikvision_ds_2cd', api: 'ISAPI' },
-    { label: 'Neko Cam Gen 1', value: 'neko_cam_gen_1', api: 'Neko Device API' },
-    { label: 'Other (Type manually)', value: 'custom', api: 'Manual API setup required' },
+    { id: 'tapo', label: 'TP-Link Tapo', icon: 'link-variant', api: 'Tapo Cloud API' },
+    { id: 'xiaomi', label: 'Xiaomi Mi Home', icon: 'shield-home', api: 'Xiaomi Cloud API' },
+    { id: 'ezviz', label: 'EZVIZ', icon: 'video-check', api: 'EZVIZ Cloud API' },
+    { id: 'custom', label: 'Other (Manual)', icon: 'cog-outline', api: 'Manual API setup' },
 ];
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const DecorativeCatEars = () => (
+    <View style={styles.earContainer} pointerEvents="none">
+        <View style={[styles.ear, styles.earLeft]} />
+        <View style={[styles.ear, styles.earRight]} />
+    </View>
+);
+
 // ==============================================
 // 2. Main Component (หน้าจอตั้งค่า)
 // ==============================================
@@ -33,11 +44,35 @@ export default function SetcameraScreen({ onNavigate, session }) {
     const [selectedCats, setSelectedCats] = useState([]);
 
     // Hardware State
-    const [selectedCameraPreset, setSelectedCameraPreset] = useState('tapo_c200');
+    const [selectedCameraPreset, setSelectedCameraPreset] = useState('tapo');
     const [customCameraBrand, setCustomCameraBrand] = useState('');
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-    const selectedCameraMeta = CAMERA_BRANDS.find((item) => item.value === selectedCameraPreset);
+    const [isConnecting, setIsConnecting] = useState(false);
+    const [connected, setConnected] = useState(false);
+
+    // Animation values
+    const successAnim = React.useRef(new Animated.Value(0)).current;
+
+    // Scale animations for each brand
+    const brandScales = React.useRef({
+        tapo: new Animated.Value(1),
+        xiaomi: new Animated.Value(1),
+        ezviz: new Animated.Value(1),
+        custom: new Animated.Value(1),
+    }).current;
+
+    const selectedCameraMeta = CAMERA_BRANDS.find((item) => item.id === selectedCameraPreset);
     const selectedCameraApi = selectedCameraMeta?.api || 'Manual API setup required';
+
+    const animateSelection = (brandId) => {
+        Object.keys(brandScales).forEach(id => {
+            Animated.spring(brandScales[id], {
+                toValue: id === brandId ? 1.03 : 1,
+                useNativeDriver: true,
+                friction: 8,
+            }).start();
+        });
+    };
 
     // Load initial settings and fetch cats
     React.useEffect(() => {
@@ -57,9 +92,19 @@ export default function SetcameraScreen({ onNavigate, session }) {
                     const mode = await AsyncStorage.getItem('camera_monitoringMode');
                     const savedCatsJson = await AsyncStorage.getItem('camera_selectedCats');
                     const savedStatus = await AsyncStorage.getItem('camera_status');
+                    const savedBrand = await AsyncStorage.getItem('camera_brand');
 
                     if (mode) setMonitoringMode(mode);
                     if (savedStatus) setCameraStatus(savedStatus);
+                    if (savedBrand) {
+                        setSelectedCameraPreset(savedBrand);
+                        // Trigger pulse for initial selected brand
+                        animateSelection(savedBrand);
+                        if (savedStatus === 'connected') {
+                            setConnected(true);
+                            successAnim.setValue(1);
+                        }
+                    }
 
                     if (savedCatsJson) {
                         setSelectedCats(JSON.parse(savedCatsJson));
@@ -99,6 +144,34 @@ export default function SetcameraScreen({ onNavigate, session }) {
                 details: 'All systems functioning normally.'
             });
         }
+    };
+
+    const handleLogin = (brandLabel) => {
+        setIsConnecting(true);
+        setTimeout(async () => {
+            setIsConnecting(false);
+            setConnected(true);
+            updateCameraStatus('connected');
+
+            Animated.sequence([
+                Animated.spring(successAnim, {
+                    toValue: 1,
+                    tension: 50,
+                    friction: 7,
+                    useNativeDriver: true,
+                }),
+                Animated.delay(200),
+                Animated.spring(successAnim, {
+                    toValue: 1.05,
+                    useNativeDriver: true,
+                }),
+                Animated.spring(successAnim, {
+                    toValue: 1,
+                    friction: 3,
+                    useNativeDriver: true,
+                })
+            ]).start();
+        }, 1500);
     };
 
     const handleTestConnection = () => {
@@ -146,17 +219,21 @@ export default function SetcameraScreen({ onNavigate, session }) {
 
     return (
         <LinearGradient
-            colors={['#F5FBFB', '#F5FBFB']}
+            colors={['#F5FBFB', '#E8F5E9']}
             style={{ flex: 1 }}
         >
             <SafeAreaView style={styles.container}>
                 {/* Header */}
                 <View style={styles.header}>
-                    <TouchableOpacity onPress={() => onNavigate('Camera')} style={styles.backButton}>
-                        <Ionicons name="arrow-back" size={20} color="#1C1C1E" />
+                    <TouchableOpacity onPress={() => onNavigate('Camera')} style={styles.backBtnStyle} activeOpacity={0.85}>
+                        <Ionicons name="chevron-back" size={22} color="#1C1C1E" />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Camera Settings</Text>
-                    <View style={styles.backButton} />
+                    <View style={styles.titleContainer}>
+                        <Text style={styles.titleLogo}>NEK</Text>
+                        <Ionicons name="paw" size={18} color="#4FD1C5" />
+                        <Text style={styles.titleLogo}>CARE</Text>
+                    </View>
+                    <View style={styles.headerIconBtn} />
                 </View>
 
                 <ScrollView contentContainerStyle={styles.content}>
@@ -169,6 +246,9 @@ export default function SetcameraScreen({ onNavigate, session }) {
                                     backgroundColor: cameraStatus === 'connected' ? '#56b059ff' :
                                         cameraStatus === 'connecting' ? '#FFC107' : '#F44336'
                                 }]} />
+                                <View style={[styles.statusDot,
+                                { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : cameraStatus === 'connecting' ? '#FFB300' : '#F44336' }
+                                ]} />
                                 <Text style={styles.sectionTitleWhite}>
                                     {cameraStatus === 'connected' ? 'Camera Connected' :
                                         cameraStatus === 'connecting' ? 'Connecting...' : 'Camera Disconnected'}
@@ -179,7 +259,11 @@ export default function SetcameraScreen({ onNavigate, session }) {
                                 backgroundColor: cameraStatus === 'connected' ? '#75c776ff' :
                                     cameraStatus === 'connecting' ? '#FFB300' : '#F44336'
                             }]}>
-                                <Ionicons name={cameraStatus === 'connected' ? "checkmark" : cameraStatus === "connecting" ? "sync" : "alert-outline"} size={16} color="#fff" />
+                                <View style={[styles.statusIconBg,
+                                { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : cameraStatus === 'connecting' ? '#FFB300' : '#F44336' }
+                                ]}>
+                                    <Ionicons name={cameraStatus === 'connected' ? "checkmark" : cameraStatus === "connecting" ? "sync" : "alert-outline"} size={16} color="#fff" />
+                                </View>
                             </View>
                         </View>
 
@@ -219,6 +303,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
                         </View>
 
                         <View style={styles.previewContent}>
+                            <DecorativeCatEars />
                             {/* Placeholder Image or Message */}
                             {cameraStatus === 'connected' ? (
                                 <View style={styles.previewPlaceholder}>
@@ -291,98 +376,142 @@ export default function SetcameraScreen({ onNavigate, session }) {
                         </View>
                     </View>
 
-                    {/* 4. Camera Hardware */}
+                    {/* 4. Camera Hardware Accordion */}
                     <View style={styles.card}>
-                        <Text style={styles.sectionTitle}>Camera Hardware</Text>
-                        <Text style={styles.label}>Camera brand (API compatible)</Text>
-                        <View style={{ marginBottom: 12 }}>
-                            <TouchableOpacity
-                                style={styles.dropdownHeader}
-                                onPress={() => setIsDropdownOpen(!isDropdownOpen)}
-                                activeOpacity={0.7}
-                            >
-                                <Text style={styles.dropdownHeaderText}>
-                                    {selectedCameraMeta?.label || 'Select Camera'}
-                                </Text>
-                                <Ionicons name={isDropdownOpen ? "chevron-up" : "chevron-down"} size={20} color="#555" />
-                            </TouchableOpacity>
-
-                            {isDropdownOpen && (
-                                <View style={styles.dropdownListContainer}>
-                                    {CAMERA_BRANDS.map((camera, index) => (
-                                        <TouchableOpacity
-                                            key={camera.value}
-                                            style={[
-                                                styles.dropdownItem,
-                                                index === CAMERA_BRANDS.length - 1 && { borderBottomWidth: 0 }
-                                            ]}
-                                            onPress={() => {
-                                                if (selectedCameraPreset !== camera.value) {
-                                                    setSelectedCameraPreset(camera.value);
-                                                    setIsDropdownOpen(false);
-
-                                                    // Reset states to prevent state sticking
-                                                    setStreamUrl(null);
-                                                    setLastSignal(null);
-                                                    updateCameraStatus("disconnected");
-                                                } else {
-                                                    setIsDropdownOpen(false);
-                                                }
-                                            }}
-                                        >
-                                            <Text style={[
-                                                styles.dropdownItemText,
-                                                selectedCameraPreset === camera.value && styles.dropdownItemTextSelected
-                                            ]}>
-                                                {camera.label}
-                                            </Text>
-                                            {selectedCameraPreset === camera.value && (
-                                                <Ionicons name="checkmark" size={18} color="#00695C" />
-                                            )}
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                            )}
-                        </View>
-
-                        {selectedCameraPreset === 'custom' && (
-                            <View style={styles.inputRow}>
-                                <MaterialCommunityIcons name="webcam" size={16} color="#555" style={{ marginRight: 8 }} />
-                                <TextInput
-                                    style={styles.input}
-                                    value={customCameraBrand}
-                                    onChangeText={setCustomCameraBrand}
-                                    placeholder="Type camera brand/model..."
-                                    placeholderTextColor="#999"
-                                />
+                        <TouchableOpacity
+                            style={styles.accordionHeader}
+                            onPress={() => {
+                                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                                setIsDropdownOpen(!isDropdownOpen);
+                            }}
+                            activeOpacity={0.7}
+                        >
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <MaterialCommunityIcons name="webcam" size={22} color="#26A69A" style={{ marginRight: 10 }} />
+                                <Text style={styles.sectionTitle}>Camera Hardware & Brand</Text>
                             </View>
-                        )}
-
-                        <View style={styles.infoRow}>
-                            <Ionicons name="link-outline" size={14} color="#555" />
-                            <Text style={styles.infoText}>API profile: {selectedCameraApi}</Text>
-                        </View>
-                        <Text style={styles.label}>Webhook Configuration</Text>
-                        <View style={styles.inputRow}>
-                            <Ionicons name="lock-closed-outline" size={16} color="#aaa" style={{ marginRight: 8 }} />
-                            <TextInput
-                                style={styles.input}
-                                value="https://api.7917&t=URRbNgm9U8Q9IPFj-0"
-                                editable={false}
-                            />
-                            <TouchableOpacity style={styles.copyButton}>
-                                <Text style={styles.copyText}>COPY</Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        <TouchableOpacity style={styles.actionButtonGray}>
-                            <Text style={styles.actionButtonText}>Update & Reconnect</Text>
+                            <Ionicons name={isDropdownOpen ? "chevron-up" : "chevron-down"} size={20} color="#00695C" />
                         </TouchableOpacity>
 
-                        <View style={styles.infoRow}>
-                            <Ionicons name="information-circle" size={14} color="#555" />
-                            <Text style={styles.infoText}>Used for receiving camera events and AI detection signals</Text>
-                        </View>
+                        {isDropdownOpen && (
+                            <Animated.View style={styles.accordionContent}>
+                                <Text style={styles.label}>Select API compatible camera brand</Text>
+
+                                <View style={styles.brandCardStack}>
+                                    {CAMERA_BRANDS.map((brand) => {
+                                        const isSelected = selectedCameraPreset === brand.id;
+                                        return (
+                                            <Animated.View key={brand.id} style={{ transform: [{ scale: brandScales[brand.id] || 1 }] }}>
+                                                <TouchableOpacity
+                                                    activeOpacity={0.9}
+                                                    onPress={async () => {
+                                                        setSelectedCameraPreset(brand.id);
+                                                        animateSelection(brand.id);
+                                                        setConnected(false);
+                                                        successAnim.setValue(0);
+                                                        updateCameraStatus("disconnected");
+                                                        await AsyncStorage.setItem('camera_brand', brand.id);
+                                                    }}
+                                                    style={[
+                                                        styles.brandCardSmall,
+                                                        isSelected && styles.brandCardSelected,
+                                                    ]}
+                                                >
+                                                    <View style={styles.brandHeader}>
+                                                        <View style={[styles.brandIconBg, isSelected && { backgroundColor: '#B2DFDB' }]}>
+                                                            <MaterialCommunityIcons
+                                                                name={brand.icon}
+                                                                size={20}
+                                                                color={isSelected ? "#004D40" : "#90A4AE"}
+                                                            />
+                                                        </View>
+                                                        <View style={{ flex: 1, marginLeft: 12 }}>
+                                                            <Text style={[styles.brandNameTitle, isSelected && { color: '#004D40' }]}>
+                                                                {brand.label}
+                                                            </Text>
+                                                            <Text style={styles.brandApiSub}>{brand.api}</Text>
+                                                        </View>
+                                                        {isSelected && (
+                                                            <Ionicons name="checkmark-circle" size={20} color="#00695C" />
+                                                        )}
+                                                    </View>
+
+                                                    {isSelected && (
+                                                        <View style={styles.brandActionLinks}>
+                                                            <TouchableOpacity
+                                                                style={styles.brandActionLink}
+                                                                onPress={() => onNavigate('Phone', { initialStep: 2, brand: brand.id })}
+                                                            >
+                                                                <Ionicons name="lock-closed" size={14} color="#00695C" />
+                                                                <Text style={styles.brandActionText}>Cloud Login</Text>
+                                                            </TouchableOpacity>
+
+                                                            <TouchableOpacity
+                                                                style={styles.brandActionLink}
+                                                                onPress={() => onNavigate('Phone', { initialStep: 3, brand: brand.id })}
+                                                            >
+                                                                <Ionicons name="videocam" size={14} color="#00695C" />
+                                                                <Text style={styles.brandActionText}>Test Live</Text>
+                                                            </TouchableOpacity>
+
+                                                            <TouchableOpacity
+                                                                style={styles.brandActionLink}
+                                                                onPress={() => onNavigate('Phone', { initialStep: 4, brand: brand.id })}
+                                                            >
+                                                                <Ionicons name="grid" size={14} color="#00695C" />
+                                                                <Text style={styles.brandActionText}>Zones</Text>
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    )}
+                                                </TouchableOpacity>
+                                            </Animated.View>
+                                        );
+                                    })}
+                                </View>
+
+                                {selectedCameraPreset === 'custom' && (
+                                    <View style={styles.inputRow}>
+                                        <MaterialCommunityIcons name="webcam" size={16} color="#555" style={{ marginRight: 8 }} />
+                                        <TextInput
+                                            style={styles.input}
+                                            value={customCameraBrand}
+                                            onChangeText={setCustomCameraBrand}
+                                            placeholder="Type camera brand/model..."
+                                            placeholderTextColor="#999"
+                                        />
+                                    </View>
+                                )}
+
+                                <View style={styles.infoRow}>
+                                    <Ionicons name="link-outline" size={14} color="#555" />
+                                    <Text style={styles.infoText}>API profile: {selectedCameraApi}</Text>
+                                </View>
+                                <Text style={styles.label}>Webhook Configuration</Text>
+                                <View style={styles.inputRow}>
+                                    <Ionicons name="lock-closed-outline" size={16} color="#aaa" style={{ marginRight: 8 }} />
+                                    <TextInput
+                                        style={styles.input}
+                                        value="https://api.7917&t=URRbNgm9U8Q9IPFj-0"
+                                        editable={false}
+                                    />
+                                    <TouchableOpacity style={styles.copyButton}>
+                                        <Text style={styles.copyText}>COPY</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                <TouchableOpacity
+                                    style={[styles.actionButtonGray, { backgroundColor: '#00897B', borderColor: '#00897B' }]}
+                                    onPress={() => onNavigate('Phone', { initialStep: 5, brand: selectedCameraPreset })}
+                                >
+                                    <Text style={[styles.actionButtonText, { color: '#fff' }]}>Finish All Setup</Text>
+                                </TouchableOpacity>
+
+                                <View style={styles.infoRow}>
+                                    <Ionicons name="information-circle" size={14} color="#555" />
+                                    <Text style={styles.infoText}>Used for receiving camera events and AI detection signals</Text>
+                                </View>
+                            </Animated.View>
+                        )}
                     </View>
 
                     {/* 5. Setup & Guide */}
@@ -434,6 +563,39 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    headerIconBtn: {
+        width: 42,
+        height: 42,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    backBtnStyle: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 6,
+        elevation: 2,
+    },
+    titleContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flex: 1,
+    },
+    titleLogo: {
+        fontSize: 20,
+        fontFamily: 'Inter-Bold',
+        color: '#00695C',
+        marginHorizontal: 2,
+    },
     headerTitle: {
         fontSize: 22,
         fontWeight: '700',
@@ -450,11 +612,14 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
         borderWidth: 1,
         borderColor: '#E5E5EA',
+        borderWidth: 1.5,
+        borderColor: '#E0F2F1',
         borderRadius: 16,
         padding: 16,
         marginBottom: 16,
         overflow: 'hidden',
         shadowColor: '#0F172A',
+        shadowColor: '#546E7A',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.06,
         shadowRadius: 10,
@@ -528,6 +693,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         position: 'relative',
+        position: 'relative',
     },
     previewPlaceholder: {
         justifyContent: 'center',
@@ -565,6 +731,7 @@ const styles = StyleSheet.create({
     toggleContainer: {
         flexDirection: 'row',
         backgroundColor: '#F2F4F7',
+        backgroundColor: '#E0F2F1',
         borderRadius: 20,
         padding: 4,
         marginBottom: 16,
@@ -577,14 +744,17 @@ const styles = StyleSheet.create({
     },
     toggleBtnActive: {
         backgroundColor: '#fff',
+        backgroundColor: '#B2DFDB',
         elevation: 2
     },
     toggleText: {
         color: '#757575',
+        color: '#00695C',
         fontSize: 12,
     },
     toggleTextActive: {
         color: '#00695C',
+        color: '#004D40',
         fontWeight: 'bold',
     },
     catSelectionRow: {
@@ -607,6 +777,7 @@ const styles = StyleSheet.create({
     },
     catAvatarSelected: {
         borderColor: '#00695C',
+        borderColor: '#26A69A',
     },
     catName: {
         color: '#333',
@@ -698,5 +869,137 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 10,
         fontWeight: 'bold',
+    },
+    // Accordion Styles
+    accordionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 4,
+    },
+    accordionContent: {
+        marginTop: 15,
+        borderTopWidth: 1,
+        borderTopColor: '#F0F0F0',
+        paddingTop: 15,
+    },
+    // Brand Card Styles
+    brandCardStack: {
+        gap: 12,
+        marginBottom: 20,
+    },
+    brandCardSmall: {
+        backgroundColor: "#fff",
+        borderRadius: 16,
+        padding: 12,
+        borderWidth: 1.5,
+        borderColor: "rgba(0,0,0,0.05)",
+    },
+    brandCardSelected: {
+        borderColor: "#00897B",
+        backgroundColor: "#F4FAF9",
+        borderColor: "#26A69A",
+        backgroundColor: "#F0FAF9",
+    },
+    brandHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    brandIconBg: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        backgroundColor: '#F5F7FA',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    brandNameTitle: {
+        fontSize: 15,
+        fontWeight: "700",
+        color: "#37474F",
+        color: "#546E7A",
+    },
+    brandApiSub: {
+        fontSize: 11,
+        color: "#78909C",
+        marginTop: 1,
+    },
+    loginButtonSmall: {
+        marginTop: 12,
+    },
+    gradientBtnSmall: {
+        paddingVertical: 8,
+        borderRadius: 12,
+        alignItems: "center",
+        flexDirection: 'row',
+        justifyContent: 'center',
+    },
+    loginTextSmall: {
+        color: "#fff",
+        fontWeight: "700",
+        fontSize: 13,
+    },
+    connectedBoxSmall: {
+        marginTop: 12,
+        padding: 10,
+        borderRadius: 12,
+        backgroundColor: "#E8F5E9",
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    connectedTextSmall: {
+        color: "#1B5E20",
+        fontWeight: "700",
+        fontSize: 13,
+    },
+    brandActionLinks: {
+        flexDirection: 'row',
+        marginTop: 12,
+        gap: 8,
+        justifyContent: 'space-between',
+    },
+    brandActionLink: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        justifyContent: 'flex-start',
+        paddingVertical: 8,
+        backgroundColor: '#F0F4F4',
+        paddingHorizontal: 12,
+        backgroundColor: '#E8F5E9',
+        borderRadius: 8,
+        gap: 6,
+    },
+    brandActionText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#00695C',
+        color: '#1B5E20',
+    },
+    // Cat Ear Styles
+    earContainer: {
+        position: 'absolute',
+        top: -8,
+        left: 12,
+        right: 12,
+        height: 12,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        zIndex: -1,
+    },
+    ear: {
+        width: 20,
+        height: 16,
+        backgroundColor: '#ECEFF1',
+        borderTopLeftRadius: 10,
+        borderTopRightRadius: 10,
+    },
+    earLeft: {
+        transform: [{ rotate: '-15deg' }],
+    },
+    earRight: {
+        transform: [{ rotate: '15deg' }],
     },
 });

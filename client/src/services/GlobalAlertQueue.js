@@ -119,6 +119,15 @@ export function GlobalAlertQueueProvider({ children, session }) {
 
     const handleSkip = async () => {
         if (!currentAlert) return;
+
+        // If it's an abnormal (risky) behavior, we DON'T resolve it via "Skip".
+        // It must be identified specifically to disappear from the banner.
+        // We just hide the modal for now (Dismiss).
+        if (currentAlert.isAbnormal) {
+            handleDismiss();
+            return;
+        }
+
         await AlertEngine.resolveIdentity(currentAlert.id, null, 'skipped');
         setCurrentAlert(null);
     };
