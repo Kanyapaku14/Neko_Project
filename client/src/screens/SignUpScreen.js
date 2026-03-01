@@ -21,13 +21,17 @@ export default function SignUpScreen({ onNavigate }) {
             return;
         }
 
+        const cleanEmail = email.trim().toLowerCase();
+        if (!cleanEmail.endsWith('@gmail.com') && !cleanEmail.endsWith('@hotmail.com')) {
+            Alert.alert("ข้อผิดพลาด", "กรุณาใช้อีเมล @gmail.com หรือ @hotmail.com เท่านั้นในการสมัครสมาชิก");
+            return;
+        }
 
         setLoading(true); // เริ่มหมุน
 
 
         try {
             // 2. ส่งข้อมูลไป Supabase (ต้องอยู่ภายในฟังก์ชัน async นี้)
-            const cleanEmail = email.trim();
             const { data, error } = await supabase.auth.signUp({
                 email: cleanEmail,
                 password: password,
