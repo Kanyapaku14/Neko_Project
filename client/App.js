@@ -12,9 +12,9 @@ import supabase from './src/screens/config/supabaseClient';
 import Dashboard from './src/screens/Dashbord';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// ✅ 1. Import ไฟล์ LogDailyNormal เข้ามา
 import LogDailyNormal from './src/screens/LogDailyNormal';
-import HomeScreen from './src/screens/HomeScreen'; // อย่าลืม Import Home ด้วยถ้าจะใช้
+import AddMedical from './src/screens/AddMedical'; // ✅ Import AddMedical
+import HomeScreen from './src/screens/HomeScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScreen
@@ -54,8 +54,9 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState('SignIn');
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [authScreen, setAuthScreen] = useState('Home');
+  const [authScreen, setAuthScreen] = useState('Home'); // ✅ เปลี่ยนกลับเป็น Home
   const [catId, setCatId] = useState(null);
+  const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
   const [profileLoading, setProfileLoading] = useState(false); // ✅ Track if checking profile
   const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null); // null until loaded
 
@@ -134,7 +135,7 @@ export default function App() {
       // 2. Check Cat
       const { data: cat, error: catError } = await supabase
         .from('cats')
-        .select('id')
+        .select('id, name') // ✅ ดึงชื่อแมวมาด้วย
         .eq('owner_id', session.user.id)
         .limit(1)
         .single();
@@ -145,6 +146,7 @@ export default function App() {
       }
 
       setCatId(cat.id); // ✅ Save catId
+      setCatName(cat.name); // ✅ Save catName
 
       // If all good, explicitly set to Home
       setAuthScreen('Home');
@@ -164,7 +166,6 @@ export default function App() {
     );
   }
 
-  // --- Helper function to render screens ---
   const renderScreen = () => {
     // 1. Session based (if logged in)
     if (session) {
@@ -211,8 +212,16 @@ export default function App() {
       if (currentScreenName === 'LogDaily') {
         return <LogDailyNormal
           session={session}
+          catId={catId} // ✅ ส่ง catId ไปที่ LogDailyNormal
+          catName={catName} // ✅ ส่ง catName ไปที่ LogDailyNormal
           onBack={() => setAuthScreen('Home')}
           initialDate={screenParams?.date || null}
+        />;
+      }
+      if (currentScreenName === 'AddMedical') {
+        return <AddMedical
+          navigation={{ goBack: () => setAuthScreen('Home') }}
+          onBack={() => setAuthScreen('Home')}
         />;
       }
       if (currentScreenName === 'Calendar') {

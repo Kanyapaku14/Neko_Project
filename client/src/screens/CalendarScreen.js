@@ -21,7 +21,7 @@ const MONTHS = [
 ];
 
 export default function CalendarScreen({ onNavigate, session }) {
-  const [currentDate, setCurrentDate] = useState(new Date()); 
+  const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [dailyLog, setDailyLog] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -37,7 +37,7 @@ export default function CalendarScreen({ onNavigate, session }) {
         .eq('owner_id', session.user.id)
         .limit(1)
         .single();
-      
+
       if (data) setCatId(data.id);
     };
     fetchCat();
@@ -47,20 +47,20 @@ export default function CalendarScreen({ onNavigate, session }) {
   useEffect(() => {
     const fetchLog = async () => {
       if (!catId || !selectedDate) return;
-      
+
       // Use local date string instead of UTC
       const year = selectedDate.getFullYear();
       const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
       const day = String(selectedDate.getDate()).padStart(2, '0');
       const dateString = `${year}-${month}-${day}`;
-      
+
       const { data, error } = await supabase
         .from('daily_logs')
         .select('*')
         .eq('cat_id', catId)
         .eq('log_date', dateString)
-        .maybeSingle(); 
-      
+        .maybeSingle();
+
       setDailyLog(data || null);
       setLoading(false);
     };
@@ -150,7 +150,7 @@ export default function CalendarScreen({ onNavigate, session }) {
       </View>
 
       {/* Details Section */}
-      <ScrollView 
+      <ScrollView
         style={styles.detailsContainer}
         contentContainerStyle={{ paddingBottom: 150 }}
         showsVerticalScrollIndicator={false}
@@ -181,52 +181,52 @@ export default function CalendarScreen({ onNavigate, session }) {
 
             {/* Detailed List (Optional: keeping it for completeness but styled less prominently if needed, or just below) */}
             <View style={styles.textLogContainer}>
-             <View style={styles.textLogRow}>
+              <View style={styles.textLogRow}>
                 <MaterialCommunityIcons name="water-percent" size={18} color="#147C78" />
                 <Text style={styles.textLogLabel}>Urine: </Text>
                 <Text style={styles.textLogValue}>
-                   {dailyLog.urine_level_enum?.replace(/_/g, ' ') || '-'}
-                   {dailyLog.urine_color_enum ? ` (${dailyLog.urine_color_enum.replace(/_/g, ' ')})` : ''}
+                  {dailyLog.urine_level_enum?.replace(/_/g, ' ') || '-'}
+                  {dailyLog.urine_color_enum ? ` (${dailyLog.urine_color_enum.replace(/_/g, ' ')})` : ''}
                 </Text>
-             </View>
+              </View>
 
-             <View style={styles.textLogRow}>
+              <View style={styles.textLogRow}>
                 <MaterialCommunityIcons name="poop" size={18} color="#147C78" />
                 <Text style={styles.textLogLabel}>Stool: </Text>
                 <Text style={styles.textLogValue}>
-                   {dailyLog.stool_level_enum?.replace(/_/g, ' ') || '-'}
-                   {dailyLog.stool_color_enum ? ` (${dailyLog.stool_color_enum.replace(/_/g, ' ')})` : ''}
+                  {dailyLog.stool_level_enum?.replace(/_/g, ' ') || '-'}
+                  {dailyLog.stool_color_enum ? ` (${dailyLog.stool_color_enum.replace(/_/g, ' ')})` : ''}
                 </Text>
-             </View>
+              </View>
 
-             {(dailyLog.vomit_level_enum || dailyLog.vomit_color_enum) && (
+              {(dailyLog.vomit_level_enum || dailyLog.vomit_color_enum) && (
                 <View style={styles.textLogRow}>
-                   <MaterialCommunityIcons name="alert-circle" size={18} color="#D32F2F" />
-                   <Text style={[styles.textLogLabel, {color: '#D32F2F'}]}>Vomit: </Text>
-                   <Text style={styles.textLogValue}>
-                      {dailyLog.vomit_level_enum?.replace(/_/g, ' ') || '-'}
-                      {dailyLog.vomit_color_enum ? ` (${dailyLog.vomit_color_enum.replace(/_/g, ' ')})` : ''}
-                   </Text>
+                  <MaterialCommunityIcons name="alert-circle" size={18} color="#D32F2F" />
+                  <Text style={[styles.textLogLabel, { color: '#D32F2F' }]}>Vomit: </Text>
+                  <Text style={styles.textLogValue}>
+                    {dailyLog.vomit_level_enum?.replace(/_/g, ' ') || '-'}
+                    {dailyLog.vomit_color_enum ? ` (${dailyLog.vomit_color_enum.replace(/_/g, ' ')})` : ''}
+                  </Text>
                 </View>
-             )}
+              )}
 
-             {dailyLog.behavior_enum && (
+              {dailyLog.behavior_enum && (
                 <View style={styles.textLogRow}>
-                   <MaterialCommunityIcons name="cat" size={18} color="#147C78" />
-                   <Text style={styles.textLogLabel}>Behavior: </Text>
-                   <Text style={styles.textLogValue}>{dailyLog.behavior_enum.replace(/_/g, ' ')}</Text>
+                  <MaterialCommunityIcons name="cat" size={18} color="#147C78" />
+                  <Text style={styles.textLogLabel}>Behavior: </Text>
+                  <Text style={styles.textLogValue}>{dailyLog.behavior_enum.replace(/_/g, ' ')}</Text>
                 </View>
-             )}
+              )}
 
-             {dailyLog.notes && (
-                <View style={[styles.textLogRow, {alignItems: 'flex-start'}]}>
-                   <MaterialCommunityIcons name="note-text" size={18} color="#147C78" />
-                   <Text style={styles.textLogLabel}>Notes: </Text>
-                   <Text style={[styles.textLogValue, {flex: 1}]}>{dailyLog.notes}</Text>
+              {dailyLog.notes && (
+                <View style={[styles.textLogRow, { alignItems: 'flex-start' }]}>
+                  <MaterialCommunityIcons name="note-text" size={18} color="#147C78" />
+                  <Text style={styles.textLogLabel}>Notes: </Text>
+                  <Text style={[styles.textLogValue, { flex: 1 }]}>{dailyLog.notes}</Text>
                 </View>
-             )}
+              )}
+            </View>
           </View>
-        </View>
         ) : (
           <Text style={styles.noRecordText}>There is no record for this day.</Text>
         )}
@@ -237,9 +237,9 @@ export default function CalendarScreen({ onNavigate, session }) {
         </TouchableOpacity>
 
         {/* Backdated Edit Button */}
-        <TouchableOpacity 
-            style={styles.editButton} 
-            onPress={() => onNavigate({ screen: 'LogDaily', params: { date: selectedDate.toISOString() } })}
+        <TouchableOpacity
+          style={styles.editButton}
+          onPress={() => onNavigate({ screen: 'LogDaily', params: { date: selectedDate.toISOString() } })}
         >
           <Feather name="plus-circle" size={18} color="#147C78" style={{ marginRight: 8 }} />
           <Text style={styles.editButtonText}>
@@ -439,7 +439,7 @@ const styles = StyleSheet.create({
     fontWeight: "bold", // Bolder
     fontSize: 18, // Larger
   },
-  
+
   /* ====== Summary Card Styles ====== */
   summaryCard: {
     flexDirection: 'row',
