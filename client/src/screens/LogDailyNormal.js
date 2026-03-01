@@ -21,7 +21,7 @@ const getLevelValue = (level) => {
 const formatToEnum = (val) => val ? String(val).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : null;
  
 // --- Custom Component: กล่องกรอกตัวเลขพร้อมหน่วยข้างใน ---
-const UnitInput = ({ value, onChangeText, unit, width }) => (
+const UnitInput = ({ value, onChangeText, unit, width, maxLength }) => (
     <View style={{
         flexDirection: 'row',
         alignItems: 'center',
@@ -32,7 +32,7 @@ const UnitInput = ({ value, onChangeText, unit, width }) => (
         borderRadius: 8,
         height: 38,
         width: width || 100,
-        paddingHorizontal: 8
+        paddingHorizontal: 6
     }}>
         <TextInput
             style={{
@@ -46,10 +46,11 @@ const UnitInput = ({ value, onChangeText, unit, width }) => (
             placeholder="0"
             placeholderTextColor="#999"
             keyboardType="numeric"
+            maxLength={maxLength}
             value={value !== null && value !== undefined ? String(value) : ""}
             onChangeText={onChangeText}
         />
-        <Text style={{ fontSize: 14, color: '#999', marginLeft: 10 }}>
+        <Text style={{ fontSize: 13, color: '#999', marginLeft: 4 }}>
             {unit}
         </Text>
     </View>
@@ -197,13 +198,13 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
  
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
                             <Text style={{ width: 85, fontSize: 14, color: theme.textLabel }}>Consume</Text>
-                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="ml" width={70} />
+                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="meals" width={85} maxLength={2} />
                             <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
  
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
-                            <UnitInput value={foodIntake} onChangeText={setFoodIntake} unit="g" width={60} />
+                            <UnitInput value={foodIntake} onChangeText={setFoodIntake} unit="g" width={85} maxLength={4} />
                             <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
@@ -213,7 +214,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Water</Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
-                            <UnitInput value={waterIntake} onChangeText={setWaterIntake} unit="ml" width={70} />
+                            <UnitInput value={waterIntake} onChangeText={setWaterIntake} unit="ml" width={85} maxLength={4} />
                             <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
@@ -270,9 +271,22 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                     </View>
  
                     {/* --- Save Button --- */}
-                    <TouchableOpacity style={{ backgroundColor: '#A5D6C9', borderRadius: 12, height: 55, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }} onPress={handleSave} disabled={loading}>
+                    <TouchableOpacity 
+                        style={{ 
+                            backgroundColor: (foodType && consumeMeals && foodIntake && waterIntake && urineLevel && stoolLevel) ? '#00796B' : '#4DB6AC', 
+                            borderRadius: 12, 
+                            height: 55, 
+                            flexDirection: 'row', 
+                            justifyContent: 'center', 
+                            alignItems: 'center', 
+                            marginBottom: 20,
+                            opacity: (foodType && consumeMeals && foodIntake && waterIntake && urineLevel && stoolLevel) ? 1 : 0.7
+                        }} 
+                        onPress={handleSave} 
+                        disabled={loading}
+                    >
                         <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#fff', marginRight: 8 }}>{loading ? "Saving..." : "Save Event"}</Text>
-                        <Ionicons name="checkmark-circle-outline" size={24} color="#fff" />
+                        <Ionicons name="checkmark-circle-outline" size={24} color="#fcfcfcff" />
                     </TouchableOpacity>
                 </ScrollView>
             </LinearGradient>
@@ -508,27 +522,86 @@ export default function LogDaily(props) {
     const [behaviorTags, setBehaviorTags] = useState([]);
     const [respiratoryTags, setRespiratoryTags] = useState([]);
     const [notes, setNotes] = useState(null);
+    const [hasSavedNormalData, setHasSavedNormalData] = useState(false); // Track if normal data exists in DB
 
-    useEffect(() => { if (session?.user) fetchCatId(); }, [session]);
+    useEffect(() => { 
+        if (session?.user) {
+            fetchCatIdAndLog();
+        } 
+    }, [session, initialDate]);
 
-    const fetchCatId = async () => {
-        const { data } = await supabase.from('cats').select('id').eq('owner_id', session.user.id).single();
-        if (data) setCatId(data.id);
+    const fetchCatIdAndLog = async () => {
+        const { data: catData } = await supabase.from('cats').select('id').eq('owner_id', session.user.id).single();
+        if (catData) {
+            setCatId(catData.id);
+            await fetchExistingLog(catData.id);
+        }
+    };
+
+    const fetchExistingLog = async (catId) => {
+        const logDate = initialDate ? new Date(initialDate) : new Date();
+        const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
+
+        const { data: dailyLog } = await supabase
+            .from('daily_logs')
+            .select(`
+                id,
+                log_type,
+                normal_logs (*),
+                something_off_logs (*)
+            `)
+            .eq('cat_id', catId)
+            .eq('log_date', logDateStr)
+            .single();
+
+        if (dailyLog) {
+            if (dailyLog.normal_logs && dailyLog.normal_logs.length > 0) {
+                setHasSavedNormalData(true);
+                const normal = dailyLog.normal_logs[0];
+                setFoodType(normal.food_type);
+                setConsumeMeals(normal.meals_per_day !== null && normal.meals_per_day !== undefined ? String(normal.meals_per_day) : '');
+                setFoodIntake(normal.total_food_grams !== null && normal.total_food_grams !== undefined ? String(normal.total_food_grams) : '');
+                setWaterIntake(normal.water_ml_per_day !== null && normal.water_ml_per_day !== undefined ? String(normal.water_ml_per_day) : '');
+                
+                const levelToNum = (lvl) => {
+                    if(lvl === 'very_high') return 5;
+                    if(lvl === 'high') return 4;
+                    if(lvl === 'normal') return 3;
+                    if(lvl === 'low') return 2;
+                    if(lvl === 'very_low') return 1;
+                    return null;
+                };
+
+                setUrineLevel(levelToNum(normal.urine_level));
+                setStoolLevel(levelToNum(normal.stool_level));
+            }
+            if (dailyLog.something_off_logs && dailyLog.something_off_logs.length > 0) {
+                const off = dailyLog.something_off_logs[0];
+                setIsVomitChecked(off.has_vomit);
+                setVomitColor(off.vomit_type);
+                setIsDiarrheaChecked(off.has_diarrhea);
+                setDiarrheaColor(off.diarrhea_type);
+                setBehaviorTags(off.behavior_energy || []);
+                setRespiratoryTags(off.respiratory_physical || []);
+                setNotes(off.notes || null);
+            }
+        }
     };
 
     const handleSaveNormal = async () => {
         if (!catId) return Alert.alert("Error", "No cat profile found");
 
-        const isNormalDataComplete =
-            foodType !== null &&
-            (consumeMeals !== null && consumeMeals !== '') &&
-            (foodIntake !== null && foodIntake !== '') &&
-            (waterIntake !== null && waterIntake !== '') &&
-            urineLevel !== null &&
-            stoolLevel !== null;
+        const missingFields = [];
+        if (foodType === null) missingFields.push("Type of food");
+        if (consumeMeals === null || consumeMeals.toString().trim() === '') missingFields.push("Consume amount");
+        if (foodIntake === null || foodIntake.toString().trim() === '') missingFields.push("Total food quantity");
+        if (waterIntake === null || waterIntake.toString().trim() === '') missingFields.push("Total water quantity");
+        if (urineLevel === null) missingFields.push("Urine level");
+        if (stoolLevel === null) missingFields.push("Stool level");
 
-        if (!isNormalDataComplete) {
-            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก (Please complete all data missing)");
+
+        if (missingFields.length > 0) {
+            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก\n(Missing: " + missingFields.join(', ') + ")");
         }
 
         await saveData();
@@ -537,23 +610,53 @@ export default function LogDaily(props) {
     const handleSaveSomethingOff = async () => {
         if (!catId) return Alert.alert("Error", "No cat profile found");
 
-        const hasSomethingOffData = isVomitChecked || isDiarrheaChecked || (behaviorTags && behaviorTags.length > 0) || (respiratoryTags && respiratoryTags.length > 0) || (notes && notes.trim() !== '');
+        const missingFields = [];
+        if (isVomitChecked && !vomitColor) missingFields.push("Vomit Color");
+        if (isDiarrheaChecked && !diarrheaColor) missingFields.push("Diarrhea Color");
 
-        const isNormalDataComplete =
-            foodType !== null &&
-            (consumeMeals !== null && consumeMeals !== '') &&
-            (foodIntake !== null && foodIntake !== '') &&
-            (waterIntake !== null && waterIntake !== '') &&
-            urineLevel !== null &&
-            stoolLevel !== null;
-
-        if (hasSomethingOffData && !isNormalDataComplete) {
-            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลในหน้า Normal ให้ครบด้วย (Please complete all Normal data)");
+        if (missingFields.length > 0) {
+            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก\n(Missing: " + missingFields.join(', ') + ")");
         }
 
-        await saveData();
-    };
+        setLoading(true);
 
+        try {
+            const logDate = initialDate ? new Date(initialDate) : new Date();
+            const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
+
+            // วิ่งไปเช็คใน Supabase ว่า วันนี้ + แมวตัวนี้ มีข้อมูลหน้า Normal หรือยัง?
+            const { data: existingData, error: checkError } = await supabase
+                .from('daily_logs')
+                .select('id, normal_logs(id)')
+                .eq('cat_id', catId)
+                .eq('log_date', logDateStr)
+                .maybeSingle();
+
+            if (checkError) throw checkError;
+
+            // เช็คว่า normal_logs มีข้อมูลอยู่ข้างในไหม
+            const hasNormalInDB = existingData?.normal_logs && 
+                                  (Array.isArray(existingData.normal_logs) ? existingData.normal_logs.length > 0 : Object.keys(existingData.normal_logs).length > 0);
+
+            // เงื่อนไขเหล็ก: ถ้าใน DB ไม่มี Normal ให้บล็อคทันที!
+            if (!hasNormalInDB) {
+                setLoading(false);
+                return Alert.alert(
+                    "ไม่สามารถบันทึกได้", 
+                    "ต้องกรอกและบันทึกข้อมูลหน้า 'Normal' (อาหาร/น้ำ/ขับถ่าย) ของวันนี้ให้เสร็จก่อน ถึงจะสามารถบันทึกอาการ Something off ได้"
+                );
+            }
+
+            // ถ้าเช็คผ่านหมด (มีข้อมูล Normal แล้ว) ก็ให้เซฟ Something Off ลง DB ได้เลย
+            await saveData();
+
+        } catch (error) {
+            console.error("Check normal data error:", error);
+            Alert.alert("Error", "เกิดข้อผิดพลาดในการตรวจสอบข้อมูล");
+            setLoading(false);
+        }
+    };
+    
     const saveData = async () => {
         if (!catId) return Alert.alert("Error", "No cat profile found");
         setLoading(true);
@@ -574,37 +677,42 @@ export default function LogDaily(props) {
 
             if (dailyError) throw dailyError;
 
-            // Step 2: UPSERT normal_logs (child) - Use upsert with onConflict on daily_log_id
-            const { error: normalError } = await supabase
-                .from('normal_logs')
-                .upsert({
-                    daily_log_id: dailyLog.id,
-                    food_type: foodType,
-                    meals_per_day: consumeMeals !== null && consumeMeals !== '' ? Number(consumeMeals) : 0,
-                    total_food_grams: foodIntake !== null && foodIntake !== '' ? Number(foodIntake) : 0,
-                    water_ml_per_day: waterIntake !== null && waterIntake !== '' ? Number(waterIntake) : 0,
-                    urine_level: getLevelValue(urineLevel),
-                    stool_level: getLevelValue(stoolLevel),
-                }, { onConflict: 'daily_log_id' });
+            if (status === 'Normal') {
+                // Step 2: UPSERT normal_logs (child) - Use upsert with onConflict on daily_log_id
+                const { error: normalError } = await supabase
+                    .from('normal_logs')
+                    .upsert({
+                        daily_log_id: dailyLog.id,
+                        food_type: foodType,
+                        meals_per_day: consumeMeals !== null && consumeMeals !== '' ? Number(consumeMeals) : 0,
+                        total_food_grams: foodIntake !== null && foodIntake !== '' ? Number(foodIntake) : 0,
+                        water_ml_per_day: waterIntake !== null && waterIntake !== '' ? Number(waterIntake) : 0,
+                        urine_level: getLevelValue(urineLevel),
+                        stool_level: getLevelValue(stoolLevel),
+                    }, { onConflict: 'daily_log_id' });
 
-            if (normalError) throw normalError;
+                if (normalError) throw normalError;
+            } else {
+                // Step 3: UPSERT something_off_logs (child)
+                const { error: offError } = await supabase
+                    .from('something_off_logs')
+                    .upsert({  
+                        daily_log_id: dailyLog.id,
+                        has_vomit: isVomitChecked,
+                        vomit_type: isVomitChecked ? formatToEnum(vomitColor) : null,
+                        has_diarrhea: isDiarrheaChecked,
+                        diarrhea_type: isDiarrheaChecked ? formatToEnum(diarrheaColor) : null,
+                        
+                        // 🌟 แก้ไขให้ใช้ Array เหมือนเดิม ตามฐานข้อมูลที่เป็น text[]
+                        behavior_energy: behaviorTags.length > 0 ? behaviorTags : null,
+                        respiratory_physical: respiratoryTags.length > 0 ? respiratoryTags : null,
+                        
+                        notes: notes || null,
+                    }, { onConflict: 'daily_log_id' }); // อย่าลืมใส่ onConflict ด้วยนะครับ
 
-            // Step 3: UPSERT something_off_logs (child) - Use upsert with onConflict on daily_log_id
-            const { error: offError } = await supabase
-                .from('something_off_logs')
-                .upsert({
-                    daily_log_id: dailyLog.id,
-                    has_vomit: isVomitChecked,
-                    vomit_type: isVomitChecked ? formatToEnum(vomitColor) : null,
-                    has_diarrhea: isDiarrheaChecked,
-                    diarrhea_type: isDiarrheaChecked ? formatToEnum(diarrheaColor) : null,
-                    behavior_energy: behaviorTags.length > 0 ? behaviorTags : null,
-                    respiratory_physical: respiratoryTags.length > 0 ? respiratoryTags : null,
-                    notes: notes || null,
-                }, { onConflict: 'daily_log_id' });
-
-            if (offError) throw offError;
-
+                if (offError) throw offError;
+            }
+            
             Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
         } catch (err) {
             console.error('Save error:', err);
