@@ -10,12 +10,13 @@ import {
   Modal,
   Dimensions
 } from "react-native";
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle } from 'react-native-svg';
 import styles from "../styles/resultStyles";
+import supabase from "./config/supabaseClient"; // 🚨 เพิ่มบรรทัดนี้เพื่อดึงฐานข้อมูล
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ===== รายชื่อโรค =====
 const DISEASE_OPTIONS = [
@@ -48,14 +49,13 @@ const getRiskColor = (riskLevel) => {
 const getOverallRiskDetails = (score) => {
   if (score === null || score === undefined || score === "No Data") return { label: "No Data", color: "#B0B0B0", text: "No Data" };
   const numScore = Number(score);
-  if (isNaN(numScore) || numScore === 0) return { label: "0", color: "#B0B0B0", text: "Extreme Risk" };
-  if (numScore >= 91) return { label: `${numScore}%`, color: "#2ecc71", text: "Good Health" };
-  if (numScore >= 71) return { label: `${numScore}%`, color: "#1abc9c", text: "Low Risk" };
-  if (numScore >= 61) return { label: `${numScore}%`, color: "#f1c40f", text: "Moderate Risk" };
-  if (numScore >= 51) return { label: `${numScore}%`, color: "#e67e22", text: "High Risk" };
-  if (numScore >= 41) return { label: `${numScore}%`, color: "#d35400", text: "Severe Risk" };
-  if (numScore >= 31) return { label: `${numScore}%`, color: "#c0392b", text: "Serious Risk" };
-  return { label: `${numScore}%`, color: "#e74c3c", text: "Extreme Risk" };
+  if (isNaN(numScore) || numScore === 0) return { label: "0", color: "#B0B0B0", text: "No Data" };
+
+  if (numScore >= 91) return { label: `${numScore}%`, color: "#e74c3c", text: "Extreme Risk" };
+  if (numScore >= 71) return { label: `${numScore}%`, color: "#e67e22", text: "High Risk" };
+  if (numScore >= 51) return { label: `${numScore}%`, color: "#f1c40f", text: "Moderate Risk" };
+  if (numScore >= 21) return { label: `${numScore}%`, color: "#1abc9c", text: "Low Risk" };
+  return { label: `${numScore}%`, color: "#2ecc71", text: "Normal" };
 };
 
 const formatPreventionData = (data) => {
@@ -83,7 +83,7 @@ const formatCounselingData = (data) => {
 const ResultScreenFactory = {
   async fetchAssessment(catId) {
     try {
-      const API_URL = "http://10.0.2.2:3000/api/assessment";
+      const API_URL = "http://10.0.2.2:3000/api/assessment"; // 💡 แก้ IP ถ้าเทสบนมือถือจริง
       const response = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -122,7 +122,7 @@ const ResultScreenFactory = {
   }
 };
 
-export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
+export default function ResultScreen({ onBack, onSave, onNavigate, route, session }) {
   const insets = useSafeAreaInsets();
   const [loadingData, setLoadingData] = useState(true);
   const [loadingGuidance, setLoadingGuidance] = useState(false);
@@ -137,36 +137,48 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
   const [summaryTitle, setSummaryTitle] = useState("");
   const [summaryDesc, setSummaryDesc] = useState("");
 
-  const catId = route?.params?.catId;
+  // 🚨 สร้าง State ไว้รอรับ ID แมว
+  const [catId, setCatId] = useState(route?.params?.catId || null);
 
+  // 🚨 Effect ที่ 1: ถ้าไม่ได้รับ catId มาจากหน้าก่อน ให้ดึงจากฐานข้อมูลเอง
+  useEffect(() => {
+    const fetchCat = async () => {
+      if (catId) return; // ถ้ามีอยู่แล้วไม่ต้องดึงใหม่
+
+      try {
+        let currentSession = session;
+        if (!currentSession) {
+          const { data } = await supabase.auth.getSession();
+          currentSession = data?.session;
+        }
+
+        if (currentSession?.user?.id) {
+          const { data, error } = await supabase
+            .from('cats')
+            .select('id')
+            .eq('owner_id', currentSession.user.id)
+            .limit(1)
+            .single();
+
+          if (data) {
+            setCatId(data.id);
+          } else {
+            // ถ้าไม่มีแมวเลยจริงๆ
+            setShowNoDataModal(true);
+            setLoadingData(false);
+          }
+        }
+      } catch (err) {
+        console.log("Error fetching cat ID:", err);
+      }
+    };
+    fetchCat();
+  }, [session, catId]);
+
+  // 🚨 Effect ที่ 2: เมื่อได้ catId มาแล้ว ค่อยส่งไปประเมินที่ Server
   useEffect(() => {
     const loadInitialData = async () => {
-      // ==========================================
-      // 🚨 MOCK DATA สำหรับทดสอบ Donut Chart และ UI
-      // (ถ้าต้องการใช้ข้อมูลจริงจาก API ให้ลบ หรือ Comment ล็อคนี้ออก)
-      // ==========================================
-      setLoadingData(true);
-      setTimeout(() => {
-        setRiskData([
-          { label: "Kidney Disease", value: "Moderate", score: 68 },
-          { label: "Diabetes", value: "Low", score: 25 },
-          { label: "Urolithiasis", value: "Normal", score: 10 },
-          { label: "Gum Disease", value: "High", score: 85 },
-          { label: "Feline Panleukopenia", value: "Extreme", score: 98 },
-        ]);
-        setOverallScore(68); // ทดสอบคะแนนความเสี่ยงโดยรวม (Overall Score)
-        setSummaryTitle("ความเสี่ยงระดับปานกลาง");
-        setSummaryDesc("จากข้อมูลเบื้องต้นพบความเสี่ยงบางประการ ควรติดตามอาการน้องแมวอย่างใกล้ชิด");
-        setLoadingData(false);
-      }, 800); // จำลองการโหลด 0.8 วินาที
-      return;
-      // ==========================================
-
-      if (!catId) {
-        setShowNoDataModal(true);
-        setLoadingData(false);
-        return;
-      }
+      if (!catId) return; // 💡 รอให้ได้ catId มาก่อนค่อยทำงาน
 
       setLoadingData(true);
       try {
@@ -182,7 +194,8 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
           setSummaryTitle(result.summaryTitle || "");
           setSummaryDesc(result.summaryDesc || "");
 
-          if (result.overallRisk === "No Data" || result.overallScore === "No Data") {
+          // แจ้งเตือนเมื่อไม่มีข้อมูลของวันนี้
+          if (result.requireTodayLog || result.overallRisk === "No Data" || result.overallScore === 0) {
             setShowNoDataModal(true);
           }
 
@@ -259,9 +272,9 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
       >
         <View style={customStyles.modalOverlay}>
           <View style={customStyles.modalContainer}>
-            <Text style={customStyles.modalTitle}>ยังไม่มีข้อมูลสุขภาพ</Text>
+            <Text style={customStyles.modalTitle}>ขาดข้อมูลของวันนี้</Text>
             <Text style={customStyles.modalText}>
-              AI ต้องการข้อมูลประจำวัน (Daily Log) เพื่อใช้ประเมินความเสี่ยง ไปบันทึกข้อมูลของน้องแมวตอนนี้เลยไหม?
+              ระบบประเมินความเสี่ยงจำเป็นต้องใช้ข้อมูลสุขภาพอัปเดตล่าสุดของ "วันนี้" ไปบันทึก Daily Log ตอนนี้เลยไหม?
             </Text>
             <View style={customStyles.modalButtonRow}>
               <TouchableOpacity
@@ -274,7 +287,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
                 style={[customStyles.modalButton, customStyles.modalButtonConfirm]}
                 onPress={() => {
                   setShowNoDataModal(false);
-                  if (onNavigate) onNavigate('LogDaily');
+                  if (onNavigate) onNavigate({ screen: 'LogDaily' });
                 }}
               >
                 <Text style={customStyles.modalButtonConfirmText}>บันทึกเลย</Text>
@@ -294,7 +307,6 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
         <View style={styles.circleWrapper}>
           <View style={styles.circleBg}>
             <Svg width="180" height="180" style={{ position: 'absolute', transform: [{ rotate: '-90deg' }] }}>
-              {/* Background Track Circle */}
               <Circle
                 cx="90"
                 cy="90"
@@ -303,7 +315,6 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
                 strokeWidth="16"
                 fill="none"
               />
-              {/* Foreground Progress Circle */}
               {clampedScore > 0 && (
                 <Circle
                   cx="90"
@@ -355,17 +366,15 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
 
         <Text style={styles.sectionTitle}>Recommended Approach</Text>
 
-        {/* Card 1: Disease Prevention */}
-        <View style={[styles.card, { zIndex: 2000, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 40, alignSelf: 'center', height: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
+        <View style={[styles.card, { zIndex: 2000, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 40, alignSelf: 'center', minHeight: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
           <Text style={styles.cardTitle}>Disease Prevention</Text>
 
-          <View style={{ marginBottom: 15, marginTop: 10, zIndex: 3000, width: '38%' }}>
+          <View style={{ marginBottom: 15, marginTop: 10, zIndex: 3000, width: '45%' }}>
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => setIsDropdownOpen(!isDropdownOpen)}
               style={customStyles.dropdownHeader}
             >
-              {/* ✅ แก้ไข: ใช้ flexShrink: 1 แทน flex: 1 และใส่ paddingRight เพื่อป้องกันไม่ให้ข้อความไปดันลูกศร */}
               <Text
                 style={{ fontSize: 11, color: selectedConditionLabel ? '#000' : '#888', flexShrink: 1, paddingRight: 8 }}
                 numberOfLines={1}
@@ -373,7 +382,6 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
               >
                 {selectedConditionLabel || "เลือกโรค..."}
               </Text>
-              {/* ลูกศรตอนนี้จะเกาะอยู่ริมขวาเสมอ ไม่กระเด็นออกนอกกล่องแล้ว */}
               <Text style={{ fontSize: 12, color: '#666' }}>{isDropdownOpen ? "▲" : "▼"}</Text>
             </TouchableOpacity>
 
@@ -425,8 +433,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
           )}
         </View>
 
-        {/* Card 2: Counseling */}
-        <View style={[styles.card, { zIndex: 1000, marginTop: 5, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 40, alignSelf: 'center', height: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
+        <View style={[styles.card, { zIndex: 1000, marginTop: 5, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 40, alignSelf: 'center', minHeight: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
           <Text style={styles.cardTitle}>Counseling</Text>
           {loadingGuidance ? (
             <View style={styles.loadingContainer}>
@@ -454,7 +461,6 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
           )}
         </View>
 
-        {/* Save Assessment Button */}
         <TouchableOpacity
           style={{
             backgroundColor: '#1abc9c',
@@ -478,7 +484,6 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
 }
 
 const customStyles = StyleSheet.create({
-  // ✅ แก้ไข: เพิ่ม paddingHorizontal: 12 เพื่อให้ลูกศรมีระยะห่างจากขอบขวา และข้อความไม่ชิดซ้ายจนเกินไป
   dropdownHeader: {
     borderWidth: 1,
     borderColor: '#E0E0E0',
