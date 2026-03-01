@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, Modal, ActivityIndicator, Alert, Platform, Animated, Easing, useWindowDimensions } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
@@ -9,6 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import AlertEngine, { AlertEvents } from '../services/AlertEngine';
 import supabase from './config/supabaseClient';
 import AddPostScreen from './AddPostScreen';
+import HomeHeader from '../components/HomeHeader';
 
 const GRID_GAP = 10;
 const GRID_PADDING = 16;
@@ -328,288 +330,274 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     }
 
     return (
-        <LinearGradient colors={['#F5FBFB', '#F5FBFB']} style={{ flex: 1 }}>
-            <SafeAreaView style={styles.container}>
-                {/* Header */}
-                <Animated.View
-                    style={[
-                        styles.header,
-                        { paddingTop: 8 },
-                        {
-                            opacity: headerAnim,
-                            transform: [
-                                {
-                                    translateY: headerAnim.interpolate({
-                                        inputRange: [0, 1],
-                                        outputRange: [-12, 0],
-                                    }),
-                                },
-                            ],
-                        },
-                    ]}
-                >
-                    <TouchableOpacity onPress={onBack} style={styles.backButton} activeOpacity={0.85}>
-                        <Ionicons name="chevron-back" size={22} color="#1C1C1E" />
-                    </TouchableOpacity>
-                    <View style={styles.brandContainer}>
-                        <Text style={styles.brandText}>NEK</Text>
-                        <Ionicons name="paw" size={16} color="#22A6A4" />
-                        <Text style={styles.brandText}>CARE</Text>
-                    </View>
-                    <View style={styles.headerRight}>
+        <View style={{ flex: 1, backgroundColor: '#F5FBFB' }}>
+            <StatusBar style="dark" translucent backgroundColor="transparent" />
+            <LinearGradient colors={['#F4FAF9', '#E0F2F1']} style={{ flex: 1 }}>
+                <SafeAreaView style={styles.container}>
+                    {/* Header */}
+                    <HomeHeader
+                        leftComponent={
+                            <TouchableOpacity onPress={onBack} style={styles.backButton} activeOpacity={0.85}>
+                                <Ionicons name="chevron-back" size={22} color="#1C1C1E" />
+                            </TouchableOpacity>
+                        }
+                        rightComponent={
+                            <View style={styles.headerRight}>
+                                <TouchableOpacity
+                                    style={styles.headerPill}
+                                    onPress={() => setShowStatsModal(true)}
+                                    activeOpacity={0.7}
+                                >
+                                    <MaterialCommunityIcons name="cat" size={14} color="#0C5A58" />
+                                    <Text style={styles.headerPillText}>{images.length}</Text>
+                                </TouchableOpacity>
+                            </View>
+                        }
+                    />
+
+                    <View style={styles.zoneSwitchWrap}>
                         <TouchableOpacity
-                            style={styles.headerPill}
-                            onPress={() => setShowStatsModal(true)}
-                            activeOpacity={0.7}
+                            style={[styles.zoneChip, activeZone === 'live' && styles.zoneChipActive]}
+                            onPress={() => setActiveZone('live')}
+                            activeOpacity={0.85}
                         >
-                            <MaterialCommunityIcons name="cat" size={14} color="#0C5A58" />
-                            <Text style={styles.headerPillText}>{images.length}</Text>
+                            <Ionicons name="flash-outline" size={14} color={activeZone === 'live' ? '#FFFFFF' : '#0C5A58'} />
+                            <Text style={[styles.zoneChipText, activeZone === 'live' && styles.zoneChipTextActive]}>Live ({liveImages.length})</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.zoneChip, activeZone === 'saved' && styles.zoneChipActive]}
+                            onPress={() => setActiveZone('saved')}
+                            activeOpacity={0.85}
+                        >
+                            <Ionicons name="heart-outline" size={14} color={activeZone === 'saved' ? '#FFFFFF' : '#0C5A58'} />
+                            <Text style={[styles.zoneChipText, activeZone === 'saved' && styles.zoneChipTextActive]}>Saved ({sortedSavedImages.length})</Text>
                         </TouchableOpacity>
                     </View>
-                </Animated.View>
 
-                <View style={styles.zoneSwitchWrap}>
-                    <TouchableOpacity
-                        style={[styles.zoneChip, activeZone === 'live' && styles.zoneChipActive]}
-                        onPress={() => setActiveZone('live')}
-                        activeOpacity={0.85}
-                    >
-                        <Ionicons name="flash-outline" size={14} color={activeZone === 'live' ? '#FFFFFF' : '#0C5A58'} />
-                        <Text style={[styles.zoneChipText, activeZone === 'live' && styles.zoneChipTextActive]}>Live ({liveImages.length})</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.zoneChip, activeZone === 'saved' && styles.zoneChipActive]}
-                        onPress={() => setActiveZone('saved')}
-                        activeOpacity={0.85}
-                    >
-                        <Ionicons name="heart-outline" size={14} color={activeZone === 'saved' ? '#FFFFFF' : '#0C5A58'} />
-                        <Text style={[styles.zoneChipText, activeZone === 'saved' && styles.zoneChipTextActive]}>Saved ({sortedSavedImages.length})</Text>
-                    </TouchableOpacity>
-                </View>
-
-                {/* Grid */}
-                {loading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#00695C" />
-                    </View>
-                ) : (
-                    <Animated.View
-                        style={{
-                            flex: 1,
-                            opacity: pageAnim,
-                            transform: [
-                                {
-                                    translateY: pageAnim.interpolate({
-                                        inputRange: [0, 1],
-                                        outputRange: [10, 0],
-                                    }),
-                                },
-                            ],
-                        }}
-                    >
-                        <FlatList
-                            key={`gallery-${columnCount}`}
-                            data={zoneData}
-                            renderItem={renderItem}
-                            keyExtractor={item => item.id}
-                            numColumns={columnCount}
-                            contentContainerStyle={styles.gridContent}
-                            columnWrapperStyle={styles.columnWrapper}
-                            ListHeaderComponent={
-                                <View style={styles.galleryIntroCard}>
-                                    <View style={styles.galleryIntroIconWrap}>
-                                        <Ionicons name="images-outline" size={18} color="#0C5A58" />
+                    {/* Grid */}
+                    {loading ? (
+                        <View style={styles.loadingContainer}>
+                            <ActivityIndicator size="large" color="#00695C" />
+                        </View>
+                    ) : (
+                        <Animated.View
+                            style={{
+                                flex: 1,
+                                opacity: pageAnim,
+                                transform: [
+                                    {
+                                        translateY: pageAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [10, 0],
+                                        }),
+                                    },
+                                ],
+                            }}
+                        >
+                            <FlatList
+                                key={`gallery-${columnCount}`}
+                                data={zoneData}
+                                renderItem={renderItem}
+                                keyExtractor={item => item.id}
+                                numColumns={columnCount}
+                                contentContainerStyle={styles.gridContent}
+                                columnWrapperStyle={styles.columnWrapper}
+                                ListHeaderComponent={
+                                    <View style={styles.galleryIntroCard}>
+                                        <View style={styles.galleryIntroIconWrap}>
+                                            <Ionicons name="images-outline" size={18} color="#0C5A58" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.galleryIntroText}>{activeZone === 'live' ? 'Live Activity Feed' : 'Your Saved Cat Moments'}</Text>
+                                            <Text style={styles.galleryIntroSubText}>
+                                                {activeZone === 'live'
+                                                    ? 'Auto-updates from recent detections'
+                                                    : 'Only snapshots you kept'}
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.simulateButton}
+                                            onPress={() => {
+                                                AlertEngine.logPendingIdentity({
+                                                    behaviorLabel: Math.random() > 0.5 ? 'eating' : 'grooming',
+                                                    confidence: 0.92,
+                                                    cropSnapshot: 'https://placekitten.com/g/200/300',
+                                                    sessionId: 'test_' + Date.now(),
+                                                    source: 'Manual Simulator',
+                                                    isAbnormal: false
+                                                });
+                                            }}
+                                        >
+                                            <Text style={styles.simulateText}>TEST</Text>
+                                        </TouchableOpacity>
                                     </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.galleryIntroText}>{activeZone === 'live' ? 'Live Activity Feed' : 'Your Saved Cat Moments'}</Text>
-                                        <Text style={styles.galleryIntroSubText}>
+                                }
+                                ListEmptyComponent={
+                                    <View style={styles.emptyState}>
+                                        <Ionicons name="images-outline" size={64} color="#B0BEC5" />
+                                        <Text style={styles.emptyText}>{activeZone === 'live' ? 'No live snapshots now' : 'No saved snapshots yet'}</Text>
+                                        <Text style={styles.emptySubText}>
                                             {activeZone === 'live'
-                                                ? 'Auto-updates from recent detections'
-                                                : 'Only snapshots you kept'}
+                                                ? 'New detections will appear here in real time'
+                                                : 'Tap Keep on a snapshot to save it here'}
                                         </Text>
                                     </View>
+                                }
+                            />
+                        </Animated.View>
+                    )}
+
+                    {/* Image Preview Modal */}
+                    <Modal visible={!!selectedImage} transparent={true} animationType="fade">
+                        <View style={styles.modalContainer}>
+                            {selectedImage && (
+                                <View style={[styles.previewCard, { width: Math.min(screenWidth - 24, 430), marginTop: insets.top > 0 ? 0 : 12 }]}>
+                                    <View style={styles.previewHeader}>
+                                        <View style={styles.previewTitleWrap}>
+                                            <View style={styles.previewPawBadge}>
+                                                <Ionicons name="paw" size={14} color="#FFFFFF" />
+                                            </View>
+                                            <Text style={styles.previewHeaderText}>Cat Moment</Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.previewCloseButton}
+                                            onPress={() => setSelectedImage(null)}
+                                            activeOpacity={0.85}
+                                        >
+                                            <Ionicons name="close" size={20} color="#1F2937" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <View style={styles.previewImageWrap}>
+                                        <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} resizeMode="contain" />
+                                    </View>
+
+                                    <View style={styles.imageInfo}>
+                                        <Text style={styles.imageTitle}>{selectedImage.title}</Text>
+                                        <Text style={styles.imageDate}>{new Date(selectedImage.date).toLocaleString()}</Text>
+                                    </View>
+
+                                    <View style={styles.actionContainer}>
+                                        <TouchableOpacity style={[styles.actionButton, styles.keepButton]} onPress={handleKeepToggle}>
+                                            <Ionicons name={isSaved(selectedImage.id) ? 'heart' : 'heart-outline'} size={22} color="#E6517A" />
+                                            <Text style={[styles.actionText, styles.keepActionText]}>
+                                                {isSaved(selectedImage.id) ? 'Kept' : 'Keep'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={[styles.actionButton, styles.saveButton]} onPress={requestSaveToDevice}>
+                                            <Ionicons name="download-outline" size={22} color="#1A56C5" />
+                                            <Text style={[styles.actionText, styles.saveActionText]}>Save</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={[styles.actionButton, styles.deleteButton]} onPress={requestDeleteConfirm}>
+                                            <Ionicons name="trash-outline" size={22} color="#FF5252" />
+                                            <Text style={[styles.actionText, { color: '#FF5252' }]}>Delete</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={[styles.actionButton, styles.shareButton]} onPress={() => setShowShareModal(true)}>
+                                            <Ionicons name="share-social-outline" size={22} color="#0C5A58" />
+                                            <Text style={[styles.actionText, styles.shareActionText]}>Share</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            )}
+                        </View>
+                    </Modal>
+
+                    <Modal visible={saveConfirmVisible} transparent animationType="fade" onRequestClose={() => setSaveConfirmVisible(false)}>
+                        <View style={styles.confirmOverlay}>
+                            <View style={styles.confirmContent}>
+                                <View style={styles.confirmIconCircle}>
+                                    <Ionicons name="download-outline" size={36} color="#2A69C7" />
+                                </View>
+                                <Text style={styles.confirmTitle}>Save Snapshot</Text>
+                                <Text style={styles.confirmText}>Do you want to save this snapshot to your device gallery?</Text>
+                                <View style={styles.confirmActions}>
+                                    <TouchableOpacity style={styles.confirmCancel} onPress={() => setSaveConfirmVisible(false)}>
+                                        <Text style={styles.confirmCancelText}>Cancel</Text>
+                                    </TouchableOpacity>
                                     <TouchableOpacity
-                                        style={styles.simulateButton}
-                                        onPress={() => {
-                                            AlertEngine.logPendingIdentity({
-                                                behaviorLabel: Math.random() > 0.5 ? 'eating' : 'grooming',
-                                                confidence: 0.92,
-                                                cropSnapshot: 'https://placekitten.com/g/200/300',
-                                                sessionId: 'test_' + Date.now(),
-                                                source: 'Manual Simulator',
-                                                isAbnormal: false
-                                            });
+                                        style={styles.confirmPrimary}
+                                        onPress={async () => {
+                                            setSaveConfirmVisible(false);
+                                            await handleSaveToDevice();
                                         }}
                                     >
-                                        <Text style={styles.simulateText}>TEST</Text>
+                                        <Text style={styles.confirmPrimaryText}>Save</Text>
                                     </TouchableOpacity>
                                 </View>
-                            }
-                            ListEmptyComponent={
-                                <View style={styles.emptyState}>
-                                    <Ionicons name="images-outline" size={64} color="#B0BEC5" />
-                                    <Text style={styles.emptyText}>{activeZone === 'live' ? 'No live snapshots now' : 'No saved snapshots yet'}</Text>
-                                    <Text style={styles.emptySubText}>
-                                        {activeZone === 'live'
-                                            ? 'New detections will appear here in real time'
-                                            : 'Tap Keep on a snapshot to save it here'}
-                                    </Text>
-                                </View>
-                            }
-                        />
-                    </Animated.View>
-                )}
+                            </View>
+                        </View>
+                    </Modal>
 
-                {/* Image Preview Modal */}
-                <Modal visible={!!selectedImage} transparent={true} animationType="fade">
-                    <View style={styles.modalContainer}>
-                        {selectedImage && (
-                            <View style={[styles.previewCard, { width: Math.min(screenWidth - 24, 430), marginTop: insets.top > 0 ? 0 : 12 }]}>
-                                <View style={styles.previewHeader}>
-                                    <View style={styles.previewTitleWrap}>
-                                        <View style={styles.previewPawBadge}>
-                                            <Ionicons name="paw" size={14} color="#FFFFFF" />
-                                        </View>
-                                        <Text style={styles.previewHeaderText}>Cat Moment</Text>
-                                    </View>
+                    <Modal visible={deleteConfirmVisible} transparent animationType="fade" onRequestClose={() => setDeleteConfirmVisible(false)}>
+                        <View style={styles.confirmOverlay}>
+                            <View style={styles.confirmContent}>
+                                <View style={styles.confirmIconCircle}>
+                                    <Ionicons name="alert-circle-outline" size={36} color="#2A69C7" />
+                                </View>
+                                <Text style={styles.confirmTitle}>Delete Snapshot</Text>
+                                <Text style={styles.confirmText}>Are you sure you want to delete this snapshot? This cannot be undone.</Text>
+                                <View style={styles.confirmActions}>
+                                    <TouchableOpacity style={styles.confirmCancel} onPress={() => setDeleteConfirmVisible(false)}>
+                                        <Text style={styles.confirmCancelText}>Cancel</Text>
+                                    </TouchableOpacity>
                                     <TouchableOpacity
-                                        style={styles.previewCloseButton}
-                                        onPress={() => setSelectedImage(null)}
-                                        activeOpacity={0.85}
+                                        style={styles.confirmPrimary}
+                                        onPress={async () => {
+                                            setDeleteConfirmVisible(false);
+                                            await handleDelete();
+                                        }}
                                     >
-                                        <Ionicons name="close" size={20} color="#1F2937" />
-                                    </TouchableOpacity>
-                                </View>
-
-                                <View style={styles.previewImageWrap}>
-                                    <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} resizeMode="contain" />
-                                </View>
-
-                                <View style={styles.imageInfo}>
-                                    <Text style={styles.imageTitle}>{selectedImage.title}</Text>
-                                    <Text style={styles.imageDate}>{new Date(selectedImage.date).toLocaleString()}</Text>
-                                </View>
-
-                                <View style={styles.actionContainer}>
-                                    <TouchableOpacity style={[styles.actionButton, styles.keepButton]} onPress={handleKeepToggle}>
-                                        <Ionicons name={isSaved(selectedImage.id) ? 'heart' : 'heart-outline'} size={22} color="#E6517A" />
-                                        <Text style={[styles.actionText, styles.keepActionText]}>
-                                            {isSaved(selectedImage.id) ? 'Kept' : 'Keep'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity style={[styles.actionButton, styles.saveButton]} onPress={requestSaveToDevice}>
-                                        <Ionicons name="download-outline" size={22} color="#1A56C5" />
-                                        <Text style={[styles.actionText, styles.saveActionText]}>Save</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity style={[styles.actionButton, styles.deleteButton]} onPress={requestDeleteConfirm}>
-                                        <Ionicons name="trash-outline" size={22} color="#FF5252" />
-                                        <Text style={[styles.actionText, { color: '#FF5252' }]}>Delete</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity style={[styles.actionButton, styles.shareButton]} onPress={() => setShowShareModal(true)}>
-                                        <Ionicons name="share-social-outline" size={22} color="#0C5A58" />
-                                        <Text style={[styles.actionText, styles.shareActionText]}>Share</Text>
+                                        <Text style={styles.confirmPrimaryText}>Delete</Text>
                                     </TouchableOpacity>
                                 </View>
                             </View>
-                        )}
-                    </View>
-                </Modal>
+                        </View>
+                    </Modal>
 
-                <Modal visible={saveConfirmVisible} transparent animationType="fade" onRequestClose={() => setSaveConfirmVisible(false)}>
-                    <View style={styles.confirmOverlay}>
-                        <View style={styles.confirmContent}>
-                            <View style={styles.confirmIconCircle}>
-                                <Ionicons name="download-outline" size={36} color="#2A69C7" />
-                            </View>
-                            <Text style={styles.confirmTitle}>Save Snapshot</Text>
-                            <Text style={styles.confirmText}>Do you want to save this snapshot to your device gallery?</Text>
-                            <View style={styles.confirmActions}>
-                                <TouchableOpacity style={styles.confirmCancel} onPress={() => setSaveConfirmVisible(false)}>
-                                    <Text style={styles.confirmCancelText}>Cancel</Text>
-                                </TouchableOpacity>
+                    <Modal visible={showStatsModal} transparent animationType="slide">
+                        <View style={styles.statsModalOverlay}>
+                            <View style={styles.statsModalContent}>
+                                <View style={styles.statsHeader}>
+                                    <Text style={styles.statsTitle}>Capture Statistics</Text>
+                                    <TouchableOpacity onPress={() => setShowStatsModal(false)}>
+                                        <Ionicons name="close" size={24} color="#1F2937" />
+                                    </TouchableOpacity>
+                                </View>
+
+                                <View style={styles.statsGrid}>
+                                    <View style={styles.statBox}>
+                                        <Text style={styles.statNum}>{images.length}</Text>
+                                        <Text style={styles.statLabel}>Total Captures</Text>
+                                    </View>
+                                    <View style={styles.statBox}>
+                                        <Text style={styles.statNum}>{liveImages.length}</Text>
+                                        <Text style={styles.statLabel}>Recent Live</Text>
+                                    </View>
+                                    <View style={styles.statBox}>
+                                        <Text style={styles.statNum}>{savedSnapshots.length}</Text>
+                                        <Text style={styles.statLabel}>Saved Moments</Text>
+                                    </View>
+                                </View>
+
                                 <TouchableOpacity
-                                    style={styles.confirmPrimary}
-                                    onPress={async () => {
-                                        setSaveConfirmVisible(false);
-                                        await handleSaveToDevice();
-                                    }}
+                                    style={styles.closeStatsBtn}
+                                    onPress={() => setShowStatsModal(false)}
                                 >
-                                    <Text style={styles.confirmPrimaryText}>Save</Text>
+                                    <Text style={styles.closeStatsText}>Dismiss</Text>
                                 </TouchableOpacity>
                             </View>
                         </View>
-                    </View>
-                </Modal>
-
-                <Modal visible={deleteConfirmVisible} transparent animationType="fade" onRequestClose={() => setDeleteConfirmVisible(false)}>
-                    <View style={styles.confirmOverlay}>
-                        <View style={styles.confirmContent}>
-                            <View style={styles.confirmIconCircle}>
-                                <Ionicons name="alert-circle-outline" size={36} color="#2A69C7" />
-                            </View>
-                            <Text style={styles.confirmTitle}>Delete Snapshot</Text>
-                            <Text style={styles.confirmText}>Are you sure you want to delete this snapshot? This cannot be undone.</Text>
-                            <View style={styles.confirmActions}>
-                                <TouchableOpacity style={styles.confirmCancel} onPress={() => setDeleteConfirmVisible(false)}>
-                                    <Text style={styles.confirmCancelText}>Cancel</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.confirmPrimary}
-                                    onPress={async () => {
-                                        setDeleteConfirmVisible(false);
-                                        await handleDelete();
-                                    }}
-                                >
-                                    <Text style={styles.confirmPrimaryText}>Delete</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </View>
-                </Modal>
-
-                <Modal visible={showStatsModal} transparent animationType="slide">
-                    <View style={styles.statsModalOverlay}>
-                        <View style={styles.statsModalContent}>
-                            <View style={styles.statsHeader}>
-                                <Text style={styles.statsTitle}>Capture Statistics</Text>
-                                <TouchableOpacity onPress={() => setShowStatsModal(false)}>
-                                    <Ionicons name="close" size={24} color="#1F2937" />
-                                </TouchableOpacity>
-                            </View>
-
-                            <View style={styles.statsGrid}>
-                                <View style={styles.statBox}>
-                                    <Text style={styles.statNum}>{images.length}</Text>
-                                    <Text style={styles.statLabel}>Total Captures</Text>
-                                </View>
-                                <View style={styles.statBox}>
-                                    <Text style={styles.statNum}>{liveImages.length}</Text>
-                                    <Text style={styles.statLabel}>Recent Live</Text>
-                                </View>
-                                <View style={styles.statBox}>
-                                    <Text style={styles.statNum}>{savedSnapshots.length}</Text>
-                                    <Text style={styles.statLabel}>Saved Moments</Text>
-                                </View>
-                            </View>
-
-                            <TouchableOpacity
-                                style={styles.closeStatsBtn}
-                                onPress={() => setShowStatsModal(false)}
-                            >
-                                <Text style={styles.closeStatsText}>Dismiss</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </Modal>
-            </SafeAreaView>
-        </LinearGradient>
+                    </Modal>
+                </SafeAreaView>
+            </LinearGradient>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#F5FBFB',
+        backgroundColor: 'transparent',
     },
     header: {
         flexDirection: 'row',
@@ -638,13 +626,13 @@ const styles = StyleSheet.create({
     brandContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        justifyContent: 'center',
     },
     brandText: {
-        fontSize: 22,
-        color: '#1C1C1E',
+        fontSize: 20,
+        color: '#00695C',
         fontFamily: 'Inter-Bold',
-        letterSpacing: 0.4,
+        marginHorizontal: 3,
     },
     headerRight: {
         width: 42,

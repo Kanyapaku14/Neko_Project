@@ -4,14 +4,14 @@ const styles = StyleSheet.create({
   /* ====== หน้า HOME ====== */
   container: {
     flex: 1,
-    backgroundColor: "transparent", // ✅ Remove solid bg to see main texture
+    backgroundColor: "#f5fffdff",
   },
 
   /* ====== HEADER ====== */
   headerBg: {
     height: 60,
     width: "100%",
-    backgroundColor: "transparent", 
+    backgroundColor: "#f5fffdff",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -29,7 +29,7 @@ const styles = StyleSheet.create({
      alignItems: 'center',
      flexDirection: 'row',
      gap: 5,
-     zIndex: -1, 
+     zIndex: 1,
   },
 
   title: {

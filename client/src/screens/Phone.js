@@ -15,6 +15,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { PanResponder, Linking } from "react-native";
+import { StatusBar } from "expo-status-bar";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get("window");
@@ -25,7 +26,16 @@ const BRANDS = [
     { id: "ezviz", name: "EZVIZ", icon: "video-check" },
 ];
 
-export default function Phone({ onBack, onConfirm, initialStep, brand, mode = 'new' }) {
+export default function Phone({
+    onBack,
+    onConfirm,
+    initialStep,
+    brand,
+    mode = 'new',
+    isHideBackButton = false,
+    isHideSkipButton = false
+}) {
+    // Fixed ReferenceError: hideBack
     const getStepNumber = (step) => {
         if (typeof step === 'number') return step;
         switch (step) {
@@ -237,307 +247,310 @@ export default function Phone({ onBack, onConfirm, initialStep, brand, mode = 'n
     };
 
     return (
-        <LinearGradient colors={["#F4FAF9", "#E0F2F1"]} style={{ flex: 1 }}>
-            <SafeAreaView style={styles.container}>
-                {/* Header with Logo */}
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={handlePrevStep} style={styles.backBtnStyle} activeOpacity={0.85}>
-                        <Ionicons name="chevron-back" size={22} color="#1C1C1E" />
-                    </TouchableOpacity>
+        <View style={{ flex: 1, backgroundColor: '#f5fffdff' }}>
+            <StatusBar style="dark" translucent backgroundColor="transparent" />
+            <LinearGradient colors={["#f5fffdff", "#f5fffdff"]} style={{ flex: 1 }}>
+                <SafeAreaView style={styles.container}>
+                    {/* Header */}
+                    <View style={styles.header}>
+                        {!isHideBackButton && currentStep === 1 ? (
+                            <TouchableOpacity onPress={onBack} style={styles.backBtnStyle} activeOpacity={0.85}>
+                                <Ionicons name="chevron-back" size={28} color="#333" />
+                            </TouchableOpacity>
+                        ) : !isHideBackButton || currentStep > 1 ? (
+                            <TouchableOpacity onPress={handlePrevStep} style={styles.backBtnStyle} activeOpacity={0.85}>
+                                <Ionicons name="chevron-back" size={28} color="#333" />
+                            </TouchableOpacity>
+                        ) : (
+                            <View style={styles.backBtnStyle} />
+                        )}
 
-                    <View style={styles.titleContainer}>
-                        <Text style={styles.titleLogo}>NEK</Text>
-                        <Ionicons name="paw" size={18} color="#4FD1C5" />
-                        <Text style={styles.titleLogo}>CARE</Text>
+                        <View style={styles.titleContainer}>
+                            <Text style={styles.headerTitle}>Camera Setup</Text>
+                        </View>
+
+                        <View style={styles.headerIconBtn} />
                     </View>
 
-                    <View style={styles.headerIconBtn} />
-                </View>
+                    {/* Step Indicator Below Header */}
+                    {!isUpdateMode && (
+                        <View style={styles.stepBar}>
+                            {[1, 2, 3, 4].map((s) => (
+                                <View key={s} style={[styles.stepDot, currentStep >= s && styles.stepDotActive]} />
+                            ))}
+                        </View>
+                    )}
 
-                {/* Step Indicator Below Header */}
-                {!isUpdateMode && (
-                    <View style={styles.stepBar}>
-                        {[1, 2, 3, 4].map((s) => (
-                            <View key={s} style={[styles.stepDot, currentStep >= s && styles.stepDotActive]} />
-                        ))}
-                    </View>
-                )}
-
-                <Animated.View style={{ flex: 1, opacity: stepAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }}>
-                    <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 60, paddingHorizontal: 20 }}>
-
-                        {currentStep === 1 && (
-                            <View>
-                                <View style={styles.hero}>
-                                    <View style={styles.catIconContainer}>
-                                        <MaterialCommunityIcons name="cat" size={40} color="#00695C" />
+                    <Animated.View style={{ flex: 1, opacity: stepAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }}>
+                        <ScrollView
+                            contentContainerStyle={{ flexGrow: 1, paddingBottom: 60, paddingHorizontal: 20 }}
+                            showsVerticalScrollIndicator={false}
+                            scrollEnabled={currentStep !== 3}
+                            bounces={currentStep !== 3}
+                        >
+                            {currentStep === 1 && (
+                                <View>
+                                    <View style={styles.hero}>
+                                        <View style={styles.catIconContainer}>
+                                            <MaterialCommunityIcons name="cat" size={40} color="#00695C" />
+                                        </View>
+                                        <Text style={styles.title}>Choose Camera Brand</Text>
+                                        <Text style={styles.subtitle}>Select the brand you are currently using</Text>
                                     </View>
-                                    <Text style={styles.title}>Choose Camera Brand</Text>
-                                    <Text style={styles.subtitle}>Select the brand you are currently using</Text>
-                                </View>
-                                <View style={styles.cardContainer}>
-                                    {BRANDS.map((brand) => {
-                                        const isSelected = selectedBrand === brand.id;
-                                        return (
-                                            <Animated.View key={brand.id} style={{ transform: [{ scale: brandScales[brand.id] || 1 }] }}>
-                                                <TouchableOpacity
-                                                    activeOpacity={0.9}
-                                                    onPress={() => {
-                                                        setSelectedBrand(brand.id);
-                                                        animateSelection(brand.id);
-                                                    }}
-                                                    style={[styles.brandCard, isSelected && styles.brandCardSelected]}
-                                                >
-                                                    <View style={styles.brandHeader}>
-                                                        <View style={[styles.brandIconBg, isSelected && { backgroundColor: '#E0F2F1' }]}>
-                                                            <MaterialCommunityIcons name={brand.icon} size={24} color={isSelected ? "#00695C" : "#90A4AE"} />
+                                    <View style={styles.cardContainer}>
+                                        {BRANDS.map((brand) => {
+                                            const isSelected = selectedBrand === brand.id;
+                                            return (
+                                                <Animated.View key={brand.id} style={{ transform: [{ scale: brandScales[brand.id] || 1 }] }}>
+                                                    <TouchableOpacity
+                                                        activeOpacity={0.9}
+                                                        onPress={() => {
+                                                            setSelectedBrand(brand.id);
+                                                            animateSelection(brand.id);
+                                                        }}
+                                                        style={[styles.brandCard, isSelected && styles.brandCardSelected]}
+                                                    >
+                                                        <View style={styles.brandHeader}>
+                                                            <View style={[styles.brandIconBg, isSelected && { backgroundColor: '#E0F2F1' }]}>
+                                                                <MaterialCommunityIcons name={brand.icon} size={24} color={isSelected ? "#00695C" : "#90A4AE"} />
+                                                            </View>
+                                                            <View style={{ flex: 1, marginLeft: 12 }}>
+                                                                <Text style={[styles.brandName, isSelected && { color: '#00695C' }]}>{brand.name}</Text>
+                                                            </View>
                                                         </View>
-                                                        <View style={{ flex: 1, marginLeft: 12 }}>
-                                                            <Text style={[styles.brandName, isSelected && { color: '#00695C' }]}>{brand.name}</Text>
-                                                        </View>
-                                                    </View>
+                                                    </TouchableOpacity>
+                                                </Animated.View>
+                                            );
+                                        })}
+                                    </View>
+
+                                    {/* Animated Login Reveal */}
+                                    <Animated.View style={{
+                                        opacity: loginRevealAnim,
+                                        transform: [
+                                            {
+                                                translateY: loginRevealAnim.interpolate({
+                                                    inputRange: [0, 1],
+                                                    outputRange: [20, 0]
+                                                })
+                                            }
+                                        ]
+                                    }}>
+                                        {selectedBrand && !isConnecting && (
+                                            <View style={{ marginTop: 30 }}>
+                                                <Text style={[styles.subtitle, { marginBottom: 12 }]}>
+                                                    Log in to {BRANDS.find(b => b.id === selectedBrand)?.name} to link your camera feed.
+                                                </Text>
+                                                <TouchableOpacity style={styles.loginButton} onPress={handleLogin} disabled={isConnecting}>
+                                                    <LinearGradient colors={["#00BFA5", "#00897B"]} style={styles.gradientBtn}>
+                                                        <Text style={styles.loginText}>Connect Account</Text>
+                                                    </LinearGradient>
                                                 </TouchableOpacity>
-                                            </Animated.View>
-                                        );
-                                    })}
+                                            </View>
+                                        )}
+
+                                        {/* Minimal Connecting State */}
+                                        {isConnecting && (
+                                            <View style={{ marginTop: 40, alignItems: 'center', justifyContent: 'center' }}>
+                                                <ActivityIndicator size="large" color="#00897B" />
+                                                <Text style={[styles.subtitle, { marginTop: 12, color: '#00695C', fontWeight: '600' }]}>
+                                                    Connecting to your camera...
+                                                </Text>
+                                            </View>
+                                        )}
+                                    </Animated.View>
                                 </View>
+                            )}
 
-                                {/* Animated Login Reveal */}
-                                <Animated.View style={{
-                                    opacity: loginRevealAnim,
-                                    transform: [
-                                        {
-                                            translateY: loginRevealAnim.interpolate({
-                                                inputRange: [0, 1],
-                                                outputRange: [20, 0]
-                                            })
-                                        }
-                                    ]
-                                }}>
-                                    {selectedBrand && !isConnecting && (
-                                        <View style={{ marginTop: 30 }}>
-                                            <Text style={[styles.subtitle, { marginBottom: 12 }]}>
-                                                Log in to {BRANDS.find(b => b.id === selectedBrand)?.name} to link your camera feed.
-                                            </Text>
-                                            <TouchableOpacity style={styles.loginButton} onPress={handleLogin} disabled={isConnecting}>
-                                                <LinearGradient colors={["#00BFA5", "#00897B"]} style={styles.gradientBtn}>
-                                                    <Text style={styles.loginText}>Connect Account</Text>
-                                                </LinearGradient>
-                                            </TouchableOpacity>
+                            {currentStep === 2 && (
+                                <View style={{ flex: 1, justifyContent: 'space-between' }}>
+                                    <View>
+                                        <View style={styles.hero}>
+                                            <View style={styles.liveBadge}><Text style={styles.liveText}>LIVE STREAM</Text></View>
+                                            <Text style={styles.title}>Test Live Feed</Text>
+                                            <Text style={styles.subtitle}>Verify the camera feed is working correctly.</Text>
                                         </View>
-                                    )}
-
-                                    {/* Minimal Connecting State */}
-                                    {isConnecting && (
-                                        <View style={{ marginTop: 40, alignItems: 'center', justifyContent: 'center' }}>
-                                            <ActivityIndicator size="large" color="#00897B" />
-                                            <Text style={[styles.subtitle, { marginTop: 12, color: '#00695C', fontWeight: '600' }]}>
-                                                Connecting to your camera...
-                                            </Text>
-                                        </View>
-                                    )}
-                                </Animated.View>
-
-                                {/* Skip button moved outside ScrollView to be fixed at the bottom */}
-                            </View>
-                        )}
-
-                        {currentStep === 2 && (
-                            <View style={{ flex: 1, justifyContent: 'space-between' }}>
-                                <View>
-                                    <View style={styles.hero}>
-                                        <View style={styles.liveBadge}><Text style={styles.liveText}>LIVE STREAM</Text></View>
-                                        <Text style={styles.title}>Test Live Feed</Text>
-                                        <Text style={styles.subtitle}>Verify the camera feed is working correctly.</Text>
-                                    </View>
-                                    <View style={styles.previewCard}>
-                                        <View style={styles.previewPlaceholder}>
-                                            <MaterialCommunityIcons name="cat" size={48} color="rgba(255,255,255,0.2)" />
-                                            <Text style={styles.previewText}>Camera Feed Optimized for Cats</Text>
+                                        <View style={styles.previewCard}>
+                                            <View style={styles.previewPlaceholder}>
+                                                <MaterialCommunityIcons name="cat" size={48} color="rgba(255,255,255,0.2)" />
+                                                <Text style={styles.previewText}>Camera Feed Optimized for Cats</Text>
+                                            </View>
                                         </View>
                                     </View>
+                                    <TouchableOpacity style={[styles.nextButton, { marginTop: 20 }]} onPress={() => setCurrentStep(3)}>
+                                        <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
+                                            <Text style={styles.nextText}>Next: Set Zones</Text>
+                                        </LinearGradient>
+                                    </TouchableOpacity>
                                 </View>
-                                <TouchableOpacity style={[styles.nextButton, { marginTop: 20 }]} onPress={() => setCurrentStep(3)}>
-                                    <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
-                                        <Text style={styles.nextText}>Next: Set Zones</Text>
-                                    </LinearGradient>
-                                </TouchableOpacity>
-                            </View>
-                        )}
+                            )}
 
-                        {currentStep === 3 && (
-                            <View style={{ flex: 1, justifyContent: 'space-between' }}>
-                                <View>
-                                    <View style={styles.hero}>
-                                        <Text style={styles.title}>Set Detection Zones</Text>
-                                        <Text style={styles.subtitle}>1. Choose a label 2. Tap and drag on the screen to draw the zone.</Text>
-                                    </View>
-
-                                    <View style={styles.tabContainer}>
-                                        <View style={styles.tabWrapper}>
-                                            <TouchableOpacity
-                                                style={[styles.tabBtn, activeZoneType === 'feeding' && styles.tabActive]}
-                                                onPress={() => setActiveZoneType('feeding')}
-                                            >
-                                                <MaterialCommunityIcons name="food-apple" size={18} color={activeZoneType === 'feeding' ? '#00695C' : '#90A4AE'} />
-                                                <Text style={[styles.tabText, activeZoneType === 'feeding' && styles.tabTextActive]}>Feeding</Text>
-                                            </TouchableOpacity>
-
-                                            <TouchableOpacity
-                                                style={[styles.tabBtn, activeZoneType === 'litter' && styles.tabActive]}
-                                                onPress={() => setActiveZoneType('litter')}
-                                            >
-                                                <MaterialCommunityIcons name="delete-outline" size={18} color={activeZoneType === 'litter' ? '#00695C' : '#90A4AE'} />
-                                                <Text style={[styles.tabText, activeZoneType === 'litter' && styles.tabTextActive]}>Litter Box</Text>
-                                            </TouchableOpacity>
+                            {currentStep === 3 && (
+                                <View style={{ flex: 1, justifyContent: 'space-between' }}>
+                                    <View>
+                                        <View style={styles.hero}>
+                                            <Text style={styles.title}>Set Detection Zones</Text>
+                                            <Text style={styles.subtitle}>1. Choose a label 2. Tap and drag on the screen to draw the zone.</Text>
                                         </View>
-                                    </View>
 
-                                    <View style={styles.minimalWorkspace}>
-                                        {/* Universal Draw Responder on Background */}
-                                        <View style={styles.minimalPreviewBg} {...drawPanResponder}>
-                                            {/* Grid Helper (Subtle) */}
-                                            <View style={styles.gridOverlay} pointerEvents="none" />
+                                        <View style={styles.tabContainer}>
+                                            <View style={styles.tabWrapper}>
+                                                <TouchableOpacity
+                                                    style={[styles.tabBtn, activeZoneType === 'feeding' && styles.tabActive]}
+                                                    onPress={() => setActiveZoneType('feeding')}
+                                                >
+                                                    <MaterialCommunityIcons name="food-apple" size={18} color={activeZoneType === 'feeding' ? '#00695C' : '#90A4AE'} />
+                                                    <Text style={[styles.tabText, activeZoneType === 'feeding' && styles.tabTextActive]}>Feeding</Text>
+                                                </TouchableOpacity>
 
-                                            {/* Feeding Zone Display */}
-                                            {feedingZone.w > 0 && (
-                                                <View style={[styles.zoneFeedingMinimal, { top: feedingZone.y, left: feedingZone.x, width: feedingZone.w, height: feedingZone.h, borderColor: '#26A69A', borderStyle: 'dashed' }]}>
-                                                    <View style={[styles.zoneTagMinimal, { backgroundColor: '#26A69A' }]}>
-                                                        <MaterialCommunityIcons name="paw" size={10} color="#FFF" style={{ marginRight: 2 }} />
-                                                        <Text style={styles.zoneTagText}>Feeding</Text>
+                                                <TouchableOpacity
+                                                    style={[styles.tabBtn, activeZoneType === 'litter' && styles.tabActive]}
+                                                    onPress={() => setActiveZoneType('litter')}
+                                                >
+                                                    <MaterialCommunityIcons name="delete-outline" size={18} color={activeZoneType === 'litter' ? '#00695C' : '#90A4AE'} />
+                                                    <Text style={[styles.tabText, activeZoneType === 'litter' && styles.tabTextActive]}>Litter Box</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        </View>
+
+                                        <View style={styles.minimalWorkspace}>
+                                            {/* Universal Draw Responder on Background */}
+                                            <View style={styles.minimalPreviewBg} {...drawPanResponder}>
+                                                {/* Grid Helper (Subtle) */}
+                                                <View style={styles.gridOverlay} pointerEvents="none" />
+
+                                                {/* Feeding Zone Display */}
+                                                {feedingZone.w > 0 && (
+                                                    <View style={[styles.zoneFeedingMinimal, { top: feedingZone.y, left: feedingZone.x, width: feedingZone.w, height: feedingZone.h, borderColor: '#26A69A', borderStyle: 'dashed' }]}>
+                                                        <View style={[styles.zoneTagMinimal, { backgroundColor: '#26A69A' }]}>
+                                                            <MaterialCommunityIcons name="paw" size={10} color="#FFF" style={{ marginRight: 2 }} />
+                                                            <Text style={styles.zoneTagText}>Feeding</Text>
+                                                        </View>
                                                     </View>
-                                                </View>
-                                            )}
+                                                )}
 
-                                            {/* Litter Zone Display */}
-                                            {litterZone.w > 0 && (
-                                                <View style={[styles.zoneLitterMinimal, { top: litterZone.y, left: litterZone.x, width: litterZone.w, height: litterZone.h, borderColor: '#00897B', borderStyle: 'dashed' }]}>
-                                                    <View style={[styles.zoneTagMinimal, { backgroundColor: '#00897B' }]}>
-                                                        <MaterialCommunityIcons name="paw" size={10} color="#FFF" style={{ marginRight: 2 }} />
-                                                        <Text style={styles.zoneTagText}>Litter</Text>
+                                                {/* Litter Zone Display */}
+                                                {litterZone.w > 0 && (
+                                                    <View style={[styles.zoneLitterMinimal, { top: litterZone.y, left: litterZone.x, width: litterZone.w, height: litterZone.h, borderColor: '#00897B', borderStyle: 'dashed' }]}>
+                                                        <View style={[styles.zoneTagMinimal, { backgroundColor: '#00897B' }]}>
+                                                            <MaterialCommunityIcons name="paw" size={10} color="#FFF" style={{ marginRight: 2 }} />
+                                                            <Text style={styles.zoneTagText}>Litter</Text>
+                                                        </View>
                                                     </View>
-                                                </View>
-                                            )}
+                                                )}
 
-                                            {isDrawing && (
-                                                <View style={styles.minimalDrawingBanner}>
-                                                    <Text style={styles.minimalDrawingText}>Drawing {activeZoneType} area...</Text>
-                                                </View>
-                                            )}
+                                                {isDrawing && (
+                                                    <View style={styles.minimalDrawingBanner}>
+                                                        <Text style={styles.minimalDrawingText}>Drawing {activeZoneType} area...</Text>
+                                                    </View>
+                                                )}
+                                            </View>
                                         </View>
                                     </View>
+
+                                    <TouchableOpacity
+                                        style={[styles.nextButton, { marginTop: 20 }]}
+                                        onPress={isUpdateMode ? handleUpdateZones : handleNextStep}
+                                    >
+                                        <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
+                                            <Text style={styles.nextText}>{isUpdateMode ? 'Update Zones' : 'Next: Complete'}</Text>
+                                        </LinearGradient>
+                                    </TouchableOpacity>
                                 </View>
+                            )}
 
-                                <TouchableOpacity
-                                    style={[styles.nextButton, { marginTop: 20 }]}
-                                    onPress={isUpdateMode ? handleUpdateZones : handleNextStep}
-                                >
-                                    <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
-                                        <Text style={styles.nextText}>{isUpdateMode ? 'Update Zones' : 'Next: Complete'}</Text>
-                                    </LinearGradient>
-                                </TouchableOpacity>
-                            </View>
-                        )}
-
-                        {currentStep === 4 && (
-                            <View style={{ flex: 1, justifyContent: 'space-between', paddingTop: 20 }}>
-                                <View style={{ alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-                                    <View style={{ width: 100, height: 100, borderRadius: 50, backgroundColor: '#E8F5E9', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }}>
-                                        <MaterialCommunityIcons name="check-circle" size={50} color="#4CAF50" />
+                            {currentStep === 4 && (
+                                <View style={{ flex: 1, justifyContent: 'space-between', paddingTop: 20 }}>
+                                    <View style={{ alignItems: 'center', justifyContent: 'center', flex: 1 }}>
+                                        <View style={{ width: 100, height: 100, borderRadius: 50, backgroundColor: '#E8F5E9', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }}>
+                                            <MaterialCommunityIcons name="check-circle" size={50} color="#4CAF50" />
+                                        </View>
+                                        <Text style={[styles.title, { fontSize: 28, marginBottom: 10 }]}>Ready to Monitor!</Text>
+                                        <Text style={[styles.subtitle, { textAlign: 'center', paddingHorizontal: 20, fontSize: 16 }]}>
+                                            Your AI health monitoring system is active and ready to keep an eye on your cat 🐾
+                                        </Text>
                                     </View>
-                                    <Text style={[styles.title, { fontSize: 28, marginBottom: 10 }]}>Ready to Monitor!</Text>
-                                    <Text style={[styles.subtitle, { textAlign: 'center', paddingHorizontal: 20, fontSize: 16 }]}>
-                                        Your AI health monitoring system is active and ready to keep an eye on your cat 🐾
-                                    </Text>
+                                    <TouchableOpacity style={[styles.nextButton, { width: '100%' }]} onPress={async () => {
+                                        await AsyncStorage.setItem('camera_setup_complete', 'true');
+                                        onConfirm();
+                                    }}>
+                                        <LinearGradient colors={["#A5D6A7", "#4CAF50"]} style={styles.gradientNext}>
+                                            <Text style={styles.nextText}>Start Monitoring</Text>
+                                        </LinearGradient>
+                                    </TouchableOpacity>
                                 </View>
-                                <TouchableOpacity style={[styles.nextButton, { width: '100%' }]} onPress={async () => {
-                                    await AsyncStorage.setItem('camera_setup_complete', 'true');
-                                    onConfirm();
-                                }}>
-                                    <LinearGradient colors={["#A5D6A7", "#4CAF50"]} style={styles.gradientNext}>
-                                        <Text style={styles.nextText}>Start Monitoring</Text>
-                                    </LinearGradient>
-                                </TouchableOpacity>
-                            </View>
-                        )}
-                    </ScrollView>
-                </Animated.View>
+                            )}
+                        </ScrollView>
+                    </Animated.View>
 
-                <Modal
-                    transparent
-                    visible={showUpdateConfirmModal}
-                    animationType="fade"
-                    onRequestClose={() => setShowUpdateConfirmModal(false)}
-                >
-                    <View style={styles.confirmOverlay}>
-                        <View style={styles.confirmCard}>
-                            <Text style={styles.confirmTitle}>Confirm Update</Text>
-                            <Text style={styles.confirmMessage}>Apply these detection zone changes?</Text>
-                            <View style={styles.confirmActions}>
-                                <TouchableOpacity
-                                    style={styles.confirmCancelBtn}
-                                    onPress={() => setShowUpdateConfirmModal(false)}
-                                >
-                                    <Text style={styles.confirmCancelText}>Cancel</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.confirmPrimaryBtn}
-                                    onPress={handleConfirmUpdateZones}
-                                >
-                                    <Text style={styles.confirmPrimaryText}>Confirm</Text>
-                                </TouchableOpacity>
+                    {/* Fixed Skip Button for Step 1 */}
+                    {currentStep === 1 && !isConnecting && !isUpdateMode && !isHideSkipButton && (
+                        <TouchableOpacity style={styles.fixedBottomButton} onPress={handleSkip}>
+                            <Text style={styles.skipButtonText}>Skip for now</Text>
+                        </TouchableOpacity>
+                    )}
+
+                    <Modal
+                        transparent
+                        visible={showUpdateConfirmModal}
+                        animationType="fade"
+                        onRequestClose={() => setShowUpdateConfirmModal(false)}
+                    >
+                        <View style={styles.confirmOverlay}>
+                            <View style={styles.confirmCard}>
+                                <Text style={styles.confirmTitle}>Confirm Update</Text>
+                                <Text style={styles.confirmMessage}>Apply these detection zone changes?</Text>
+                                <View style={styles.confirmActions}>
+                                    <TouchableOpacity
+                                        style={styles.confirmCancelBtn}
+                                        onPress={() => setShowUpdateConfirmModal(false)}
+                                    >
+                                        <Text style={styles.confirmCancelText}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.confirmPrimaryBtn}
+                                        onPress={handleConfirmUpdateZones}
+                                    >
+                                        <Text style={styles.confirmPrimaryText}>Confirm</Text>
+                                    </TouchableOpacity>
+                                </View>
                             </View>
                         </View>
-                    </View>
-                </Modal>
-
-                {/* Fixed Skip Button for Step 1 */}
-                {currentStep === 1 && !isConnecting && !isUpdateMode && (
-                    <TouchableOpacity style={styles.fixedBottomButton} onPress={handleSkip}>
-                        <Text style={styles.skipButtonText}>Skip for now</Text>
-                    </TouchableOpacity>
-                )}
-            </SafeAreaView>
-        </LinearGradient>
+                    </Modal>
+                </SafeAreaView>
+            </LinearGradient>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+        backgroundColor: '#f5fffdff',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: 20,
+        paddingTop: 12,
+        paddingBottom: 10,
+        backgroundColor: 'transparent',
     },
     headerIconBtn: {
-        width: 42,
-        height: 42,
+        width: 40,
+        height: 40,
         justifyContent: 'center',
-        alignItems: 'center',
+        alignItems: 'flex-end',
     },
     backBtnStyle: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
+        width: 40,
+        height: 40,
         justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#E5E5EA',
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 6,
-        elevation: 2,
+        alignItems: 'flex-start',
     },
     titleContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
+        flex: 1,
     },
     titleLogo: {
         fontSize: 20,
@@ -566,8 +579,10 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         fontSize: 18,
-        fontWeight: '700',
-        color: '#00695C',
+        fontFamily: 'Inter-Bold',
+        color: '#2F6A62',
+        textAlign: 'center',
+        flex: 1,
     },
     stepIndicatorContainer: {
         flexDirection: 'row',
@@ -741,20 +756,23 @@ const styles = StyleSheet.create({
     },
     brandCard: {
         backgroundColor: "#fff",
-        borderRadius: 24,
+        borderRadius: 16,
         padding: 20,
-        borderWidth: 1.5,
-        borderColor: "rgba(0,0,0,0.05)",
-        shadowColor: "#000",
-        shadowOpacity: 0.03,
+        borderWidth: 1,
+        borderColor: "#E5E5EA",
+        shadowColor: "#0F172A",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
         shadowRadius: 10,
-        elevation: 2,
+        elevation: 3,
     },
     brandCardSelected: {
-        borderColor: "#00897B",
+        borderColor: "#D1D1D6",
         elevation: 4,
-        shadowColor: "#00695C",
-        shadowOpacity: 0.3,
+        shadowColor: "#000",
+        shadowOpacity: 0.06,
+        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 2 },
     },
     brandHeader: {
         flexDirection: 'row',

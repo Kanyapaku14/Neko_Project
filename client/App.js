@@ -316,6 +316,8 @@ export default function App() {
             initialStep={screenParams?.initialStep}
             brand={screenParams?.brand}
             mode={screenParams?.mode}
+            isHideBackButton={screenParams?.isHideBackButton}
+            isHideSkipButton={screenParams?.isHideSkipButton}
             onBack={() => setAuthScreen(screenParams?.returnTo || 'Setting')}
             onConfirm={() => setAuthScreen(screenParams?.returnTo || 'Camera')}
           />
