@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../screens/config/supabaseClient';
 import { analyzeHealthLog } from '../utils/healthLogic';
 
-export default function useCameraData(session) {
+export default function useCameraData(session, cameraStatus) {
   const [data, setData] = useState(null);
 
   const fetchData = useCallback(async () => {
@@ -13,10 +13,15 @@ export default function useCameraData(session) {
       cats: 0,
       food: 0,
       litter: 0,
-      activity: [20, 45, 10, 80], // Mock graph data (DB lacks hourly activity)
+      activity: [20, 45, 10, 80, 50], // Mock graph data (5 points for 6h intervals)
       posture: {
         abnormal: { percent: 0, name: 'None' },
         normal: { percent: 100, name: 'Normal' }
+      },
+      behaviorAnalytics: {
+        energy: { active: 50, resting: 50 },
+        routine: { score: 100, status: "Loading" },
+        wellness: { score: 80, status: "Loading" }
       },
       settings: { monitoringMode: 'multi', selectedCats: [] }
     };
@@ -41,7 +46,8 @@ export default function useCameraData(session) {
 
         if (!catError && catsData) {
           newData.cats = catsData.length;
-          const catIds = catsData.map(c => c.id);
+          const catIdsList = catsData.map(c => c.id);
+          const catIds = catIdsList; // maintain reference for later use
 
           // Get today's logs (local date string YYYY-MM-DD)
           const now = new Date();
@@ -113,6 +119,27 @@ export default function useCameraData(session) {
             // For simplicity, we stick to today's insights as labeled
           }
         }
+        // 3. Fetch Behavior Analytics from Python API
+        try {
+          const API_URL = "http://10.0.2.2:3000/api/analytics/behavior";
+          const catIds = newData.cats > 0 ? (await supabase.from('cats').select('id').eq('owner_id', session.user.id)).data.map(c => c.id) : [];
+
+          if (catIds.length > 0) {
+            const res = await fetch(API_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ catId: catIds[0] }),
+            });
+            if (res.ok) {
+              const apiResult = await res.json();
+              if (apiResult.success && apiResult.data) {
+                newData.behaviorAnalytics = apiResult.data;
+              }
+            }
+          }
+        } catch (apiErr) {
+          console.warn("Failed to fetch behavior analytics:", apiErr);
+        }
       }
 
       setData(newData);
@@ -126,6 +153,57 @@ export default function useCameraData(session) {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Simulate live camera stats when DB is disconnected
+  useEffect(() => {
+    if (cameraStatus !== 'connected') return;
+
+    const interval = setInterval(() => {
+      setData(prev => {
+        if (!prev) return prev;
+
+        let newRecent = [...(prev.recentActivities || [
+          { id: 1, type: 'active', time: '2m ago', icon: 'run', color: '#00FF00' },
+          { id: 2, type: 'eating', time: '15m ago', icon: 'food', color: '#FFC800' },
+          { id: 3, type: 'grooming', time: '45m ago', icon: 'paw', color: '#00C8FF' },
+          { id: 4, type: 'toileting', time: '1h ago', icon: 'emoticon-poop', color: '#FF9600' },
+          { id: 5, type: 'resting', time: '3h ago', icon: 'sleep', color: '#C8C8C8' }
+        ])];
+
+        if (Math.random() > 0.8 && newRecent.length > 0) {
+          newRecent[0] = { ...newRecent[0], time: 'Just now' };
+        }
+
+        const newFood = prev.food + (Math.random() > 0.8 ? 1 : 0);
+        const newLitter = prev.litter + (Math.random() > 0.95 ? 1 : 0);
+
+        const act = [...(prev.activity || [20, 45, 10, 80, 50])];
+        if (Math.random() > 0.3) {
+          act[4] = Math.min(100, Math.max(0, act[4] + (Math.floor(Math.random() * 11) - 5)));
+        }
+
+        let norm = prev.posture.normal.percent;
+        if (Math.random() > 0.4) {
+          const diff = Math.floor(Math.random() * 7) - 3;
+          norm = Math.min(100, Math.max(0, norm + diff));
+        }
+
+        return {
+          ...prev,
+          recentActivities: newRecent,
+          food: newFood,
+          litter: newLitter,
+          activity: act,
+          posture: {
+            normal: { ...prev.posture.normal, percent: norm, name: prev.posture.normal.name || 'Normal' },
+            abnormal: { ...prev.posture.abnormal, percent: 100 - norm, name: prev.posture.abnormal.name || 'None' }
+          }
+        };
+      });
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [cameraStatus]);
 
   return { data, refetch: fetchData };
 }

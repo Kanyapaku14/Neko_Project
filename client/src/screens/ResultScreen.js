@@ -7,10 +7,14 @@ import {
   ActivityIndicator,
   Alert,
   StyleSheet,
-  Modal
+  Modal,
+  Dimensions
 } from "react-native";
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from "expo-linear-gradient";
+import Svg, { Circle } from 'react-native-svg';
 import styles from "../styles/resultStyles";
 
 // ===== รายชื่อโรค =====
@@ -39,6 +43,19 @@ const getRiskColor = (riskLevel) => {
     case "Extreme": return "#e74c3c";
     default: return "#bdc3c7";
   }
+};
+
+const getOverallRiskDetails = (score) => {
+  if (score === null || score === undefined || score === "No Data") return { label: "No Data", color: "#B0B0B0", text: "No Data" };
+  const numScore = Number(score);
+  if (isNaN(numScore) || numScore === 0) return { label: "0", color: "#B0B0B0", text: "Extreme Risk" };
+  if (numScore >= 91) return { label: `${numScore}%`, color: "#2ecc71", text: "Good Health" };
+  if (numScore >= 71) return { label: `${numScore}%`, color: "#1abc9c", text: "Low Risk" };
+  if (numScore >= 61) return { label: `${numScore}%`, color: "#f1c40f", text: "Moderate Risk" };
+  if (numScore >= 51) return { label: `${numScore}%`, color: "#e67e22", text: "High Risk" };
+  if (numScore >= 41) return { label: `${numScore}%`, color: "#d35400", text: "Severe Risk" };
+  if (numScore >= 31) return { label: `${numScore}%`, color: "#c0392b", text: "Serious Risk" };
+  return { label: `${numScore}%`, color: "#e74c3c", text: "Extreme Risk" };
 };
 
 const formatPreventionData = (data) => {
@@ -116,7 +133,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
   const [preventionData, setPreventionData] = useState(null);
   const [counselingData, setCounselingData] = useState(null);
   const [riskData, setRiskData] = useState(INITIAL_RISK_DATA);
-  const [overallRisk, setOverallRisk] = useState("Unknown");
+  const [overallScore, setOverallScore] = useState("No Data");
   const [summaryTitle, setSummaryTitle] = useState("");
   const [summaryDesc, setSummaryDesc] = useState("");
 
@@ -124,6 +141,27 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
 
   useEffect(() => {
     const loadInitialData = async () => {
+      // ==========================================
+      // 🚨 MOCK DATA สำหรับทดสอบ Donut Chart และ UI
+      // (ถ้าต้องการใช้ข้อมูลจริงจาก API ให้ลบ หรือ Comment ล็อคนี้ออก)
+      // ==========================================
+      setLoadingData(true);
+      setTimeout(() => {
+        setRiskData([
+          { label: "Kidney Disease", value: "Moderate", score: 68 },
+          { label: "Diabetes", value: "Low", score: 25 },
+          { label: "Urolithiasis", value: "Normal", score: 10 },
+          { label: "Gum Disease", value: "High", score: 85 },
+          { label: "Feline Panleukopenia", value: "Extreme", score: 98 },
+        ]);
+        setOverallScore(68); // ทดสอบคะแนนความเสี่ยงโดยรวม (Overall Score)
+        setSummaryTitle("ความเสี่ยงระดับปานกลาง");
+        setSummaryDesc("จากข้อมูลเบื้องต้นพบความเสี่ยงบางประการ ควรติดตามอาการน้องแมวอย่างใกล้ชิด");
+        setLoadingData(false);
+      }, 800); // จำลองการโหลด 0.8 วินาที
+      return;
+      // ==========================================
+
       if (!catId) {
         setShowNoDataModal(true);
         setLoadingData(false);
@@ -140,11 +178,11 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
             : INITIAL_RISK_DATA;
 
           setRiskData(validRiskData);
-          setOverallRisk(result.overallRisk || "No Data");
+          setOverallScore(result.overallScore !== undefined ? result.overallScore : result.overallRisk || "No Data");
           setSummaryTitle(result.summaryTitle || "");
           setSummaryDesc(result.summaryDesc || "");
 
-          if (result.overallRisk === "No Data") {
+          if (result.overallRisk === "No Data" || result.overallScore === "No Data") {
             setShowNoDataModal(true);
           }
 
@@ -198,6 +236,13 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
     );
   }
 
+  const numScore = Number(overallScore) || 0;
+  const clampedScore = isNaN(numScore) ? 0 : Math.max(0, Math.min(100, numScore));
+  const radius = 82;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (clampedScore / 100) * circumference;
+  const riskDetails = getOverallRiskDetails(overallScore);
+
   return (
     <LinearGradient
       colors={['#FFFFFF', '#B2E1DB']}
@@ -245,12 +290,37 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 150 }} nestedScrollEnabled={true}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} nestedScrollEnabled={true}>
         <View style={styles.circleWrapper}>
           <View style={styles.circleBg}>
-            <View style={styles.circleProgress} /><Text style={styles.riskText}>{overallRisk}</Text>
+            <Svg width="180" height="180" style={{ position: 'absolute', transform: [{ rotate: '-90deg' }] }}>
+              {/* Background Track Circle */}
+              <Circle
+                cx="90"
+                cy="90"
+                r={radius}
+                stroke="#E1ECEB"
+                strokeWidth="16"
+                fill="none"
+              />
+              {/* Foreground Progress Circle */}
+              {clampedScore > 0 && (
+                <Circle
+                  cx="90"
+                  cy="90"
+                  r={radius}
+                  stroke={riskDetails.color}
+                  strokeWidth="16"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={strokeDashoffset}
+                  strokeLinecap="round"
+                  fill="none"
+                />
+              )}
+            </Svg>
+            <Text style={[styles.riskText, { color: riskDetails.color, fontSize: riskDetails.label === "No Data" ? 22 : undefined }]}>{riskDetails.label}</Text>
           </View>
-          <Text style={styles.recommendText}>Health Assessment Result</Text>
+          <Text style={[styles.recommendText, { color: riskDetails.color }]}>{riskDetails.text}</Text>
           <Text style={styles.subText}>Overall Health Risk</Text>
         </View>
 
@@ -286,10 +356,10 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
         <Text style={styles.sectionTitle}>Recommended Approach</Text>
 
         {/* Card 1: Disease Prevention */}
-        <View style={[styles.card, { zIndex: 2000, elevation: 0, shadowOpacity: 0 }]}>
+        <View style={[styles.card, { zIndex: 2000, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 40, alignSelf: 'center', height: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
           <Text style={styles.cardTitle}>Disease Prevention</Text>
 
-          <View style={{ marginBottom: 15, zIndex: 3000, width: '55%' }}>
+          <View style={{ marginBottom: 15, marginTop: 10, zIndex: 3000, width: '38%' }}>
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -297,7 +367,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
             >
               {/* ✅ แก้ไข: ใช้ flexShrink: 1 แทน flex: 1 และใส่ paddingRight เพื่อป้องกันไม่ให้ข้อความไปดันลูกศร */}
               <Text
-                style={{ fontSize: 13, color: selectedConditionLabel ? '#000' : '#888', flexShrink: 1, paddingRight: 8 }}
+                style={{ fontSize: 11, color: selectedConditionLabel ? '#000' : '#888', flexShrink: 1, paddingRight: 8 }}
                 numberOfLines={1}
                 ellipsizeMode="tail"
               >
@@ -319,7 +389,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
                       setIsDropdownOpen(false);
                     }}
                   >
-                    <Text style={{ fontSize: 14, color: selectedConditionValue === item.value ? '#1abc9c' : '#333' }}>
+                    <Text style={{ fontSize: 11, color: selectedConditionValue === item.value ? '#1abc9c' : '#333' }}>
                       {item.label}
                     </Text>
                   </TouchableOpacity>
@@ -334,47 +404,73 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route }) {
               <Text style={styles.loadingText}>กำลังขอคำแนะนำจาก AI...</Text>
             </View>
           ) : (
-            <View>
+            <View style={{ flex: 1, paddingBottom: 10 }}>
               {preventionData ? (
-                <>
+                <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8, color: '#333' }}>
                     {preventionData.title}
                   </Text>
                   <Text style={styles.cardDesc}>
                     {formatPreventionData(preventionData)}
                   </Text>
-                </>
+                </View>
               ) : (
-                <Text style={styles.cardDesc}>กรุณาเลือกโรคด้านบนเพื่อดูคำแนะนำ</Text>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                  <Text style={[styles.cardDesc, { fontSize: 11, textAlign: 'center', color: '#888' }]}>
+                    กรุณาเลือกโรคด้านบนเพื่อดูคำแนะนำ
+                  </Text>
+                </View>
               )}
             </View>
           )}
         </View>
 
         {/* Card 2: Counseling */}
-        <View style={[styles.card, { zIndex: 1000, marginTop: 5, elevation: 0, shadowOpacity: 0 }]}>
+        <View style={[styles.card, { zIndex: 1000, marginTop: 5, elevation: 0, shadowOpacity: 0, width: SCREEN_WIDTH - 40, alignSelf: 'center', height: 204, borderWidth: 0.5, borderColor: '#A6A6A6' }]}>
           <Text style={styles.cardTitle}>Counseling</Text>
           {loadingGuidance ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color="#1abc9c" />
             </View>
           ) : (
-            <View>
+            <View style={{ flex: 1, paddingBottom: 10 }}>
               {counselingData ? (
-                <>
+                <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8, color: '#D32F2F' }}>
                     {counselingData.title}
                   </Text>
                   <Text style={styles.cardDesc}>
                     {formatCounselingData(counselingData)}
                   </Text>
-                </>
+                </View>
               ) : (
-                <Text style={styles.cardDesc}>ข้อมูลจะแสดงหลังจากเลือกโรคแล้ว</Text>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                  <Text style={[styles.cardDesc, { fontSize: 11, textAlign: 'center', color: '#888' }]}>
+                    ข้อมูลจะแสดงหลังจากเลือกโรคแล้ว
+                  </Text>
+                </View>
               )}
             </View>
           )}
         </View>
+
+        {/* Save Assessment Button */}
+        <TouchableOpacity
+          style={{
+            backgroundColor: '#1abc9c',
+            width: SCREEN_WIDTH - 60,
+            alignSelf: 'center',
+            paddingVertical: 14,
+            borderRadius: 12,
+            alignItems: 'center',
+            marginTop: 20,
+            marginBottom: 20,
+          }}
+          onPress={onSave}
+          activeOpacity={0.8}
+        >
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Save Assessment</Text>
+        </TouchableOpacity>
 
       </ScrollView>
     </LinearGradient>
@@ -385,14 +481,14 @@ const customStyles = StyleSheet.create({
   // ✅ แก้ไข: เพิ่ม paddingHorizontal: 12 เพื่อให้ลูกศรมีระยะห่างจากขอบขวา และข้อความไม่ชิดซ้ายจนเกินไป
   dropdownHeader: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderColor: '#E0E0E0',
+    borderRadius: 6,
+    paddingHorizontal: 10,
     backgroundColor: '#fff',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    height: 38
+    height: 32
   },
   dropdownList: { marginTop: 4, borderWidth: 1, borderColor: '#eee', borderRadius: 8, backgroundColor: '#fff', position: 'absolute', top: 38, left: 0, right: 0, zIndex: 9999, elevation: 5 },
   dropdownItem: { padding: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
