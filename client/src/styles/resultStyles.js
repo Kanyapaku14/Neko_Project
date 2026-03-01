@@ -29,7 +29,7 @@ export default StyleSheet.create({
   /* ===== Circle ===== */
   circleWrapper: {
     alignItems: "center",
-    marginTop: 20,
+    marginTop: 0,
   },
 
   circleBg: {
@@ -73,7 +73,7 @@ export default StyleSheet.create({
   /* ===== Summary ===== */
   summary: {
     paddingHorizontal: 20,
-    marginTop: 24,
+    marginTop: 0,
   },
 
   summaryTitle: {
@@ -91,7 +91,7 @@ export default StyleSheet.create({
 
   /* ===== Sections ===== */
   sectionTitle: {
-    marginTop: 24,
+    marginTop: 8,
     marginBottom: 8,
     paddingHorizontal: 20,
     fontSize: 14,
@@ -200,26 +200,26 @@ export default StyleSheet.create({
     color: "#FFFFFF",
   },
   optionItem: {
-  padding: 12,
-  borderRadius: 10,
-  borderWidth: 1,
-  borderColor: "#E5E7EB",
-  marginTop: 10,
-},
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginTop: 10,
+  },
 
-optionActive: {
-  backgroundColor: "#E6F7F1",
-  borderColor: "#2FBF9E",
-},
+  optionActive: {
+    backgroundColor: "#E6F7F1",
+    borderColor: "#2FBF9E",
+  },
 
-optionText: {
-  fontSize: 14,
-  color: "#374151",
-},
+  optionText: {
+    fontSize: 14,
+    color: "#374151",
+  },
 
-optionTextActive: {
-  color: "#2FBF9E",
-  fontWeight: "600",
-},
+  optionTextActive: {
+    color: "#2FBF9E",
+    fontWeight: "600",
+  },
 
 });
