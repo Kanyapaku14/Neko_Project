@@ -9,7 +9,8 @@ import {
     Animated,
     Easing,
     Dimensions,
-    ActivityIndicator
+    ActivityIndicator,
+    Modal,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
@@ -24,7 +25,7 @@ const BRANDS = [
     { id: "ezviz", name: "EZVIZ", icon: "video-check" },
 ];
 
-export default function Phone({ onBack, onConfirm, initialStep, brand }) {
+export default function Phone({ onBack, onConfirm, initialStep, brand, mode = 'new' }) {
     const getStepNumber = (step) => {
         if (typeof step === 'number') return step;
         switch (step) {
@@ -37,7 +38,8 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
         }
     };
 
-    const [currentStep, setCurrentStep] = useState(getStepNumber(initialStep));
+    const isUpdateMode = mode === 'update';
+    const [currentStep, setCurrentStep] = useState(isUpdateMode ? 3 : getStepNumber(initialStep));
     const [selectedBrand, setSelectedBrand] = useState(brand || null);
     const [connected, setConnected] = useState(brand ? true : false); // Assume connected if brand passed from settings
     const [isConnecting, setIsConnecting] = useState(false);
@@ -47,6 +49,7 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
     const [litterZone, setLitterZone] = useState({ x: 0, y: 0, w: 0, h: 0 });
     const [activeZoneType, setActiveZoneType] = useState('feeding'); // 'feeding' | 'litter'
     const [isDrawing, setIsDrawing] = useState(false);
+    const [showUpdateConfirmModal, setShowUpdateConfirmModal] = useState(false);
     const startPoint = useRef({ x: 0, y: 0 });
 
     // Animation values
@@ -78,6 +81,24 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
                 useNativeDriver: true,
             })
         ]).start();
+    }, []);
+
+    useEffect(() => {
+        const loadSavedZones = async () => {
+            try {
+                const [savedFeeding, savedLitter] = await AsyncStorage.multiGet([
+                    'camera_zone_feeding',
+                    'camera_zone_litter',
+                ]);
+                const feedingRaw = savedFeeding?.[1];
+                const litterRaw = savedLitter?.[1];
+                if (feedingRaw) setFeedingZone(JSON.parse(feedingRaw));
+                if (litterRaw) setLitterZone(JSON.parse(litterRaw));
+            } catch (e) {
+                console.error('Failed to load saved zones', e);
+            }
+        };
+        loadSavedZones();
     }, []);
 
     // Animate login reveal when a brand is selected
@@ -153,8 +174,26 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
     };
 
     const handlePrevStep = () => {
+        if (isUpdateMode) {
+            onBack();
+            return;
+        }
         if (currentStep === 1) onBack();
         else setCurrentStep(prev => prev - 1);
+    };
+
+    const handleUpdateZones = () => {
+        setShowUpdateConfirmModal(true);
+    };
+
+    const handleConfirmUpdateZones = async () => {
+        setShowUpdateConfirmModal(false);
+        await AsyncStorage.multiSet([
+            ['camera_zone_feeding', JSON.stringify(feedingZone)],
+            ['camera_zone_litter', JSON.stringify(litterZone)],
+            ['camera_zone_summary', 'Feeding + Litter'],
+        ]);
+        onConfirm();
     };
 
     const drawPanResponder = PanResponder.create({
@@ -216,11 +255,13 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
                 </View>
 
                 {/* Step Indicator Below Header */}
-                <View style={styles.stepBar}>
-                    {[1, 2, 3, 4].map((s) => (
-                        <View key={s} style={[styles.stepDot, currentStep >= s && styles.stepDotActive]} />
-                    ))}
-                </View>
+                {!isUpdateMode && (
+                    <View style={styles.stepBar}>
+                        {[1, 2, 3, 4].map((s) => (
+                            <View key={s} style={[styles.stepDot, currentStep >= s && styles.stepDotActive]} />
+                        ))}
+                    </View>
+                )}
 
                 <Animated.View style={{ flex: 1, opacity: stepAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }}>
                     <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 60, paddingHorizontal: 20 }}>
@@ -387,9 +428,12 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
                                     </View>
                                 </View>
 
-                                <TouchableOpacity style={[styles.nextButton, { marginTop: 20 }]} onPress={handleNextStep}>
+                                <TouchableOpacity
+                                    style={[styles.nextButton, { marginTop: 20 }]}
+                                    onPress={isUpdateMode ? handleUpdateZones : handleNextStep}
+                                >
                                     <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
-                                        <Text style={styles.nextText}>Next: Complete</Text>
+                                        <Text style={styles.nextText}>{isUpdateMode ? 'Update Zones' : 'Next: Complete'}</Text>
                                     </LinearGradient>
                                 </TouchableOpacity>
                             </View>
@@ -419,8 +463,36 @@ export default function Phone({ onBack, onConfirm, initialStep, brand }) {
                     </ScrollView>
                 </Animated.View>
 
+                <Modal
+                    transparent
+                    visible={showUpdateConfirmModal}
+                    animationType="fade"
+                    onRequestClose={() => setShowUpdateConfirmModal(false)}
+                >
+                    <View style={styles.confirmOverlay}>
+                        <View style={styles.confirmCard}>
+                            <Text style={styles.confirmTitle}>Confirm Update</Text>
+                            <Text style={styles.confirmMessage}>Apply these detection zone changes?</Text>
+                            <View style={styles.confirmActions}>
+                                <TouchableOpacity
+                                    style={styles.confirmCancelBtn}
+                                    onPress={() => setShowUpdateConfirmModal(false)}
+                                >
+                                    <Text style={styles.confirmCancelText}>Cancel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.confirmPrimaryBtn}
+                                    onPress={handleConfirmUpdateZones}
+                                >
+                                    <Text style={styles.confirmPrimaryText}>Confirm</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
+
                 {/* Fixed Skip Button for Step 1 */}
-                {currentStep === 1 && !isConnecting && (
+                {currentStep === 1 && !isConnecting && !isUpdateMode && (
                     <TouchableOpacity style={styles.fixedBottomButton} onPress={handleSkip}>
                         <Text style={styles.skipButtonText}>Skip for now</Text>
                     </TouchableOpacity>
@@ -812,5 +884,59 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         alignItems: "center",
         zIndex: 10,
+    },
+    confirmOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.28)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+    },
+    confirmCard: {
+        width: '100%',
+        backgroundColor: '#FFFFFF',
+        borderRadius: 20,
+        paddingHorizontal: 18,
+        paddingTop: 18,
+        paddingBottom: 14,
+    },
+    confirmTitle: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: '#1C1C1E',
+        marginBottom: 8,
+    },
+    confirmMessage: {
+        fontSize: 13,
+        color: '#4B5563',
+        lineHeight: 19,
+        marginBottom: 16,
+    },
+    confirmActions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        gap: 10,
+    },
+    confirmCancelBtn: {
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: '#F5F5F5',
+    },
+    confirmCancelText: {
+        color: '#374151',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    confirmPrimaryBtn: {
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: '#111827',
+    },
+    confirmPrimaryText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
     },
 });

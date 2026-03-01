@@ -83,9 +83,11 @@ export default function CameraScreen({ onNavigate, session }) {
     ).start();
   }, []);
 
+  const showCameraIssueBanner = hasCriticalAlert && cameraStatus !== 'connected';
+
   // Animation for sticky banner
   useEffect(() => {
-    if (hasCriticalAlert) {
+    if (showCameraIssueBanner) {
       Animated.spring(bannerAnim, {
         toValue: 1,
         useNativeDriver: true,
@@ -99,7 +101,7 @@ export default function CameraScreen({ onNavigate, session }) {
         useNativeDriver: true,
       }).start();
     }
-  }, [hasCriticalAlert]);
+  }, [showCameraIssueBanner]);
 
   // Subscribe to AlertEngine
   useEffect(() => {
@@ -344,7 +346,11 @@ export default function CameraScreen({ onNavigate, session }) {
         <View style={{ opacity: 0.35 }} pointerEvents="none">
           {children}
         </View>
-        <View style={styles.sectionOverlayContent} />
+        <View style={styles.sectionOverlayContent}>
+          <View style={styles.sectionOverlayHint}>
+            <Text style={styles.sectionOverlayHintText}>Connect camera to unlock this section</Text>
+          </View>
+        </View>
       </View>
     );
   };
@@ -375,9 +381,9 @@ export default function CameraScreen({ onNavigate, session }) {
 
   const SetupPromptCard = () => (
     <View style={styles.setupCardWrapper}>
-      <LinearGradient colors={['#00897B', '#004D40']} style={styles.setupCardGradient}>
+      <LinearGradient colors={['#F4FCF9', '#EAF7F2']} style={styles.setupCardGradient}>
         <View style={styles.setupCardIconContainer}>
-          <MaterialCommunityIcons name="video-plus" size={32} color="#FFF" />
+          <MaterialCommunityIcons name="video-plus" size={26} color="#0F766E" />
         </View>
         <View style={styles.setupCardTextContainer}>
           <Text style={styles.setupCardTitle}>Connect Your Camera</Text>
@@ -459,7 +465,7 @@ export default function CameraScreen({ onNavigate, session }) {
             </TouchableOpacity>
           </View>
 
-          {hasCriticalAlert ? (
+          {showCameraIssueBanner ? (
             <Animated.View style={[
               styles.overlayBannerWrapper,
               {
@@ -1700,57 +1706,75 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(255, 255, 255, 0.45)', // Slightly adjusted for transparency
     zIndex: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sectionOverlayHint: {
+    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  sectionOverlayHintText: {
+    fontSize: 10,
+    color: '#475569',
+    fontWeight: '600',
   },
   // Setup Prompt Card Styles
   setupCardWrapper: {
     marginHorizontal: 16,
     marginTop: 10,
     marginBottom: 10,
-    borderRadius: 20,
+    borderRadius: 18,
     overflow: 'hidden',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D7ECE5',
+    elevation: 2,
+    shadowColor: '#0F766E',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
   },
   setupCardGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
   },
   setupCardIconContainer: {
-    width: 54,
-    height: 54,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#D9F1E8',
     justifyContent: 'center',
     alignItems: 'center',
   },
   setupCardTextContainer: {
     flex: 1,
-    marginLeft: 14,
+    marginLeft: 12,
   },
   setupCardTitle: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '800',
-    marginBottom: 2,
+    color: '#0F172A',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 1,
   },
   setupCardSubtitle: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 12,
+    color: '#64748B',
+    fontSize: 11,
   },
   setupCardButton: {
-    backgroundColor: '#FFF',
-    paddingHorizontal: 14,
+    backgroundColor: '#0F766E',
+    paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 12,
+    borderRadius: 999,
   },
   setupCardButtonText: {
-    color: '#00695C',
-    fontSize: 12,
-    fontWeight: '800',
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
   // New styles from user
   disconnectedPromptTitle: {
