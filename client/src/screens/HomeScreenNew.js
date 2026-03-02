@@ -31,7 +31,7 @@ const CAT_NEWS_POOL = [
     { id: 'n6', type: 'news', title: 'มนุษย์เริ่มเลี้ยงแมวตั้งแต่เมื่อไหร่? เชื่อไหมว่าเลี้ยงมาเป็น "หมื่นปี"...', link: 'https://www.sanook.com/news/9848342/', image: 'https://images.unsplash.com/photo-1573865526739-10659fec78a5?q=80&w=800&auto=format&fit=crop' }
 ];
 
-export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate }) {
+export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavigate }) {
     const [activeCat, setActiveCat] = useState(null);
     const [lastCheckText, setLastCheckText] = useState("Not assessed yet");
     const [activeBannerIndex, setActiveBannerIndex] = useState(0);
