@@ -17,6 +17,11 @@ const GRID_PADDING = 16;
 const LIVE_WINDOW_MS = 5 * 60 * 1000;
 const SAVED_LIMIT = 500;
 const SAVED_STORAGE_KEY = 'gallery_saved_snapshots_v1';
+const getStartOfDayIso = () => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
+};
 
 const getResponsiveColumns = (screenWidth) => {
     if (screenWidth >= 1024) return 5;
@@ -40,6 +45,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
     const [activeZone, setActiveZone] = useState('live');
     const [savedSnapshots, setSavedSnapshots] = useState([]);
+    const [dailyStats, setDailyStats] = useState({ total: 0, recentLive: 0, saved: 0 });
     const [nowTs, setNowTs] = useState(Date.now());
     const pageAnim = useRef(new Animated.Value(0)).current;
     const headerAnim = useRef(new Animated.Value(0)).current;
@@ -51,17 +57,24 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
 
     useEffect(() => {
         loadImages();
+        fetchDailyStats();
         fetchUserProfile();
 
-        const handler = () => loadImages();
+        const handler = () => {
+            loadImages();
+            fetchDailyStats();
+        };
         AlertEngine.on(AlertEvents.UPDATED, handler);
         return () => AlertEngine.off(AlertEvents.UPDATED, handler);
     }, [session]);
 
     useEffect(() => {
-        const timer = setInterval(() => setNowTs(Date.now()), 15000);
+        const timer = setInterval(() => {
+            setNowTs(Date.now());
+            fetchDailyStats();
+        }, 15000);
         return () => clearInterval(timer);
-    }, []);
+    }, [session]);
 
     useEffect(() => {
         Animated.parallel([
@@ -108,10 +121,34 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
         }
     };
 
-    const isSaved = (id) => savedSnapshots.some((item) => item.id === id);
+    const isSaved = (id) => {
+        const dbItem = images.find((item) => item.id === id && item.dbRowId);
+        if (dbItem) return Boolean(dbItem.savedInDb);
+        return savedSnapshots.some((item) => item.id === id);
+    };
 
     const keepSnapshot = async (snapshot) => {
         if (!snapshot?.id || !snapshot?.uri) return;
+        if (snapshot.dbRowId) {
+            try {
+                const { error } = await supabase
+                    .from('ai_cat_identity_review')
+                    .update({
+                        metadata: {
+                            ...(snapshot.metadata || {}),
+                            saved: true,
+                            saved_at: new Date().toISOString(),
+                        },
+                    })
+                    .eq('id', snapshot.dbRowId);
+                if (error) throw error;
+                await loadImages();
+                await fetchDailyStats();
+                return;
+            } catch (e) {
+                console.error('Failed to save snapshot state in DB:', e);
+            }
+        }
         const next = [
             {
                 ...snapshot,
@@ -124,6 +161,27 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     };
 
     const unkeepSnapshot = async (snapshotId) => {
+        const target = images.find((img) => img.id === snapshotId && img.dbRowId) || selectedImage;
+        if (target?.dbRowId) {
+            try {
+                const { error } = await supabase
+                    .from('ai_cat_identity_review')
+                    .update({
+                        metadata: {
+                            ...(target.metadata || {}),
+                            saved: false,
+                            saved_at: null,
+                        },
+                    })
+                    .eq('id', target.dbRowId);
+                if (error) throw error;
+                await loadImages();
+                await fetchDailyStats();
+                return;
+            } catch (e) {
+                console.error('Failed to unsave snapshot state in DB:', e);
+            }
+        }
         const next = savedSnapshots.filter((item) => item.id !== snapshotId);
         setSavedSnapshots(next);
         await persistSavedSnapshots(next);
@@ -148,7 +206,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                     const cameraIds = cameras.map((c) => c.id);
                     const { data: reviews, error: reviewErr } = await supabase
                         .from('ai_cat_identity_review')
-                        .select('id, camera_id, behavior_label, confidence, occurred_at, snapshot_url, created_at')
+                        .select('id, camera_id, behavior_label, confidence, occurred_at, snapshot_url, created_at, metadata')
                         .in('camera_id', cameraIds)
                         .not('snapshot_url', 'is', null)
                         .order('occurred_at', { ascending: false })
@@ -160,10 +218,13 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                             if (!r.snapshot_url) return;
                             dbSnapshots.push({
                                 id: `db_${r.id}`,
+                                dbRowId: r.id,
                                 uri: r.snapshot_url,
                                 date: r.occurred_at || r.created_at || new Date().toISOString(),
                                 title: r.behavior_label ? `AI: ${r.behavior_label}` : 'AI Snapshot',
                                 type: 'ai_snapshot',
+                                metadata: r.metadata || {},
+                                savedInDb: Boolean(r.metadata?.saved),
                             });
                         });
                     }
@@ -199,6 +260,45 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
             console.error("Error loading gallery:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchDailyStats = async () => {
+        if (!session?.user?.id) return;
+        try {
+            const { data: cameras, error: camErr } = await supabase
+                .from('cameras')
+                .select('id')
+                .eq('owner_id', session.user.id);
+
+            if (camErr || !Array.isArray(cameras) || cameras.length === 0) {
+                setDailyStats({ total: 0, recentLive: 0, saved: 0 });
+                return;
+            }
+
+            const cameraIds = cameras.map((c) => c.id);
+            const dayStartIso = getStartOfDayIso();
+
+            const { data: rows, error: rowErr } = await supabase
+                .from('ai_cat_identity_review')
+                .select('id, occurred_at, created_at, metadata')
+                .in('camera_id', cameraIds)
+                .gte('occurred_at', dayStartIso)
+                .order('occurred_at', { ascending: false })
+                .limit(5000);
+
+            if (rowErr || !Array.isArray(rows)) return;
+
+            const now = Date.now();
+            const total = rows.length;
+            const recentLive = rows.filter((r) => {
+                const ts = new Date(r.occurred_at || r.created_at || 0).getTime();
+                return Number.isFinite(ts) && (now - ts) <= LIVE_WINDOW_MS;
+            }).length;
+            const saved = rows.filter((r) => Boolean(r.metadata?.saved)).length;
+            setDailyStats({ total, recentLive, saved });
+        } catch (e) {
+            console.error('Failed to fetch daily gallery stats:', e);
         }
     };
 
@@ -308,7 +408,9 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
         return Number.isFinite(ts) && (nowTs - ts) <= LIVE_WINDOW_MS;
     });
 
-    const sortedSavedImages = [...savedSnapshots].sort(
+    const dbSavedImages = images.filter((item) => item.dbRowId && item.savedInDb);
+    const localSavedImages = savedSnapshots.filter((item) => !item.dbRowId);
+    const sortedSavedImages = [...dbSavedImages, ...localSavedImages].sort(
         (a, b) => new Date(b.savedAt || b.date || 0).getTime() - new Date(a.savedAt || a.date || 0).getTime()
     );
 
@@ -380,7 +482,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                                     activeOpacity={0.7}
                                 >
                                     <MaterialCommunityIcons name="cat" size={14} color="#0C5A58" />
-                                    <Text style={styles.headerPillText}>{images.length}</Text>
+                                    <Text style={styles.headerPillText}>{dailyStats.total}</Text>
                                 </TouchableOpacity>
                             </View>
                         }
@@ -446,21 +548,6 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                                                     : 'Only snapshots you kept'}
                                             </Text>
                                         </View>
-                                        <TouchableOpacity
-                                            style={styles.simulateButton}
-                                            onPress={() => {
-                                                AlertEngine.logPendingIdentity({
-                                                    behaviorLabel: Math.random() > 0.5 ? 'eating' : 'grooming',
-                                                    confidence: 0.92,
-                                                    cropSnapshot: 'https://placekitten.com/g/200/300',
-                                                    sessionId: 'test_' + Date.now(),
-                                                    source: 'Manual Simulator',
-                                                    isAbnormal: false
-                                                });
-                                            }}
-                                        >
-                                            <Text style={styles.simulateText}>TEST</Text>
-                                        </TouchableOpacity>
                                     </View>
                                 }
                                 ListEmptyComponent={
@@ -597,15 +684,15 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
 
                                 <View style={styles.statsGrid}>
                                     <View style={styles.statBox}>
-                                        <Text style={styles.statNum}>{images.length}</Text>
+                                        <Text style={styles.statNum}>{dailyStats.total}</Text>
                                         <Text style={styles.statLabel}>Total Captures</Text>
                                     </View>
                                     <View style={styles.statBox}>
-                                        <Text style={styles.statNum}>{liveImages.length}</Text>
+                                        <Text style={styles.statNum}>{dailyStats.recentLive}</Text>
                                         <Text style={styles.statLabel}>Recent Live</Text>
                                     </View>
                                     <View style={styles.statBox}>
-                                        <Text style={styles.statNum}>{savedSnapshots.length}</Text>
+                                        <Text style={styles.statNum}>{dailyStats.saved}</Text>
                                         <Text style={styles.statLabel}>Saved Moments</Text>
                                     </View>
                                 </View>
@@ -678,18 +765,6 @@ const styles = StyleSheet.create({
         fontSize: 10,
         color: '#0C5A58',
         fontFamily: 'Inter-Bold',
-    },
-    simulateButton: {
-        backgroundColor: '#E6F5F5',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 8,
-        marginLeft: 8,
-    },
-    simulateText: {
-        fontSize: 10,
-        fontFamily: 'Inter-Bold',
-        color: '#0C5A58',
     },
     zoneSwitchWrap: {
         flexDirection: 'row',

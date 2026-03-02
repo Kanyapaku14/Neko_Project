@@ -695,6 +695,9 @@ export default function CameraScreen({ onNavigate, session }) {
                       <Text style={{ color: '#2E7D32', fontSize: 10, fontWeight: 'bold' }}>LIVE</Text>
                     </View>
                   </View>
+                  <Text style={[styles.cardSubtitle, { marginTop: -4, marginBottom: 8 }]}>
+                    Insights improve with more recorded behavior over time.
+                  </Text>
 
                   <View style={styles.insightsGrid}>
                     {/* Energy Distribution */}
@@ -1512,6 +1515,7 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: 24,
+    minWidth: 24,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
@@ -1524,7 +1528,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
   progressPaw: {
-    marginRight: -12,
+    marginRight: -8,
     textShadowColor: 'rgba(0,0,0,0.15)',
     textShadowOffset: { width: 0, height: 1.5 },
     textShadowRadius: 3,

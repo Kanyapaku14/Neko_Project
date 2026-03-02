@@ -281,15 +281,23 @@ class AlertEngineService {
 
         this.alerts = this.alerts.map(a => {
             const canResolveSkipped = a.type === 'pending_identity' && a.resolvedBy === 'skipped';
-            if (String(a.id) === targetId && (a.pendingIdentityConfirm === true || canResolveSkipped)) {
+            const canEditResolved = a.type === 'pending_identity' && a.pendingIdentityConfirm !== true && !!a.resolvedBy;
+            if (String(a.id) === targetId && (a.pendingIdentityConfirm === true || canResolveSkipped || canEditResolved)) {
+                const chosenName = resolvedCatName || a.resolvedCatName || null;
+                const resolutionNote = resolvedBy === 'skipped'
+                    ? 'Marked as not your cat.'
+                    : (chosenName
+                        ? `Selected cat: ${chosenName}.`
+                        : (catId ? `Selected cat ID: ${catId}.` : 'Identity confirmed.'));
                 resolved = {
                     ...a,
                     pendingIdentityConfirm: false,
                     isRead: true, // Mark as read since user interacted with it
                     resolvedCatId: catId,
-                    resolvedCatName: resolvedCatName || a.resolvedCatName || null,
+                    resolvedCatName: chosenName,
                     resolvedAt: new Date().toISOString(),
-                    resolvedBy
+                    resolvedBy,
+                    resolutionText: resolutionNote,
                 };
                 return resolved;
             }

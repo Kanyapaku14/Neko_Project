@@ -201,6 +201,19 @@ export default function SetcameraScreen({ onNavigate, session }) {
         }
     };
 
+    const clearCameraZonesInDb = async (targetCameraId) => {
+        if (!targetCameraId) return;
+        try {
+            const { error } = await supabase
+                .from('camera_zones')
+                .delete()
+                .eq('camera_id', targetCameraId);
+            if (error) throw error;
+        } catch (err) {
+            console.warn('Failed to clear camera_zones:', err?.message || err);
+        }
+    };
+
     const upsertCameraConfig = async (overrides = {}) => {
         if (!session?.user?.id) return null;
         const effectiveBrand = overrides.brand || selectedCameraPreset || committedCameraBrand || 'custom';
@@ -403,7 +416,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
         }
     };
 
-    const resetSetupForNewCamera = async () => {
+    const resetSetupForNewCamera = async (targetCameraId = null) => {
         await AsyncStorage.multiRemove([
             'camera_monitoringMode',
             'camera_selectedCats',
@@ -412,6 +425,9 @@ export default function SetcameraScreen({ onNavigate, session }) {
             'camera_zone_feeding',
             'camera_zone_litter',
         ]);
+        if (targetCameraId) {
+            await clearCameraZonesInDb(targetCameraId);
+        }
         setMonitoringMode('multi');
         setSelectedCats(myCats.map((cat) => cat.id));
         setZoneLabel(defaultZoneLabel);
@@ -424,7 +440,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
         animateSelection(brandId);
         successAnim.setValue(0);
         await updateCameraStatus("disconnected");
-        await resetSetupForNewCamera();
+        await resetSetupForNewCamera(cameraId);
         await AsyncStorage.setItem('camera_brand', brandId);
         setCommittedCameraBrand(brandId);
         await upsertCameraConfig({
