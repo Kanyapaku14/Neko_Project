@@ -18,32 +18,13 @@ import supabase from "../screens/config/supabaseClient";
 import { Ionicons } from "@expo/vector-icons";
 import HomeHeader from "../components/HomeHeader";
 import Paw from "../components/Paw";
-import styles from "../styles/homeStyles";
+import styles from "../styles/homeStylesOld";
 
-const { width } = Dimensions.get('window');
 
-const CAT_NEWS_POOL = [
-    { id: 'n1', type: 'news', title: 'ไม่ใช่คลิป AI! น้องแมวสายสตรองโชว์งัด "ไมโครเวฟเครื่องใหม่เอี่ยม" ร่วงคาบ้าน', link: 'https://www.sanook.com/news/9866962/', image: 'https://images.unsplash.com/photo-1543852786-1cf6624b9987?q=80&w=800&auto=format&fit=crop' },
-    { id: 'n2', type: 'news', title: 'อภิชาตแมว! เจ้าเหมียว "คิตตี้" ต่อสู้โจรปล้นบ้าน ปกป้องเจ้าของจนเกือบเอาชีวิตไม่รอด', link: 'https://www.sanook.com/news/9862010/', image: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?q=80&w=800&auto=format&fit=crop' },
-    { id: 'n3', type: 'news', title: 'แม่ใช้คุ้มมาก! น้องแมว "ปิกาจู" โชว์สกิลปิดประตู ตรงบรีฟเป๊ะ...', link: 'https://www.sanook.com/news/9861854/', image: 'https://images.unsplash.com/photo-1495360010541-f48722b34f7d?q=80&w=800&auto=format&fit=crop' },
-    { id: 'n4', type: 'news', title: 'เตือนทาสแมว! "4 ท่านอนสุดอันตราย" ที่คุณเห็นว่าน่ารัก แต่อาจเป็นสัญญาณ...', link: 'https://www.sanook.com/news/9857090/', image: 'https://images.unsplash.com/photo-1513245543132-31f507417b26?q=80&w=800&auto=format&fit=crop' },
-    { id: 'n5', type: 'news', title: 'ทำไมไม่ถึงสักทีนะ? แมวเดินขึ้นบันไดเลื่อนผิดฝั่ง โชคดีมีหนุ่มใจดีเข้าช่วย', link: 'https://www.sanook.com/news/9847490/', image: 'https://images.unsplash.com/photo-1533738363-b7f9aef128ce?q=80&w=800&auto=format&fit=crop' },
-    { id: 'n6', type: 'news', title: 'มนุษย์เริ่มเลี้ยงแมวตั้งแต่เมื่อไหร่? เชื่อไหมว่าเลี้ยงมาเป็น "หมื่นปี"...', link: 'https://www.sanook.com/news/9848342/', image: 'https://images.unsplash.com/photo-1573865526739-10659fec78a5?q=80&w=800&auto=format&fit=crop' }
-];
 
 export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavigate }) {
     const [activeCat, setActiveCat] = useState(null);
     const [lastCheckText, setLastCheckText] = useState("Not assessed yet");
-    const [activeBannerIndex, setActiveBannerIndex] = useState(0);
-    const [bannerData, setBannerData] = useState([]);
-
-    const handleScroll = (event) => {
-        const slideSize = event.nativeEvent.layoutMeasurement.width;
-        const index = Math.floor(event.nativeEvent.contentOffset.x / slideSize);
-        if (index !== activeBannerIndex) {
-            setActiveBannerIndex(index);
-        }
-    };
 
     useEffect(() => {
         const fetchLastAssessment = async (catId) => {
@@ -109,10 +90,7 @@ export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavig
             }
         });
 
-        // Setup random banners
-        const shuffled = [...CAT_NEWS_POOL].sort(() => 0.5 - Math.random());
-        const selectedNews = shuffled.slice(0, 4);
-        setBannerData(selectedNews);
+
 
         return () => {
             subscription.remove();
@@ -156,7 +134,10 @@ export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavig
                     {/* 2. ส่วนข้อความ (Hero Section เดิม เหลือแค่ Text) */}
                     <View style={styles.heroSection}>
                         <Text style={styles.heroTitle}>
-                            Everything looks great todays!
+                            Welcome to NekoCare
+                        </Text>
+                        <Text style={styles.heroSubtitle}>
+                            Your cat profile is ready.{"\n"}Let's start the first health check.
                         </Text>
 
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
@@ -167,7 +148,6 @@ export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavig
 
                     {/* ===== Action Buttons ===== */}
                     <View style={styles.actionContainer}>
-
                         {/* 1. Assess Health Risk */}
                         <TouchableOpacity
                             style={styles.assessButton}
@@ -194,77 +174,44 @@ export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavig
                                 <Text style={styles.photoBtnText}>Start Assessment</Text>
                             </TouchableOpacity>
                         </View>
-
-                        {/* 3. Log Daily */}
-                        <View style={styles.logCard}>
-                            <View style={styles.logLeft}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                                    <Ionicons name="calendar-outline" size={20} color="#2D6A64" style={{ marginRight: 8 }} />
-                                    <Text style={styles.logTitle}>Log Daily</Text>
-                                </View>
-                                <Text style={styles.logDesc}>Track your cat's daily activities and behaviors</Text>
-                            </View>
-                            <TouchableOpacity
-                                style={styles.logBtn}
-                                onPress={onLogDaily}
-                            >
-                                <Text style={styles.logBtnText}>Add Log</Text>
-                            </TouchableOpacity>
-                        </View>
-
                     </View>
 
-                    {/* ===== Banner Carousel Section ===== */}
-                    <View style={styles.bannerSectionContainer}>
-                        <ScrollView
-                            horizontal
-                            pagingEnabled
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.bannerScrollContent}
-                            onScroll={handleScroll}
-                            scrollEventThrottle={16}
-                            snapToInterval={342} // width (330) + marginRight (12)
-                            decelerationRate="fast"
-                        >
-                            {bannerData.map((banner) => {
-                                return (
-                                    <TouchableOpacity
-                                        key={banner.id}
-                                        style={styles.bannerCard}
-                                        activeOpacity={0.9}
-                                        onPress={() => {
-                                            if (banner.link) {
-                                                Linking.openURL(banner.link).catch(err => console.error("Couldn't load page", err));
-                                            }
-                                        }}
-                                    >
-                                        <Image
-                                            source={{ uri: banner.image }}
-                                            style={styles.bannerImage}
-                                            resizeMode="cover"
-                                        />
-                                        <LinearGradient
-                                            colors={['transparent', 'rgba(0,0,0,0.8)']}
-                                            style={styles.bannerGradient}
-                                        >
-                                            <Text style={styles.bannerTitle} numberOfLines={2}>
-                                                {banner.title}
-                                            </Text>
-                                        </LinearGradient>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </ScrollView>
+                    {/* ===== 3. GETTING STARTED TIMELINE ===== */}
+                    <View style={styles.gettingStartedSection}>
+                        <Text style={styles.gettingStartedTitle}>Getting Started</Text>
 
-                        {/* Pagination Dots */}
-                        <View style={styles.paginationContainer}>
-                            {bannerData.map((_, index) => (
-                                <View
-                                    key={index}
-                                    style={index === activeBannerIndex ? styles.paginationDotActive : styles.paginationDot}
-                                />
-                            ))}
+                        {/* Item 1: Cat profile completed */}
+                        <View style={styles.timelineContainer}>
+                            <View style={styles.timelineCheck}>
+                                <Ionicons name="checkmark" size={16} color="#FFF" />
+                            </View>
+                            <View style={styles.timelineLine} />
+                            <Text style={styles.timelineText}>Cat profile completed</Text>
                         </View>
+
+                        {/* Item 2: First health assessment */}
+                        <View style={styles.timelineContainer}>
+                            <View style={styles.timelineEmpty} />
+                            <View style={styles.timelineLine} />
+                            <Text style={styles.timelineText}>First health assessment</Text>
+                        </View>
+
+                        {/* Item 3: Daily monitoring */}
+                        <View style={styles.timelineContainer}>
+                            <View style={styles.timelineEmpty} />
+                            <Text style={styles.timelineText}>Daily monitoring</Text>
+                        </View>
+                    </View>
+
+                    {/* ===== 4. SMART MONITORING CARD ===== */}
+                    <View style={styles.smartMonitoringCard}>
+                        <View style={styles.smartMonLeft}>
+                            <Text style={styles.smartMonTitle}>Smart Monitoring</Text>
+                            <Text style={styles.smartMonDesc}>Connect your camera to track daily activity{"\n"}and litter behavior</Text>
+                        </View>
+                        <TouchableOpacity style={styles.smartMonBtn}>
+                            <Text style={styles.smartMonBtnText}>Set up camera 🐾</Text>
+                        </TouchableOpacity>
                     </View>
 
                 </ScrollView>
