@@ -30,6 +30,7 @@ export const AlertEvents = {
     UPDATED: 'ALERT_ENGINE_UPDATED',
     NEW_CRITICAL: 'ALERT_ENGINE_NEW_CRITICAL',
     RESOLVED: 'ALERT_ENGINE_RESOLVED',
+    ALERT_ADDED: 'ALERT_ENGINE_ALERT_ADDED',
     // Identity confirmation events
     IDENTITY_PENDING: 'ALERT_ENGINE_IDENTITY_PENDING',
     IDENTITY_RESOLVED: 'ALERT_ENGINE_IDENTITY_RESOLVED',
@@ -135,16 +136,18 @@ class AlertEngineService {
         const expiresAt = alertData.expiresAt ?? new Date(Date.now() + ttlMs).toISOString();
 
         const newAlert = {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+            id: alertData.id || (Date.now().toString() + Math.random().toString(36).substr(2, 5)),
             type: alertData.type || 'system',
             severity: normalizedSeverity,
             title: alertData.title,
             desc: alertData.desc,
             details: alertData.details || '',
-            timestamp: new Date().toISOString(),
+            timestamp: alertData.timestamp || new Date().toISOString(),
             expiresAt,
             isRead: false,
             resolved: normalizedSeverity !== 'critical',
+            _fromRemote: alertData._fromRemote === true,
+            remoteReviewId: alertData.remoteReviewId || null,
 
             // â”€â”€ Identity Confirmation Fields (optional, undefined if not a pending_identity alert) â”€â”€
             // pendingIdentityConfirm: bool â€” true while waiting for user to identify the cat
@@ -180,6 +183,7 @@ class AlertEngineService {
         }
 
         await this._saveAlerts();
+        this.emitter.emit(AlertEvents.ALERT_ADDED, newAlert);
 
         if (normalizedSeverity === 'critical') {
             this.emitter.emit(AlertEvents.NEW_CRITICAL, newAlert);
@@ -317,6 +321,26 @@ class AlertEngineService {
         if (changed) {
             await this._saveAlerts();
             console.log(`AlertEngine: Marked feedback as used for training [${alertId}]`);
+        }
+    }
+
+
+    /**
+     * Attach remote review id from DB row to an existing local alert.
+     * @param {string} alertId
+     * @param {string} remoteReviewId
+     */
+    async attachRemoteReviewId(alertId, remoteReviewId) {
+        let changed = false;
+        this.alerts = this.alerts.map(a => {
+            if (a.id === alertId && !a.remoteReviewId && remoteReviewId) {
+                changed = true;
+                return { ...a, remoteReviewId };
+            }
+            return a;
+        });
+        if (changed) {
+            await this._saveAlerts();
         }
     }
 

@@ -1,0 +1,19 @@
+{
+  "classes": [
+    "eating",
+    "grooming",
+    "head_pressing",
+    "resting",
+    "toileting",
+    "vomiting"
+  ],
+  "num_classes": 6,
+  "confidence_threshold": 0.5,
+  "unknown_label": "unknown",
+  "backend_mapping": {
+    "unknown": "active"
+  },
+  "model_version": "v3",
+  "backbone": "EfficientNet-B0",
+  "image_size": 256
+}

@@ -53,10 +53,9 @@ export default function CameraScreen({ onNavigate, session }) {
   const [showCatSwitcher, setShowCatSwitcher] = useState(false);
   const [environment, setEnvironment] = useState({ temperature: 25.4, humidity: 58 });
   const [proStats, setProStats] = useState({ ping: 42, bitrate: 1.2, fps: 30 });
-  const [retryCountdown, setRetryCountdown] = useState(15);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [livePreviewUri, setLivePreviewUri] = useState(null);
 
-  const { data, lastUpdated, refetch } = useCameraData(session, cameraStatus);
+  const { data } = useCameraData(session, cameraStatus);
 
   // Animations
   const bannerAnim = useRef(new Animated.Value(0)).current;
@@ -150,34 +149,52 @@ export default function CameraScreen({ onNavigate, session }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Offline Auto-Retry Mechanism
   useEffect(() => {
     let timer;
-    if (cameraStatus === 'connected' && isConnectedSignalLost) {
-      timer = setInterval(() => {
-        setRetryCountdown(prev => {
-          if (prev <= 1) {
-            handleManualRefresh();
-            return 15;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+    const fetchLatestPreview = async () => {
+      try {
+        const cameraId = await AsyncStorage.getItem('camera_id');
+        if (!cameraId) {
+          setLivePreviewUri(null);
+          return;
+        }
+
+        const { data: latest, error } = await supabase
+          .from('ai_cat_identity_review')
+          .select('snapshot_url, occurred_at')
+          .eq('camera_id', cameraId)
+          .not('snapshot_url', 'is', null)
+          .order('occurred_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          console.warn('Failed to load live preview:', error?.message || error);
+          return;
+        }
+
+        const uri = latest?.snapshot_url || null;
+        if (uri && /^https?:\/\//i.test(uri)) {
+          setLivePreviewUri(uri);
+        } else {
+          setLivePreviewUri(null);
+        }
+      } catch (e) {
+        console.warn('Failed to fetch live preview:', e?.message || e);
+      }
+    };
+
+    if (cameraStatus === 'connected') {
+      fetchLatestPreview();
+      timer = setInterval(fetchLatestPreview, 6000);
     } else {
-      setRetryCountdown(15);
+      setLivePreviewUri(null);
     }
-    return () => clearInterval(timer);
-  }, [cameraStatus, isConnectedSignalLost]);
 
-  const handleManualRefresh = async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setTimeout(() => setIsRefreshing(false), 500);
-    setRetryCountdown(15);
-  };
-
-  // Helper to check signal
-  const isConnectedSignalLost = cameraStatus === 'connected' && (!data || !lastUpdated || (Date.now() - lastUpdated.getTime() > 10000));
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [cameraStatus]);
 
   // Simulate environment data from camera stream
   useEffect(() => {
@@ -358,30 +375,6 @@ export default function CameraScreen({ onNavigate, session }) {
     );
   };
 
-  const OfflineBanner = () => (
-    <View style={styles.offlineBannerContainer}>
-      <LinearGradient colors={['#FF5252', '#D32F2F']} style={styles.offlineBannerGradient}>
-        <View style={styles.offlineMain}>
-          <MaterialCommunityIcons name="wifi-off" size={20} color="#FFF" />
-          <View style={styles.offlineTextContainer}>
-            <Text style={styles.offlineTitle}>Signal Lost</Text>
-            <Text style={styles.offlineSubtitle}>Reconnecting in {retryCountdown}s...</Text>
-          </View>
-        </View>
-        <TouchableOpacity style={styles.retryButton} onPress={handleManualRefresh} disabled={isRefreshing}>
-          {isRefreshing ? (
-            <ActivityIndicator size="small" color="#FFF" />
-          ) : (
-            <>
-              <MaterialCommunityIcons name="refresh" size={18} color="#FFF" />
-              <Text style={styles.retryText}>Try Again</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </LinearGradient>
-    </View>
-  );
-
   const SetupPromptCard = () => (
     <View style={styles.setupCardWrapper}>
       <LinearGradient colors={['#F4FCF9', '#EAF7F2']} style={styles.setupCardGradient}>
@@ -424,8 +417,6 @@ export default function CameraScreen({ onNavigate, session }) {
       <StatusBar style="dark" translucent backgroundColor="transparent" />
       <LinearGradient colors={['#f5fffdff', '#f5fffdff']} style={{ flex: 1 }}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
-          {isConnectedSignalLost && <OfflineBanner />}
-
           <HomeHeader
             leftComponent={
               <TouchableOpacity
@@ -499,9 +490,13 @@ export default function CameraScreen({ onNavigate, session }) {
               {/* Camera Section */}
               <View style={styles.cameraContainer}>
                 <View style={styles.cameraFrame}>
-                  <View style={styles.videoPlaceholder}>
-                    <Text style={styles.liveFeedLabel}>Live Feed</Text>
-                  </View>
+                  {livePreviewUri ? (
+                    <Image source={{ uri: livePreviewUri }} style={styles.livePreviewImage} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.videoPlaceholder}>
+                      <Text style={styles.liveFeedLabel}>Live Feed</Text>
+                    </View>
+                  )}
 
                   <View style={[styles.cameraStatusBadge, { backgroundColor: cameraStatus === 'connected' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(30, 30, 30, 0.75)' }]}>
                     <Animated.View style={[styles.cameraStatusDot, {
@@ -993,6 +988,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
+  },
+  livePreviewImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#E5E7EB',
   },
   liveFeedLabel: {
     color: '#64748B',
@@ -1779,56 +1779,6 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 14,
     fontWeight: '700',
-  },
-  // Offline Banner Styles
-  offlineBannerContainer: {
-    marginHorizontal: 20,
-    marginTop: 10,
-    borderRadius: 16,
-    overflow: 'hidden',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-  },
-  offlineBannerGradient: {
-    flexDirection: 'row',
-    padding: 12,
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  offlineMain: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  offlineTextContainer: {
-    marginLeft: 10,
-  },
-  offlineTitle: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  offlineSubtitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 11,
-    fontFamily: 'Inter-Medium',
-  },
-  retryButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  retryText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '700',
-    marginLeft: 6,
   },
   statusRow: {
     flexDirection: 'row',

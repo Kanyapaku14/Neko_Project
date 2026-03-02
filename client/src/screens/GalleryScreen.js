@@ -136,17 +136,38 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
             const history = AlertEngine.getHistory();
             let allAlerts = [...history];
 
-            // 2. Future DB Integration: Fetch from Supabase
+            const dbSnapshots = [];
+            // 2. Pull DB snapshots from ai_cat_identity_review for this user's cameras
             if (session?.user?.id) {
-                // Example structure for future implementation:
-                // const { data } = await supabase
-                //   .from('alerts')
-                //   .select('*')
-                //   .eq('user_id', session.user.id)
-                //   .not('snapshot_url', 'is', null);
-                // if (data) {
-                //    // Merge logic here
-                // }
+                const { data: cameras, error: camErr } = await supabase
+                    .from('cameras')
+                    .select('id')
+                    .eq('owner_id', session.user.id);
+
+                if (!camErr && Array.isArray(cameras) && cameras.length > 0) {
+                    const cameraIds = cameras.map((c) => c.id);
+                    const { data: reviews, error: reviewErr } = await supabase
+                        .from('ai_cat_identity_review')
+                        .select('id, camera_id, behavior_label, confidence, occurred_at, snapshot_url, created_at')
+                        .in('camera_id', cameraIds)
+                        .not('snapshot_url', 'is', null)
+                        .order('occurred_at', { ascending: false })
+                        .limit(400);
+
+                    if (!reviewErr && Array.isArray(reviews)) {
+                        reviews.forEach((r) => {
+                            // Mobile app can render network URLs directly.
+                            if (!r.snapshot_url) return;
+                            dbSnapshots.push({
+                                id: `db_${r.id}`,
+                                uri: r.snapshot_url,
+                                date: r.occurred_at || r.created_at || new Date().toISOString(),
+                                title: r.behavior_label ? `AI: ${r.behavior_label}` : 'AI Snapshot',
+                                type: 'ai_snapshot',
+                            });
+                        });
+                    }
+                }
             }
 
             // Filter alerts that have snapshots
@@ -163,7 +184,17 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                 type: alert.type
             }));
 
-            setImages(formattedImages);
+            // Merge + de-duplicate by id, newest first
+            const merged = [...dbSnapshots, ...formattedImages];
+            const uniqueById = [];
+            const seen = new Set();
+            merged.forEach((item) => {
+                if (!item?.id || seen.has(item.id)) return;
+                seen.add(item.id);
+                uniqueById.push(item);
+            });
+            uniqueById.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            setImages(uniqueById);
         } catch (error) {
             console.error("Error loading gallery:", error);
         } finally {
