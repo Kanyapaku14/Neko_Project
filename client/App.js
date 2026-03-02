@@ -34,6 +34,7 @@ import CommunityScreen from './src/screens/CommunityScreen';
 import RankingScreen from './src/screens/RankingScreen';
 import CommunityProfile from './src/screens/CommunityProfile';
 import { GlobalAlertQueueProvider } from './src/services/GlobalAlertQueue';
+import AlertRepository from './src/services/AlertRepository';
 import AlertScreen from './src/screens/AlertScreen';
 import EventDetailScreen from './src/screens/EventDetailScreen';
 
@@ -118,6 +119,13 @@ export default function App() {
     };
     loadCameraStatus();
   }, []);
+
+  useEffect(() => {
+    AlertRepository.init();
+    if (session?.user?.id) {
+      AlertRepository.syncFromRemote();
+    }
+  }, [session?.user?.id]);
 
   // Check if user has profile and cat
   const checkUserProfileStatus = async (session) => {

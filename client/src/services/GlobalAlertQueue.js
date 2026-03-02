@@ -15,6 +15,7 @@
 
 import React, { createContext, useState, useEffect, useCallback } from 'react';
 import AlertEngine, { AlertEvents } from './AlertEngine';
+import AlertRepository from './AlertRepository';
 import CatPickerModal from '../components/alert/CatPickerModal';
 import supabase from '../screens/config/supabaseClient'; // Make sure this path is correct based on where we place this file
 
@@ -49,6 +50,13 @@ export function GlobalAlertQueueProvider({ children, session }) {
         };
         fetchCats();
     }, [session]);
+
+    // Keep local queue in sync with remote pending identities/alerts
+    useEffect(() => {
+        if (!session?.user?.id) return;
+        AlertRepository.init();
+        AlertRepository.syncFromRemote();
+    }, [session?.user?.id]);
 
     // 2. Listen for Auto-Popup events from AlertEngine
     useEffect(() => {
@@ -113,6 +121,7 @@ export function GlobalAlertQueueProvider({ children, session }) {
     const handleSelect = async (catId) => {
         if (!currentAlert) return;
         const selectedCat = catsFromDb.find(c => c.id === catId);
+        await AlertRepository.resolveIdentityOnRemote(currentAlert, catId, 'user');
         await AlertEngine.resolveIdentity(currentAlert.id, catId, 'user', selectedCat?.name || null);
         setCurrentAlert(null); // Triggers effect #3 to pop next
     };
@@ -128,6 +137,7 @@ export function GlobalAlertQueueProvider({ children, session }) {
             return;
         }
 
+        await AlertRepository.resolveIdentityOnRemote(currentAlert, null, 'skipped');
         await AlertEngine.resolveIdentity(currentAlert.id, null, 'skipped');
         setCurrentAlert(null);
     };

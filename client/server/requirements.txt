@@ -1,2 +1,11 @@
 google-genai
 python-dotenv
+flask
+flask-cors
+supabase
+opencv-python
+numpy
+pillow
+ultralytics
+torch
+torchvision

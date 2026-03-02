@@ -21,6 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import AlertEngine, { AlertEvents } from '../services/AlertEngine';
+import AlertRepository from '../services/AlertRepository';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -413,6 +414,11 @@ export default function AlertScreen({ onBack, onNavigate }) {
     const menuButtonPressAnim = useRef(new Animated.Value(0)).current;
     const selectionBarAnim = useRef(new Animated.Value(0)).current;
     const { pushAlert } = useContext(GlobalAlertQueueContext);
+
+    useEffect(() => {
+        AlertRepository.init();
+        AlertRepository.syncFromRemote();
+    }, []);
 
     useEffect(() => {
         const list = filterMode === 'deleted' && AlertEngine.getDeletedHistory
