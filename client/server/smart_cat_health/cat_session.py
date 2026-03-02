@@ -11,16 +11,20 @@ class CatSessionManager:
     MAX_CATS = 6
     LOST_TRACK_TIMEOUT = 15
 
-    def __init__(self, session_dir="sessions", max_cats=None):
+    def __init__(self, session_dir="sessions", max_cats=None, known_cat_ids=None):
         self.track_to_cat = {}
         self.cats = {}
         self.lost_pool = set()
         self._next_cat_num = 1
+        self.known_cat_ids = [str(cid) for cid in (known_cat_ids or []) if cid]
+        self._next_known_idx = 0
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.session_start = time.time()
         self.session_dir = session_dir
         if max_cats is not None:
             self.MAX_CATS = max_cats
+        elif self.known_cat_ids:
+            self.MAX_CATS = len(self.known_cat_ids)
         os.makedirs(session_dir, exist_ok=True)
 
     @staticmethod
@@ -53,8 +57,12 @@ class CatSessionManager:
                 self.lost_pool.discard(closest)
                 return closest
 
-        cat_id = f"CAT{self._next_cat_num:03d}"
-        self._next_cat_num += 1
+        if self._next_known_idx < len(self.known_cat_ids):
+            cat_id = self.known_cat_ids[self._next_known_idx]
+            self._next_known_idx += 1
+        else:
+            cat_id = f"CAT{self._next_cat_num:03d}"
+            self._next_cat_num += 1
         self.track_to_cat[track_id] = cat_id
         self.cats[cat_id] = {
             "cat_id": cat_id,

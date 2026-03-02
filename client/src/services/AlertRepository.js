@@ -3,6 +3,7 @@ import AlertEngine, { AlertEvents } from './AlertEngine';
 import supabase from '../screens/config/supabaseClient';
 
 const CAMERA_ID_KEY = 'camera_id';
+const RESOLVED_REVIEW_IDS_KEY = 'resolved_identity_review_ids';
 
 const isUuid = (value) =>
     typeof value === 'string'
@@ -49,8 +50,11 @@ const mapAlertToDb = (alert, ownerId, cameraId) => ({
         pendingIdentityConfirm: alert.pendingIdentityConfirm === true,
         isAbnormal: alert.isAbnormal === true,
         cropSnapshot: alert.cropSnapshot || null,
+        remoteReviewId: alert.remoteReviewId || null,
         resolvedBy: alert.resolvedBy || null,
         resolvedAt: alert.resolvedAt || null,
+        resolvedCatName: alert.resolvedCatName || null,
+        resolutionText: alert.resolutionText || null,
     },
 });
 
@@ -75,6 +79,8 @@ const mapDbAlertToLocal = (row) => ({
     isAbnormal: row?.metadata?.isAbnormal === true,
     resolvedBy: row?.metadata?.resolvedBy || null,
     resolvedAt: row?.metadata?.resolvedAt || null,
+    resolvedCatName: row?.metadata?.resolvedCatName || null,
+    resolutionText: row?.metadata?.resolutionText || null,
     resolvedCatId: row.cat_id || null,
     _fromRemote: true,
 });
@@ -99,6 +105,7 @@ const mapIdentityReviewToLocalAlert = (row) => {
         cropSnapshot: row.snapshot_url || null,
         sessionId: row.session_id || null,
         source: row.source || null,
+        cameraId: row.camera_id || null,
         resolvedCatId: row.resolved_cat_id || null,
         resolvedBy: row.resolved_by || null,
         resolvedAt: row.reviewed_at || null,
@@ -130,6 +137,29 @@ const AlertRepository = {
             userId,
             cameraId: isUuid(storedCameraId) ? storedCameraId : null,
         };
+    },
+
+    async _getResolvedReviewIds() {
+        try {
+            const raw = await AsyncStorage.getItem(RESOLVED_REVIEW_IDS_KEY);
+            if (!raw) return new Set();
+            const arr = JSON.parse(raw);
+            if (!Array.isArray(arr)) return new Set();
+            return new Set(arr.map((v) => String(v)));
+        } catch (e) {
+            return new Set();
+        }
+    },
+
+    async _markResolvedReviewId(reviewId) {
+        if (!reviewId) return;
+        try {
+            const set = await this._getResolvedReviewIds();
+            set.add(String(reviewId));
+            await AsyncStorage.setItem(RESOLVED_REVIEW_IDS_KEY, JSON.stringify(Array.from(set)));
+        } catch (e) {
+            // no-op
+        }
     },
 
     async push(alert) {
@@ -183,6 +213,13 @@ const AlertRepository = {
             if (!userId) return false;
 
             const localIds = new Set(AlertEngine.getHistory().map((a) => String(a.id)));
+            const localRemoteReviewIds = new Set(
+                AlertEngine.getHistory()
+                    .map((a) => a?.remoteReviewId)
+                    .filter(Boolean)
+                    .map((v) => String(v))
+            );
+            const resolvedReviewIds = await this._getResolvedReviewIds();
 
             const { data: dbAlerts, error: alertsError } = await supabase
                 .from('alerts')
@@ -209,7 +246,9 @@ const AlertRepository = {
                 if (reviewErr) throw reviewErr;
 
                 for (const row of (reviews || [])) {
+                    if (resolvedReviewIds.has(String(row.id))) continue;
                     if (localIds.has(String(row.id))) continue;
+                    if (localRemoteReviewIds.has(String(row.id))) continue;
                     await AlertEngine.logEvent(mapIdentityReviewToLocalAlert(row));
                 }
             }
@@ -235,6 +274,7 @@ const AlertRepository = {
         try {
             const reviewId = alert?.remoteReviewId || (isUuid(alert?.id) ? alert.id : null);
             if (!reviewId) return false;
+            await this._markResolvedReviewId(reviewId);
 
             const payload = {
                 reviewed: true,
@@ -248,10 +288,79 @@ const AlertRepository = {
                 .update(payload)
                 .eq('id', reviewId);
             if (error) throw error;
+
+            // Resolve all pending rows in same session to avoid repetitive popups.
+            if (alert?.sessionId) {
+                await supabase
+                    .from('ai_cat_identity_review')
+                    .update(payload)
+                    .eq('camera_id', alert.cameraId || (await this._getContext()).cameraId)
+                    .eq('session_id', alert.sessionId)
+                    .eq('reviewed', false);
+            }
+
+            // Resolve every local alert that points to this same remote review.
+            const history = AlertEngine.getHistory();
+            const matches = history.filter((a) =>
+                (String(a?.remoteReviewId || '') === String(reviewId) || String(a?.id || '') === String(reviewId))
+                && a?.pendingIdentityConfirm === true
+            );
+            for (const a of matches) {
+                await AlertEngine.resolveIdentity(a.id, catId, resolvedBy);
+            }
+
+            // Keep alerts table in sync as resolved/read to avoid duplicate popup after re-sync.
+            const { userId } = await this._getContext();
+            if (userId) {
+                const alertResolvedPayload = {
+                    resolved: true,
+                    is_read: true,
+                    updated_at: new Date().toISOString(),
+                    cat_id: isUuid(catId) ? catId : null,
+                };
+
+                if (isUuid(alert?.id)) {
+                    await supabase
+                        .from('alerts')
+                        .update(alertResolvedPayload)
+                        .eq('owner_id', userId)
+                        .eq('id', alert.id);
+                }
+
+                await supabase
+                    .from('alerts')
+                    .update(alertResolvedPayload)
+                    .eq('owner_id', userId)
+                    .contains('metadata', { remoteReviewId: reviewId });
+
+                if (alert?.sessionId) {
+                    await supabase
+                        .from('alerts')
+                        .update(alertResolvedPayload)
+                        .eq('owner_id', userId)
+                        .eq('session_id', alert.sessionId)
+                        .eq('resolved', false);
+                }
+            }
             return true;
         } catch (err) {
             console.warn(`AlertRepository.resolveIdentityOnRemote failed: ${err?.message || err}`);
             return false;
+        }
+    },
+
+    async resolveLocalIdentityGroup(alert, catId, resolvedBy = 'user', resolvedCatName = null) {
+        const history = AlertEngine.getHistory();
+        const sessionId = alert?.sessionId || null;
+        const reviewId = String(alert?.remoteReviewId || alert?.id || '');
+        const targets = history.filter((a) => {
+            if (a?.type !== 'pending_identity') return false;
+            if (sessionId && a?.sessionId === sessionId) return true;
+            const aid = String(a?.remoteReviewId || a?.id || '');
+            return reviewId && aid === reviewId;
+        });
+        for (const t of targets) {
+            await AlertEngine.resolveIdentity(t.id, catId, resolvedBy, resolvedCatName);
         }
     },
 

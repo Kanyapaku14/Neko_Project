@@ -5,6 +5,7 @@ import argparse
 import mimetypes
 from collections import defaultdict
 from datetime import datetime, timezone
+from collections import deque
 
 from dotenv import load_dotenv
 
@@ -30,6 +31,52 @@ CLASSIFY_EVERY_N = 2
 CROP_EXPAND_RATIO = 0.25
 NORMAL_SNAPSHOT_COOLDOWN_SEC = 15.0
 ABNORMAL_SNAPSHOT_COOLDOWN_SEC = 8.0
+OVER_CAPACITY_ALERT_COOLDOWN_SEC = 180.0
+OVER_CAPACITY_MIN_PERSIST_SEC = 8.0
+
+# Real-world health app event rules:
+# - Require sustained frames before counting one behavior event
+# - Apply behavior-specific cooldown to prevent duplicate counting
+BEHAVIOR_MIN_STREAK_FRAMES = {
+    "eat": 10,
+    "litter": 12,
+    "sleep": 16,
+    "activity": 20,
+    "abnormal": 5,
+}
+BEHAVIOR_MIN_CONFIDENCE = {
+    "eat": 0.50,
+    "litter": 0.55,
+    "sleep": 0.45,
+    "activity": 0.40,
+    "abnormal": 0.65,
+}
+BEHAVIOR_EVENT_COOLDOWN_SEC = {
+    "eat": 90.0,
+    "litter": 120.0,
+    "sleep": 300.0,
+    "activity": 180.0,
+    "abnormal": 60.0,
+}
+
+# Hard daily cap to prevent runaway counting due to noisy detections.
+BEHAVIOR_DAILY_CAP = {
+    "eat": 30,
+    "litter": 20,
+    "sleep": 24,
+    "activity": 120,
+    "abnormal": 25,
+}
+
+# Abnormal escalation:
+# - warning on first abnormal event
+# - critical if >=3 abnormal events within 10 minutes
+ABNORMAL_ESCALATION_WINDOW_SEC = 600.0
+ABNORMAL_ESCALATION_CRITICAL_COUNT = 3
+ABNORMAL_ALERT_COOLDOWN_SEC = {
+    "warning": 300.0,
+    "critical": 600.0,
+}
 
 
 def expand_bbox(bbox, frame_shape, ratio=CROP_EXPAND_RATIO):
@@ -103,6 +150,23 @@ def load_camera_owner_id(supabase, camera_id):
         return None
 
 
+def load_cat_name_map(supabase, cat_ids):
+    if not supabase or not cat_ids:
+        return {}
+    try:
+        rows = (
+            supabase.table("cats")
+            .select("id,name")
+            .in_("id", cat_ids)
+            .execute()
+            .data
+            or []
+        )
+        return {str(r.get("id")): (r.get("name") or str(r.get("id"))) for r in rows if r.get("id")}
+    except Exception:
+        return {}
+
+
 def load_camera_source_from_db(supabase, camera_id):
     """
     Load dedicated source for this camera only.
@@ -123,7 +187,7 @@ def load_camera_record(supabase, camera_id):
     try:
         return (
             supabase.table("cameras")
-            .select("id, owner_id, stream_source, stream_source_type")
+            .select("id, owner_id, mode, stream_source, stream_source_type")
             .eq("id", camera_id)
             .maybe_single()
             .execute()
@@ -133,26 +197,104 @@ def load_camera_record(supabase, camera_id):
         return None
 
 
-def load_camera_cat_uuid_map(supabase, camera_id):
-    """Map session IDs (CAT001, CAT002, ...) to real cat UUIDs from camera_cats."""
-    out = {}
+def load_camera_assigned_cat_ids(supabase, camera_id):
+    """
+    Return ordered cat UUID list assigned to this camera (from UI camera setup).
+    Order: primary first, then assigned_at.
+    """
     if not supabase or not camera_id:
-        return out
+        return []
     try:
         rows = (
             supabase.table("camera_cats")
-            .select("cat_id, assigned_at")
+            .select("cat_id, is_primary, assigned_at")
             .eq("camera_id", camera_id)
+            .order("is_primary", desc=True)
             .order("assigned_at", desc=False)
             .execute()
             .data
             or []
         )
-        for i, row in enumerate(rows, start=1):
-            out[f"CAT{i:03d}"] = row.get("cat_id")
+        return [str(r.get("cat_id")) for r in rows if r.get("cat_id")]
     except Exception:
-        return {}
-    return out
+        return []
+
+
+def load_camera_zones(supabase, camera_id):
+    if not supabase or not camera_id:
+        return []
+    try:
+        rows = (
+            supabase.table("camera_zones")
+            .select("id, zone_type, label, polygon")
+            .eq("camera_id", camera_id)
+            .execute()
+            .data
+            or []
+        )
+        return rows
+    except Exception:
+        return []
+
+
+def _zone_rect_pixels(zone_polygon, frame_shape):
+    """
+    Support normalized rect format persisted by Phone.js:
+    polygon.rect = {x,y,w,h} in [0..1]
+    """
+    if not isinstance(zone_polygon, dict):
+        return None
+    rect = zone_polygon.get("rect")
+    if not isinstance(rect, dict):
+        return None
+    h, w = frame_shape[:2]
+    x = float(rect.get("x", 0.0))
+    y = float(rect.get("y", 0.0))
+    rw = float(rect.get("w", 0.0))
+    rh = float(rect.get("h", 0.0))
+    x1 = max(0, min(w - 1, int(x * w)))
+    y1 = max(0, min(h - 1, int(y * h)))
+    x2 = max(0, min(w - 1, int((x + rw) * w)))
+    y2 = max(0, min(h - 1, int((y + rh) * h)))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return (x1, y1, x2, y2)
+
+
+def detect_zone_for_bbox(camera_zones, bbox, frame_shape):
+    """
+    Return zone_type if bbox foot point lies inside a configured zone, else None.
+    """
+    if not camera_zones:
+        return None
+    bx1, by1, bx2, by2 = bbox
+    fx = int((bx1 + bx2) / 2.0)  # foot center x
+    fy = int(by2)  # foot y
+    for z in camera_zones:
+        zr = _zone_rect_pixels(z.get("polygon"), frame_shape)
+        if not zr:
+            continue
+        x1, y1, x2, y2 = zr
+        if x1 <= fx <= x2 and y1 <= fy <= y2:
+            return z.get("zone_type")
+    return None
+
+
+def apply_zone_behavior_prior(db_behavior, confidence, zone_type):
+    """
+    Rule-based disambiguation:
+    - In food zone, low-confidence activity/sleep tends to be 'eat'
+    - In litter zone, low-confidence activity/sleep tends to be 'litter'
+    - In bed zone, low-confidence eat tends to be 'sleep'
+    """
+    conf = float(confidence or 0.0)
+    if zone_type == "food" and db_behavior in ("activity", "sleep") and conf < 0.72:
+        return "eat"
+    if zone_type == "litter" and db_behavior in ("activity", "sleep") and conf < 0.75:
+        return "litter"
+    if zone_type == "bed" and db_behavior == "eat" and conf < 0.65:
+        return "sleep"
+    return db_behavior
 
 
 def insert_ai_event(supabase, camera_id, cat_uuid, behavior, confidence, abnormal):
@@ -169,7 +311,15 @@ def insert_ai_event(supabase, camera_id, cat_uuid, behavior, confidence, abnorma
     supabase.table("ai_cat_events").insert(payload).execute()
 
 
-def insert_identity_review(supabase, camera_id, pred_cat_uuid, behavior, confidence, snapshot_path):
+def insert_identity_review(
+    supabase,
+    camera_id,
+    pred_cat_uuid,
+    behavior,
+    confidence,
+    snapshot_path,
+    metadata=None,
+):
     if not supabase or not camera_id:
         return
     payload = {
@@ -182,7 +332,7 @@ def insert_identity_review(supabase, camera_id, pred_cat_uuid, behavior, confide
         "reviewed": False,
         "source": "smart_cat_health_server",
         "session_id": None,
-        "metadata": {},
+        "metadata": metadata or {},
     }
     supabase.table("ai_cat_identity_review").insert(payload).execute()
 
@@ -248,16 +398,28 @@ def insert_timeline_event(supabase, cat_uuid, event_type, title, description, ev
     supabase.table("timeline_events").insert(payload).execute()
 
 
-def insert_alert_if_needed(supabase, owner_id, camera_id, cat_uuid, behavior, confidence, abnormal, event_time_iso):
+def insert_alert_if_needed(
+    supabase,
+    owner_id,
+    camera_id,
+    cat_uuid,
+    behavior,
+    confidence,
+    abnormal,
+    event_time_iso,
+    severity="warning",
+    title=None,
+):
     if not (supabase and owner_id and abnormal):
         return
+    title = title or "Abnormal behavior detected"
     payload = {
         "owner_id": owner_id,
         "camera_id": camera_id,
         "cat_id": cat_uuid if cat_uuid and "-" in str(cat_uuid) else None,
         "type": "behavior_abnormal",
-        "severity": "warning",
-        "title": "Abnormal behavior detected",
+        "severity": severity,
+        "title": title,
         "description": f"Detected {behavior} with confidence {int(confidence * 100)}%",
         "details": "Please review camera snapshot and cat condition.",
         "timestamp": event_time_iso,
@@ -265,6 +427,120 @@ def insert_alert_if_needed(supabase, owner_id, camera_id, cat_uuid, behavior, co
         "metadata": {"behavior": behavior, "confidence": confidence},
     }
     supabase.table("alerts").insert(payload).execute()
+
+
+def insert_over_capacity_alert(
+    supabase,
+    owner_id,
+    camera_id,
+    top_cat_uuid,
+    top_cat_name,
+    observed_count,
+    allowed_count,
+    event_time_iso,
+):
+    if not (supabase and owner_id and camera_id):
+        return
+    title = "More cats detected than assigned"
+    desc = f"Detected {observed_count} cats while this camera is assigned to {allowed_count}."
+    if top_cat_name:
+        details = f"Most active in this period: {top_cat_name} ({top_cat_uuid}). Please review camera assignment."
+    else:
+        details = "Please review camera assignment and cat identity."
+    payload = {
+        "owner_id": owner_id,
+        "camera_id": camera_id,
+        "cat_id": top_cat_uuid if top_cat_uuid and "-" in str(top_cat_uuid) else None,
+        "type": "camera_over_capacity",
+        "severity": "warning",
+        "title": title,
+        "description": desc,
+        "details": details,
+        "timestamp": event_time_iso,
+        "source": "smart_cat_health_server",
+        "metadata": {
+            "observed_count": observed_count,
+            "allowed_count": allowed_count,
+            "top_cat_uuid": top_cat_uuid,
+            "top_cat_name": top_cat_name,
+        },
+    }
+    supabase.table("alerts").insert(payload).execute()
+
+
+def should_commit_behavior_event(event_state, cat_key, db_behavior, confidence, now_ts):
+    """
+    Count one event only when:
+    1) behavior confidence passes threshold
+    2) behavior is sustained for minimum streak frames
+    3) same behavior cooldown has elapsed
+    """
+    min_conf = BEHAVIOR_MIN_CONFIDENCE.get(db_behavior, 0.4)
+    if float(confidence or 0.0) < min_conf:
+        return False
+
+    state = event_state.setdefault(
+        cat_key,
+        {
+            "observed_label": None,
+            "streak": 0,
+            "last_event_at": {},  # label -> epoch seconds
+        },
+    )
+
+    if state["observed_label"] == db_behavior:
+        state["streak"] += 1
+    else:
+        state["observed_label"] = db_behavior
+        state["streak"] = 1
+
+    min_streak = BEHAVIOR_MIN_STREAK_FRAMES.get(db_behavior, 10)
+    if state["streak"] < min_streak:
+        return False
+
+    last_at = float(state["last_event_at"].get(db_behavior, 0.0))
+    cooldown = BEHAVIOR_EVENT_COOLDOWN_SEC.get(db_behavior, 120.0)
+    if (now_ts - last_at) < cooldown:
+        return False
+
+    state["last_event_at"][db_behavior] = now_ts
+    return True
+
+
+def within_daily_cap(daily_event_counts, cat_key, db_behavior, now_dt_utc):
+    day_key = now_dt_utc.date().isoformat()
+    state_key = (cat_key, day_key, db_behavior)
+    current = daily_event_counts.get(state_key, 0)
+    cap = BEHAVIOR_DAILY_CAP.get(db_behavior, 999999)
+    if current >= cap:
+        return False
+    daily_event_counts[state_key] = current + 1
+    return True
+
+
+def decide_abnormal_alert_level(abnormal_state, cat_key, now_ts):
+    """
+    Return severity level 'warning' or 'critical' when alert should fire, else None.
+    """
+    state = abnormal_state.setdefault(
+        cat_key,
+        {
+            "events": deque(),  # abnormal event timestamps
+            "last_alert_at": {"warning": 0.0, "critical": 0.0},
+        },
+    )
+
+    events = state["events"]
+    events.append(now_ts)
+    while events and (now_ts - events[0]) > ABNORMAL_ESCALATION_WINDOW_SEC:
+        events.popleft()
+
+    level = "critical" if len(events) >= ABNORMAL_ESCALATION_CRITICAL_COUNT else "warning"
+    cooldown = ABNORMAL_ALERT_COOLDOWN_SEC[level]
+    if (now_ts - state["last_alert_at"].get(level, 0.0)) < cooldown:
+        return None
+    state["last_alert_at"][level] = now_ts
+    return level
 
 
 def upsert_daily_summary(supabase, cat_uuid, summary_date, metrics):
@@ -316,7 +592,6 @@ def run(
 
     tracker = CatTracker(model_path=model_path, conf=MIN_DETECTION_CONF)
     behavior_sys = BehaviorSystem(model_path=behavior_model_path, class_mapping_path=class_mapping_path)
-    session = CatSessionManager(session_dir="sessions")
     supabase = create_supabase_client() if db_write else None
     if db_write and not supabase:
         raise SystemExit(
@@ -324,9 +599,13 @@ def run(
             "(service role key from the same Supabase project)."
         )
     camera_row = load_camera_record(supabase, camera_id) if db_write and camera_id else None
-    cat_uuid_map = load_camera_cat_uuid_map(supabase, camera_id) if db_write and camera_id else {}
+    assigned_cat_ids = load_camera_assigned_cat_ids(supabase, camera_id) if db_write and camera_id else []
+    camera_zones = load_camera_zones(supabase, camera_id) if db_write and camera_id else []
+    cat_name_map = load_cat_name_map(supabase, assigned_cat_ids) if db_write and assigned_cat_ids else {}
     owner_id = load_camera_owner_id(supabase, camera_id) if db_write and camera_id else None
     db_source = load_camera_source_from_db(supabase, camera_id) if db_write and camera_id else None
+    camera_mode = (camera_row or {}).get("mode")
+    is_single_mode = camera_mode == "single_cat"
 
     if db_write and camera_id and not camera_row:
         raise SystemExit(
@@ -339,6 +618,18 @@ def run(
             f"camera_id '{camera_id}' has no stream_source in DB. "
             "Set cameras.stream_source first (video/webcam/rtsp)."
         )
+    if db_write and camera_id and not assigned_cat_ids:
+        raise SystemExit(
+            f"camera_id '{camera_id}' has no cats assigned in camera_cats. "
+            "Assign cats from Setcamera UI first."
+        )
+
+    # Use DB cat ids directly; never create more than assigned cats when db_write mode is enabled.
+    session = CatSessionManager(
+        session_dir="sessions",
+        known_cat_ids=assigned_cat_ids if db_write else None,
+        max_cats=len(assigned_cat_ids) if (db_write and assigned_cat_ids) else None,
+    )
 
     source = db_source if db_source is not None else source
     print(
@@ -359,6 +650,15 @@ def run(
         "count_18_24": 0,
         "_behavior_counts": defaultdict(int),
     })
+    behavior_event_state = {}
+    daily_event_counts = {}
+    abnormal_escalation_state = {}
+    over_capacity_state = {
+        "active_since": None,
+        "peak_observed": 0,
+        "activity_counts": defaultdict(int),  # cat_uuid -> events count in this active window
+        "last_alert_at": 0.0,
+    }
 
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
@@ -383,6 +683,9 @@ def run(
                 frame_small = frame_orig
 
             tracked = tracker.update(frame_small)
+            valid_tracks_in_frame = 0
+            frame_cat_counts = defaultdict(int)  # mapped cat_uuid activity in this frame
+            frame_cat_last_bbox = {}  # cat_uuid -> last bbox in this frame
             for obj in tracked:
                 bx1, by1, bx2, by2 = obj.bbox
                 if scale != 1.0:
@@ -390,6 +693,7 @@ def run(
                 bbox = [bx1, by1, bx2, by2]
                 if (bx2 - bx1) * (by2 - by1) < MIN_BBOX_AREA:
                     continue
+                valid_tracks_in_frame += 1
 
                 cat_id = session.get_cat_id(obj.track_id, bbox=bbox)
                 session.update_seen(cat_id, bbox=bbox)
@@ -430,7 +734,22 @@ def run(
                     try:
                         event_time = datetime.now(timezone.utc)
                         event_iso = event_time.isoformat()
-                        cat_uuid = cat_uuid_map.get(cat_id)
+                        now_event_ts = time.time()
+                        cat_uuid = cat_id if "-" in str(cat_id) else None
+                        if cat_uuid:
+                            frame_cat_counts[cat_uuid] += 1
+                            frame_cat_last_bbox[cat_uuid] = bbox
+                        db_behavior = map_behavior_to_db(behavior)
+                        zone_type = detect_zone_for_bbox(camera_zones, bbox, frame_orig.shape)
+                        db_behavior = apply_zone_behavior_prior(db_behavior, confidence, zone_type)
+                        cat_event_key = cat_uuid or str(cat_id)
+                        should_commit = should_commit_behavior_event(
+                            event_state=behavior_event_state,
+                            cat_key=cat_event_key,
+                            db_behavior=db_behavior,
+                            confidence=confidence,
+                            now_ts=now_event_ts,
+                        )
                         if snap_path:
                             snap_path = upload_snapshot_to_storage(
                                 supabase=supabase,
@@ -439,9 +758,17 @@ def run(
                                 cat_uuid=cat_uuid,
                                 event_time=event_time,
                             )
-                        insert_ai_event(supabase, camera_id, cat_uuid, behavior, confidence, abnormal)
-                        if cat_uuid:
-                            db_behavior = map_behavior_to_db(behavior)
+                        if should_commit and within_daily_cap(
+                            daily_event_counts=daily_event_counts,
+                            cat_key=cat_event_key,
+                            db_behavior=db_behavior,
+                            now_dt_utc=event_time,
+                        ):
+                            insert_ai_event(supabase, camera_id, cat_uuid, behavior, confidence, abnormal)
+                            committed = True
+                        else:
+                            committed = False
+                        if cat_uuid and committed:
                             rollup = summary_rollup[cat_uuid]
                             if db_behavior == "eat":
                                 rollup["total_feeding"] += 1
@@ -459,13 +786,121 @@ def run(
                                 f"{behavior} ({int(confidence * 100)}%)",
                                 event_iso,
                             )
-                            insert_alert_if_needed(
-                                supabase, owner_id, camera_id, cat_uuid, behavior, confidence, abnormal, event_iso
-                            )
+                            if (not is_single_mode) and db_behavior == "abnormal":
+                                level = decide_abnormal_alert_level(
+                                    abnormal_state=abnormal_escalation_state,
+                                    cat_key=cat_event_key,
+                                    now_ts=now_event_ts,
+                                )
+                                if level:
+                                    title = "Critical abnormal pattern detected" if level == "critical" else "Abnormal behavior detected"
+                                    insert_alert_if_needed(
+                                        supabase=supabase,
+                                        owner_id=owner_id,
+                                        camera_id=camera_id,
+                                        cat_uuid=cat_uuid,
+                                        behavior=behavior,
+                                        confidence=confidence,
+                                        abnormal=True,
+                                        event_time_iso=event_iso,
+                                        severity=level,
+                                        title=title,
+                                    )
+                            elif (not is_single_mode) and db_behavior != "abnormal":
+                                insert_alert_if_needed(
+                                    supabase, owner_id, camera_id, cat_uuid, behavior, confidence, abnormal, event_iso
+                                )
                         if snap_path:
                             insert_identity_review(supabase, camera_id, cat_uuid, behavior, confidence, snap_path)
                     except Exception as e:
                         print(f"DB write error: {e}")
+
+            # Over-capacity handling: detected tracks exceed assigned cats (aggregated + throttled)
+            if db_write and camera_id and assigned_cat_ids:
+                observed_count = valid_tracks_in_frame
+                allowed_count = len(assigned_cat_ids)
+                now_ts = time.time()
+                if observed_count > allowed_count:
+                    if over_capacity_state["active_since"] is None:
+                        over_capacity_state["active_since"] = now_ts
+                        over_capacity_state["peak_observed"] = observed_count
+                        over_capacity_state["activity_counts"].clear()
+                    over_capacity_state["peak_observed"] = max(over_capacity_state["peak_observed"], observed_count)
+                    for cid, cnt in frame_cat_counts.items():
+                        over_capacity_state["activity_counts"][cid] += cnt
+
+                    persisted = now_ts - over_capacity_state["active_since"]
+                    cooldown_passed = (now_ts - over_capacity_state["last_alert_at"]) >= OVER_CAPACITY_ALERT_COOLDOWN_SEC
+                    if persisted >= OVER_CAPACITY_MIN_PERSIST_SEC and cooldown_passed:
+                        top_cat_uuid = None
+                        top_cat_name = None
+                        if over_capacity_state["activity_counts"]:
+                            top_cat_uuid = max(
+                                over_capacity_state["activity_counts"],
+                                key=over_capacity_state["activity_counts"].get,
+                            )
+                            top_cat_name = cat_name_map.get(top_cat_uuid, top_cat_uuid)
+                        try:
+                            event_iso = datetime.now(timezone.utc).isoformat()
+                            if is_single_mode:
+                                # In single-cat mode, do not spam abnormal alerts.
+                                # Create a review task so user can confirm which detection is truly their cat
+                                # (or skip if it is a toy/false positive).
+                                review_cat_uuid = top_cat_uuid or (assigned_cat_ids[0] if assigned_cat_ids else None)
+                                snap_path = None
+                                review_bbox = frame_cat_last_bbox.get(review_cat_uuid) if review_cat_uuid else None
+                                if review_bbox:
+                                    snap_bbox = expand_bbox(review_bbox, frame_orig.shape)
+                                    snap_path = behavior_sys.create_snapshot(
+                                        frame_orig,
+                                        snap_bbox,
+                                        review_cat_uuid or "unassigned",
+                                        behavior_label="active",
+                                        confidence=0.51,
+                                        event_type="monitor",
+                                    )
+                                    if snap_path:
+                                        snap_path = upload_snapshot_to_storage(
+                                            supabase=supabase,
+                                            local_path=snap_path,
+                                            camera_id=camera_id,
+                                            cat_uuid=review_cat_uuid,
+                                            event_time=datetime.now(timezone.utc),
+                                        )
+                                insert_identity_review(
+                                    supabase=supabase,
+                                    camera_id=camera_id,
+                                    pred_cat_uuid=review_cat_uuid,
+                                    behavior="active",
+                                    confidence=0.51,
+                                    snapshot_path=snap_path,
+                                    metadata={
+                                        "reason": "single_mode_over_capacity",
+                                        "observed_count": over_capacity_state["peak_observed"],
+                                        "allowed_count": allowed_count,
+                                    },
+                                )
+                            else:
+                                insert_over_capacity_alert(
+                                    supabase=supabase,
+                                    owner_id=owner_id,
+                                    camera_id=camera_id,
+                                    top_cat_uuid=top_cat_uuid,
+                                    top_cat_name=top_cat_name,
+                                    observed_count=over_capacity_state["peak_observed"],
+                                    allowed_count=allowed_count,
+                                    event_time_iso=event_iso,
+                                )
+                            over_capacity_state["last_alert_at"] = now_ts
+                            over_capacity_state["active_since"] = now_ts
+                            over_capacity_state["peak_observed"] = observed_count
+                            over_capacity_state["activity_counts"].clear()
+                        except Exception as e:
+                            print(f"Over-capacity alert insert failed: {e}")
+                else:
+                    over_capacity_state["active_since"] = None
+                    over_capacity_state["peak_observed"] = 0
+                    over_capacity_state["activity_counts"].clear()
 
             lost = session.get_lost_tracks(now)
             for tid in lost:

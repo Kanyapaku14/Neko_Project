@@ -13,7 +13,8 @@
  *   The queue automatically listens to AlertEngine via AlertEvents.IDENTITY_PENDING
  */
 
-import React, { createContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import AlertEngine, { AlertEvents } from './AlertEngine';
 import AlertRepository from './AlertRepository';
 import CatPickerModal from '../components/alert/CatPickerModal';
@@ -30,6 +31,23 @@ export function GlobalAlertQueueProvider({ children, session }) {
     const [queue, setQueue] = useState([]);
     const [currentAlert, setCurrentAlert] = useState(null);
     const [catsFromDb, setCatsFromDb] = useState([]);
+    const [criticalAlert, setCriticalAlert] = useState(null);
+    const [dismissedCriticalIds, setDismissedCriticalIds] = useState({});
+    const [autoPoppedPendingIds, setAutoPoppedPendingIds] = useState({});
+
+    const findTopCritical = useCallback(() => {
+        const criticalList = AlertEngine
+            .getHistory()
+            .filter((a) => a?.severity === 'critical' && !a?.resolved && !a?.isDeleted);
+        if (!criticalList.length) return null;
+        return criticalList[0];
+    }, []);
+
+    const openCriticalIfNeeded = useCallback((candidate) => {
+        if (!candidate?.id) return;
+        if (dismissedCriticalIds[candidate.id]) return;
+        setCriticalAlert((prev) => (prev?.id === candidate.id ? prev : candidate));
+    }, [dismissedCriticalIds]);
 
     // 1. Fetch Cats from DB when session exists
     useEffect(() => {
@@ -68,6 +86,11 @@ export function GlobalAlertQueueProvider({ children, session }) {
                 console.log('GlobalAlertQueue: Alert is normal, skipping Auto-Popup.');
                 return;
             }
+            if (!alert?.id) return;
+            if (autoPoppedPendingIds[alert.id]) {
+                // Already auto-popped in this app session; keep it in alert list only.
+                return;
+            }
 
             setQueue((prevQueue) => {
                 // Prevent duplicate enqueuing of the exact same alert ID
@@ -76,11 +99,38 @@ export function GlobalAlertQueueProvider({ children, session }) {
                 }
                 return [...prevQueue, alert];
             });
+            setAutoPoppedPendingIds((prev) => ({ ...prev, [alert.id]: true }));
         };
 
         AlertEngine.on(AlertEvents.IDENTITY_PENDING, handleNewPendingAlert);
         return () => AlertEngine.off(AlertEvents.IDENTITY_PENDING, handleNewPendingAlert);
-    }, [currentAlert]);
+    }, [currentAlert, autoPoppedPendingIds]);
+
+    // Global Critical Popup: show on every screen
+    useEffect(() => {
+        const handleNewCritical = (alert) => {
+            if (!alert) return;
+            openCriticalIfNeeded(alert);
+        };
+        const handleUpdated = () => {
+            const topCritical = findTopCritical();
+            if (topCritical) {
+                openCriticalIfNeeded(topCritical);
+                return;
+            }
+            setCriticalAlert(null);
+        };
+
+        // handle app boot/reload where critical already exists in storage
+        handleUpdated();
+
+        AlertEngine.on(AlertEvents.NEW_CRITICAL, handleNewCritical);
+        AlertEngine.on(AlertEvents.UPDATED, handleUpdated);
+        return () => {
+            AlertEngine.off(AlertEvents.NEW_CRITICAL, handleNewCritical);
+            AlertEngine.off(AlertEvents.UPDATED, handleUpdated);
+        };
+    }, [findTopCritical, openCriticalIfNeeded]);
 
     // 3. Queue Processor: Pop next alert when idle
     useEffect(() => {
@@ -122,23 +172,21 @@ export function GlobalAlertQueueProvider({ children, session }) {
         if (!currentAlert) return;
         const selectedCat = catsFromDb.find(c => c.id === catId);
         await AlertRepository.resolveIdentityOnRemote(currentAlert, catId, 'user');
-        await AlertEngine.resolveIdentity(currentAlert.id, catId, 'user', selectedCat?.name || null);
+        await AlertRepository.resolveLocalIdentityGroup(currentAlert, catId, 'user', selectedCat?.name || null);
         setCurrentAlert(null); // Triggers effect #3 to pop next
     };
 
     const handleSkip = async () => {
         if (!currentAlert) return;
-
-        // If it's an abnormal (risky) behavior, we DON'T resolve it via "Skip".
-        // It must be identified specifically to disappear from the banner.
-        // We just hide the modal for now (Dismiss).
-        if (currentAlert.isAbnormal) {
-            handleDismiss();
-            return;
-        }
-
         await AlertRepository.resolveIdentityOnRemote(currentAlert, null, 'skipped');
-        await AlertEngine.resolveIdentity(currentAlert.id, null, 'skipped');
+        await AlertRepository.resolveLocalIdentityGroup(currentAlert, null, 'skipped', 'Not your cat');
+        setCurrentAlert(null);
+    };
+
+    const handleReject = async () => {
+        if (!currentAlert) return;
+        await AlertRepository.resolveIdentityOnRemote(currentAlert, null, 'skipped');
+        await AlertRepository.resolveLocalIdentityGroup(currentAlert, null, 'skipped', 'Not your cat');
         setCurrentAlert(null);
     };
 
@@ -149,18 +197,125 @@ export function GlobalAlertQueueProvider({ children, session }) {
         setCurrentAlert(null);
     };
 
+    const dismissCritical = useCallback(() => {
+        if (!criticalAlert?.id) {
+            setCriticalAlert(null);
+            return;
+        }
+        setDismissedCriticalIds((prev) => ({ ...prev, [criticalAlert.id]: true }));
+        setCriticalAlert(null);
+    }, [criticalAlert]);
+
+    const criticalTimeText = useMemo(() => {
+        if (!criticalAlert?.timestamp) return '';
+        try {
+            return new Date(criticalAlert.timestamp).toLocaleString();
+        } catch (e) {
+            return '';
+        }
+    }, [criticalAlert]);
+
     return (
         <GlobalAlertQueueContext.Provider value={{ pushAlert, openPendingQueue }}>
             {children}
+            <Modal
+                visible={criticalAlert !== null}
+                transparent
+                animationType="fade"
+                onRequestClose={dismissCritical}
+            >
+                <Pressable style={styles.criticalBackdrop} onPress={dismissCritical}>
+                    <Pressable style={styles.criticalCard} onPress={() => { }}>
+                        <Text style={styles.criticalTitle}>
+                            Critical Alert
+                        </Text>
+                        {!!criticalAlert?.title && (
+                            <Text style={styles.criticalHeading}>{criticalAlert.title}</Text>
+                        )}
+                        {!!criticalAlert?.desc && (
+                            <Text style={styles.criticalDesc}>{criticalAlert.desc}</Text>
+                        )}
+                        {!!criticalTimeText && (
+                            <Text style={styles.criticalTime}>{criticalTimeText}</Text>
+                        )}
+                        <View style={styles.criticalActions}>
+                            <Pressable style={styles.criticalBtn} onPress={dismissCritical}>
+                                <Text style={styles.criticalBtnText}>Dismiss</Text>
+                            </Pressable>
+                        </View>
+                    </Pressable>
+                </Pressable>
+            </Modal>
             <CatPickerModal
                 visible={currentAlert !== null}
                 alert={currentAlert}
                 cats={catsFromDb}
                 onSelect={handleSelect}
                 onSkip={handleSkip}
+                onReject={handleReject}
                 onDismiss={handleDismiss}
                 queueLength={queue.length}
             />
         </GlobalAlertQueueContext.Provider>
     );
 }
+
+const styles = StyleSheet.create({
+    criticalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(15, 23, 42, 0.36)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+    },
+    criticalCard: {
+        width: '100%',
+        maxWidth: 420,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 18,
+        paddingVertical: 18,
+        paddingHorizontal: 16,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.16,
+        shadowRadius: 20,
+        elevation: 9,
+    },
+    criticalTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#B42318',
+        marginBottom: 8,
+    },
+    criticalHeading: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#1F2937',
+        marginBottom: 6,
+    },
+    criticalDesc: {
+        fontSize: 14,
+        color: '#374151',
+        lineHeight: 20,
+    },
+    criticalTime: {
+        marginTop: 8,
+        fontSize: 12,
+        color: '#6B7280',
+    },
+    criticalActions: {
+        marginTop: 14,
+        alignItems: 'flex-end',
+    },
+    criticalBtn: {
+        backgroundColor: '#B42318',
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        borderRadius: 10,
+    },
+    criticalBtnText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+});

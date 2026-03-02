@@ -24,7 +24,12 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
     // Re-evaluate pending status if alert gets resolved while this screen is open
     useEffect(() => {
         const handler = () => {
-            const upToDateAlert = AlertEngine.getHistory().find(a => a.id === data?.id);
+            const upToDateAlert = AlertEngine.getHistory().find((a) => {
+                if (a.id === data?.id) return true;
+                if (data?.remoteReviewId && String(a?.remoteReviewId || '') === String(data.remoteReviewId)) return true;
+                if (data?.sessionId && a?.sessionId === data.sessionId && a?.type === data?.type) return true;
+                return false;
+            });
             if (upToDateAlert) {
                 setAlertView(upToDateAlert);
             }
@@ -72,8 +77,10 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
     const normalizedSeverity = (alertView.severity || '').toLowerCase();
     const sevConfig = getSeverityConfig(normalizedSeverity);
     const isIdentityAlert = alertView.type === 'pending_identity';
-    const isPending = alertView.pendingIdentityConfirm === true || (isIdentityAlert && alertView.resolvedBy === 'skipped');
+    const isPending = alertView.pendingIdentityConfirm === true;
+    const isRejectedIdentity = isIdentityAlert && !isPending && alertView.resolvedBy === 'skipped';
     const resolvedCatLabel = alertView.resolvedCatName || (alertView.resolvedCatId ? `ID: ${alertView.resolvedCatId}` : null);
+    const latestResolutionText = alertView.resolutionText || null;
 
     // Nicer timestamp format
     const formatTimeNice = (isoString) => {
@@ -196,7 +203,12 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
                                     <MaterialCommunityIcons name="help-rhombus-outline" size={20} color="#E65100" style={{ marginRight: 8 }} />
                                     <Text style={[styles.sectionTitle, { color: '#E65100' }]}>Identify Cat</Text>
                                 </View>
-                                {resolvedCatLabel && !isPending ? (
+                                {isRejectedIdentity ? (
+                                    <View style={styles.selectedCatChip}>
+                                        <MaterialCommunityIcons name="close-circle" size={16} color="#B42318" />
+                                        <Text style={[styles.selectedCatText, { color: '#B42318' }]}>Marked as not your cat.</Text>
+                                    </View>
+                                ) : resolvedCatLabel && !isPending ? (
                                     <View style={styles.selectedCatChip}>
                                         <MaterialCommunityIcons name="paw" size={16} color="#1A56C5" />
                                         <Text style={styles.selectedCatText}>Selected cat: {resolvedCatLabel}</Text>
@@ -205,6 +217,9 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
                                     <Text style={styles.descText}>
                                         The system detected this behavior but is unsure which cat it is. Please identify to improve model accuracy.
                                     </Text>
+                                )}
+                                {!isPending && !!latestResolutionText && (
+                                    <Text style={[styles.descText, { marginTop: 8 }]}>{latestResolutionText}</Text>
                                 )}
                                 <TouchableOpacity
                                     style={styles.identifyButton}
@@ -228,7 +243,7 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
                                         }}
                                     >
                                         <MaterialCommunityIcons name="paw" size={16} color="#FFF" style={{ marginRight: 6 }} />
-                                        <Text style={styles.identifyButtonText}>{resolvedCatLabel ? 'Edit selected cat' : 'Identify which cat'}</Text>
+                                        <Text style={styles.identifyButtonText}>{(resolvedCatLabel || isRejectedIdentity) ? 'Edit selected cat' : 'Identify which cat'}</Text>
                                     </Animated.View>
                                 </TouchableOpacity>
                             </View>

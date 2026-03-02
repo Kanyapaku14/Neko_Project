@@ -4,8 +4,10 @@
  * Modal for selecting which cat was detected in a pending identity event.
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
+    ActivityIndicator,
+    Animated,
     Modal,
     View,
     Text,
@@ -14,9 +16,11 @@ import {
     Image,
     Dimensions,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 const BEHAVIOR_ICON_MAP = {
     vomiting: { icon: 'emoticon-sick-outline', color: '#D32F2F' },
@@ -33,8 +37,66 @@ function getBehaviorIcon(label) {
     return BEHAVIOR_ICON_MAP[normalized] || { icon: 'paw', color: '#546E7A' };
 }
 
-export default function CatPickerModal({ visible, alert, cats = [], onSelect, onSkip, onDismiss, queueLength = 0 }) {
+export default function CatPickerModal({ visible, alert, cats = [], onSelect, onSkip, onDismiss, onReject, queueLength = 0 }) {
     const [dropdownOpen, setDropdownOpen] = useState(false);
+    const [selectedCatId, setSelectedCatId] = useState(null);
+    const [selectedCatName, setSelectedCatName] = useState('');
+    const [submittingAction, setSubmittingAction] = useState(null); // 'confirm' | 'reject' | 'skip' | null
+    const mountedRef = useRef(true);
+    const modalScale = useRef(new Animated.Value(0.96)).current;
+    const modalOpacity = useRef(new Animated.Value(0)).current;
+    const confirmPressAnim = useRef(new Animated.Value(0)).current;
+    const rejectPressAnim = useRef(new Animated.Value(0)).current;
+    const skipPressAnim = useRef(new Animated.Value(0)).current;
+    const closePressAnim = useRef(new Animated.Value(0)).current;
+    const isSubmitting = submittingAction !== null;
+
+    React.useEffect(() => {
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
+
+    React.useEffect(() => {
+        if (!visible || !alert) return;
+        // First-time pending alert: no prefill.
+        // Edit flow (already resolved): prefill previous selection/status.
+        const isPending = alert.pendingIdentityConfirm === true;
+        const isResolvedSelection = !isPending && alert.resolvedBy && alert.resolvedBy !== 'skipped';
+        if (isResolvedSelection) {
+            const found = cats.find((c) => c.id === alert.resolvedCatId);
+            setSelectedCatId(found?.id || alert.resolvedCatId || null);
+            setSelectedCatName(found?.name || alert.resolvedCatName || '');
+        } else {
+            // pending or skipped -> start empty so user chooses explicitly
+            setSelectedCatId(null);
+            setSelectedCatName('');
+        }
+        setDropdownOpen(false);
+    }, [visible, cats, alert?.id, alert?.resolvedBy, alert?.resolvedCatId, alert?.resolvedCatName, alert?.pendingIdentityConfirm]);
+
+    React.useEffect(() => {
+        if (visible) {
+            Animated.parallel([
+                Animated.spring(modalScale, {
+                    toValue: 1,
+                    useNativeDriver: true,
+                    stiffness: 260,
+                    damping: 24,
+                    mass: 0.8,
+                    overshootClamping: true,
+                }),
+                Animated.timing(modalOpacity, {
+                    toValue: 1,
+                    duration: 180,
+                    useNativeDriver: true,
+                }),
+            ]).start();
+        } else {
+            modalScale.setValue(0.96);
+            modalOpacity.setValue(0);
+        }
+    }, [visible, modalOpacity, modalScale]);
 
     if (!alert) return null;
 
@@ -42,19 +104,81 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
     const confidencePct = confidence != null ? Math.round(confidence * 100) : null;
     const { icon: behaviorIcon, color: behaviorColor } = getBehaviorIcon(behaviorLabel);
 
-    const handleSelectCat = (catId) => {
+    const handlePickCat = (catId) => {
+        if (isSubmitting) return;
+        if (selectedCatId === catId) {
+            // Tap same item again => clear selection before confirm.
+            setSelectedCatId(null);
+            setSelectedCatName('');
+            setDropdownOpen(false);
+            return;
+        }
+        const cat = cats.find((c) => c.id === catId);
+        setSelectedCatId(catId);
+        setSelectedCatName(cat?.name || '');
         setDropdownOpen(false);
-        if (onSelect) onSelect(catId);
+    };
+
+    const runAction = async (actionType, runner) => {
+        if (isSubmitting) return;
+        setSubmittingAction(actionType);
+        try {
+            await runner();
+        } finally {
+            if (mountedRef.current) {
+                setSubmittingAction(null);
+            }
+        }
+    };
+
+    const animatePressIn = (animValue) => {
+        Animated.timing(animValue, {
+            toValue: 1,
+            duration: 90,
+            useNativeDriver: true,
+        }).start();
+    };
+    const animatePressOut = (animValue) => {
+        Animated.spring(animValue, {
+            toValue: 0,
+            useNativeDriver: true,
+            stiffness: 260,
+            damping: 22,
+            mass: 0.75,
+            overshootClamping: true,
+        }).start();
+    };
+
+    const handleConfirm = async () => {
+        if (!selectedCatId) return;
+        await runAction('confirm', async () => {
+            try {
+                await AsyncStorage.setItem('last_selected_cat_id', selectedCatId);
+            } catch (e) {
+                // no-op
+            }
+            if (onSelect) await onSelect(selectedCatId);
+        });
     };
 
     const handleDismiss = () => {
+        if (isSubmitting) return;
         setDropdownOpen(false);
         if (onDismiss) onDismiss();
     };
 
-    const handleSkip = () => {
-        setDropdownOpen(false);
-        if (onSkip) onSkip();
+    const handleSkip = async () => {
+        await runAction('skip', async () => {
+            setDropdownOpen(false);
+            if (onSkip) await onSkip();
+        });
+    };
+
+    const handleReject = async () => {
+        await runAction('reject', async () => {
+            setDropdownOpen(false);
+            if (onReject) await onReject();
+        });
     };
 
     return (
@@ -62,19 +186,26 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
             visible={visible}
             transparent
             animationType="fade"
-            onRequestClose={onDismiss}
+            onRequestClose={handleDismiss}
             statusBarTranslucent
         >
             <TouchableOpacity
                 style={styles.backdrop}
                 activeOpacity={1}
-                onPress={handleDismiss}
+                onPress={() => {
+                    if (!isSubmitting) handleDismiss();
+                }}
             >
-                <TouchableOpacity
-                    style={styles.modalContainer}
-                    activeOpacity={1}
-                    onPress={() => setDropdownOpen(false)}
+                <Animated.View
+                    style={[
+                        styles.modalContainer,
+                        {
+                            opacity: modalOpacity,
+                            transform: [{ scale: modalScale }],
+                        },
+                    ]}
                 >
+                    <TouchableOpacity activeOpacity={1} onPress={() => setDropdownOpen(false)}>
                     <View style={styles.header}>
                         <View style={styles.headerLeft}>
                             <Text style={styles.headerTitle}>Identify Cat</Text>
@@ -84,9 +215,24 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                                 </View>
                             )}
                         </View>
-                        <TouchableOpacity onPress={handleDismiss} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <AnimatedTouchableOpacity
+                            onPress={handleDismiss}
+                            onPressIn={() => animatePressIn(closePressAnim)}
+                            onPressOut={() => animatePressOut(closePressAnim)}
+                            disabled={isSubmitting}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            style={{
+                                opacity: isSubmitting ? 0.55 : 1,
+                                transform: [{
+                                    scale: closePressAnim.interpolate({
+                                        inputRange: [0, 1],
+                                        outputRange: [1, 0.92],
+                                    }),
+                                }],
+                            }}
+                        >
                             <Ionicons name="close" size={24} color="#546E7A" />
-                        </TouchableOpacity>
+                        </AnimatedTouchableOpacity>
                     </View>
 
                     <View style={styles.detectionCard}>
@@ -114,11 +260,16 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                     <View style={{ zIndex: 100 }}>
                         <TouchableOpacity
                             style={styles.dropdownToggle}
-                            onPress={() => setDropdownOpen(!dropdownOpen)}
+                            onPress={() => !isSubmitting && setDropdownOpen(!dropdownOpen)}
                             activeOpacity={0.8}
+                            disabled={isSubmitting}
                         >
                             <Text style={styles.dropdownToggleText}>
-                                {cats.length === 0 ? 'No cats found in the system' : 'Tap to choose a cat...'}
+                                {cats.length === 0
+                                    ? 'No cats found in the system'
+                                    : selectedCatName
+                                        ? `Selected: ${selectedCatName}`
+                                        : 'Tap to choose a cat...'}
                             </Text>
                             <Ionicons name={dropdownOpen ? 'chevron-up' : 'chevron-down'} size={20} color="#546E7A" />
                         </TouchableOpacity>
@@ -129,9 +280,15 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                                     <TouchableOpacity
                                         key={cat.id}
                                         style={[styles.dropdownItem, index === cats.length - 1 && { borderBottomWidth: 0 }]}
-                                        onPress={() => handleSelectCat(cat.id)}
+                                        onPress={() => handlePickCat(cat.id)}
+                                        disabled={isSubmitting}
                                     >
-                                        <Text style={styles.dropdownItemText}>{cat.name}</Text>
+                                        <View style={styles.dropdownItemRow}>
+                                            <Text style={styles.dropdownItemText}>{cat.name}</Text>
+                                            {selectedCatId === cat.id ? (
+                                                <Ionicons name="checkmark-circle" size={18} color="#00897B" />
+                                            ) : null}
+                                        </View>
                                     </TouchableOpacity>
                                 ))}
                             </View>
@@ -141,11 +298,95 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                     <View style={{ height: dropdownOpen ? (cats.length * 45) + 10 : 20 }} />
 
                     <View style={styles.actionRow}>
-                        <TouchableOpacity style={styles.skipButton} onPress={handleSkip} activeOpacity={0.7}>
-                            <Text style={styles.skipText}>Skip for now</Text>
-                        </TouchableOpacity>
+                        <AnimatedTouchableOpacity
+                            style={[
+                                styles.confirmButton,
+                                (!selectedCatId || isSubmitting) && styles.confirmButtonDisabled,
+                                {
+                                    transform: [{
+                                        scale: confirmPressAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [1, 0.96],
+                                        }),
+                                    }],
+                                },
+                            ]}
+                            onPress={handleConfirm}
+                            onPressIn={() => animatePressIn(confirmPressAnim)}
+                            onPressOut={() => animatePressOut(confirmPressAnim)}
+                            activeOpacity={0.8}
+                            disabled={!selectedCatId || isSubmitting}
+                        >
+                            {submittingAction === 'confirm' ? (
+                                <View style={styles.btnLoadingRow}>
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                    <Text style={[styles.confirmText, { marginLeft: 8 }]}>Saving...</Text>
+                                </View>
+                            ) : (
+                                <Text style={[styles.confirmText, !selectedCatId && styles.confirmTextDisabled]}>
+                                    Confirm
+                                </Text>
+                            )}
+                        </AnimatedTouchableOpacity>
+                        <AnimatedTouchableOpacity
+                            style={[
+                                styles.rejectButton,
+                                (selectedCatId || isSubmitting) && styles.rejectButtonDisabled,
+                                {
+                                    transform: [{
+                                        scale: rejectPressAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [1, 0.96],
+                                        }),
+                                    }],
+                                },
+                            ]}
+                            onPress={handleReject}
+                            onPressIn={() => animatePressIn(rejectPressAnim)}
+                            onPressOut={() => animatePressOut(rejectPressAnim)}
+                            activeOpacity={0.8}
+                            disabled={!!selectedCatId || isSubmitting}
+                        >
+                            {submittingAction === 'reject' ? (
+                                <View style={styles.btnLoadingRow}>
+                                    <ActivityIndicator size="small" color="#B42318" />
+                                    <Text style={[styles.rejectText, { marginLeft: 8 }]}>Updating...</Text>
+                                </View>
+                            ) : (
+                                <Text style={[styles.rejectText, selectedCatId && styles.rejectTextDisabled]}>Not this cat</Text>
+                            )}
+                        </AnimatedTouchableOpacity>
+                        <AnimatedTouchableOpacity
+                            style={[
+                                styles.skipButton,
+                                isSubmitting && styles.skipButtonDisabled,
+                                {
+                                    transform: [{
+                                        scale: skipPressAnim.interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [1, 0.96],
+                                        }),
+                                    }],
+                                },
+                            ]}
+                            onPress={handleSkip}
+                            onPressIn={() => animatePressIn(skipPressAnim)}
+                            onPressOut={() => animatePressOut(skipPressAnim)}
+                            activeOpacity={0.7}
+                            disabled={isSubmitting}
+                        >
+                            {submittingAction === 'skip' ? (
+                                <View style={styles.btnLoadingRow}>
+                                    <ActivityIndicator size="small" color="#546E7A" />
+                                    <Text style={[styles.skipText, { marginLeft: 8 }]}>Skipping...</Text>
+                                </View>
+                            ) : (
+                                <Text style={styles.skipText}>Skip for now</Text>
+                            )}
+                        </AnimatedTouchableOpacity>
                     </View>
-                </TouchableOpacity>
+                    </TouchableOpacity>
+                </Animated.View>
             </TouchableOpacity>
         </Modal>
     );
@@ -154,7 +395,7 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
 const styles = StyleSheet.create({
     backdrop: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        backgroundColor: 'rgba(15, 23, 42, 0.32)',
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -162,19 +403,21 @@ const styles = StyleSheet.create({
         width: SCREEN_WIDTH * 0.9,
         maxWidth: 400,
         backgroundColor: '#FFFFFF',
-        borderRadius: 20,
-        padding: 20,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 10,
+        borderRadius: 18,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: '#E6EEF3',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.14,
+        shadowRadius: 18,
         elevation: 10,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 16,
+        marginBottom: 12,
     },
     headerLeft: {
         flexDirection: 'row',
@@ -182,9 +425,9 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     headerTitle: {
-        fontSize: 20,
+        fontSize: 24,
         fontWeight: '700',
-        color: '#263238',
+        color: '#1E293B',
     },
     queueBadge: {
         backgroundColor: '#FF8A65',
@@ -198,11 +441,11 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
     },
     detectionCard: {
-        backgroundColor: '#F4F9F9',
-        borderRadius: 12,
-        marginBottom: 20,
+        backgroundColor: '#F8FBFC',
+        borderRadius: 11,
+        marginBottom: 12,
         borderWidth: 1,
-        borderColor: '#E0F2F1',
+        borderColor: '#E7EEF2',
         overflow: 'hidden',
     },
     snapshot: {
@@ -225,14 +468,15 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 12,
+        paddingVertical: 10,
+        paddingHorizontal: 10,
     },
     behaviorBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 12,
+        paddingHorizontal: 9,
+        paddingVertical: 3,
+        borderRadius: 999,
         gap: 6,
     },
     behaviorLabel: {
@@ -241,13 +485,13 @@ const styles = StyleSheet.create({
         textTransform: 'capitalize',
     },
     confidenceText: {
-        fontSize: 12,
+        fontSize: 11,
         fontWeight: '600',
-        color: '#78909C',
+        color: '#64748B',
     },
     instructionText: {
-        fontSize: 14,
-        color: '#546E7A',
+        fontSize: 13,
+        color: '#64748B',
         marginBottom: 8,
     },
     dropdownToggle: {
@@ -255,14 +499,15 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#CFD8DC',
+        borderColor: '#D7E2E8',
         borderRadius: 10,
-        padding: 14,
-        backgroundColor: '#FAFAFA',
+        paddingVertical: 11,
+        paddingHorizontal: 12,
+        backgroundColor: '#F8FAFB',
     },
     dropdownToggleText: {
-        fontSize: 15,
-        color: '#263238',
+        fontSize: 14,
+        color: '#1F2937',
     },
     dropdownMenu: {
         position: 'absolute',
@@ -271,12 +516,12 @@ const styles = StyleSheet.create({
         right: 0,
         backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: '#CFD8DC',
+        borderColor: '#D7E2E8',
         borderRadius: 10,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.12,
+        shadowRadius: 12,
         elevation: 5,
         zIndex: 999,
         maxHeight: 200,
@@ -286,19 +531,66 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: '#ECEFF1',
     },
+    dropdownItemRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
     dropdownItemText: {
         fontSize: 15,
         color: '#263238',
     },
     actionRow: {
         flexDirection: 'row',
-        justifyContent: 'center',
+        justifyContent: 'space-between',
+        gap: 10,
+    },
+    btnLoadingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    confirmButton: {
+        paddingVertical: 9,
+        paddingHorizontal: 16,
+        borderRadius: 999,
+        backgroundColor: '#00897B',
+    },
+    confirmButtonDisabled: {
+        backgroundColor: '#CFD8DC',
+    },
+    confirmText: {
+        color: '#FFFFFF',
+        fontWeight: '700',
+        fontSize: 14,
+    },
+    confirmTextDisabled: {
+        color: '#78909C',
     },
     skipButton: {
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        borderRadius: 20,
+        paddingVertical: 9,
+        paddingHorizontal: 14,
+        borderRadius: 999,
+        backgroundColor: '#EDF2F6',
+    },
+    skipButtonDisabled: {
         backgroundColor: '#ECEFF1',
+    },
+    rejectButton: {
+        paddingVertical: 9,
+        paddingHorizontal: 16,
+        borderRadius: 999,
+        backgroundColor: '#FFE4E6',
+    },
+    rejectButtonDisabled: {
+        backgroundColor: '#ECEFF1',
+    },
+    rejectText: {
+        color: '#B42318',
+        fontWeight: '700',
+        fontSize: 14,
+    },
+    rejectTextDisabled: {
+        color: '#90A4AE',
     },
     skipText: {
         color: '#546E7A',
