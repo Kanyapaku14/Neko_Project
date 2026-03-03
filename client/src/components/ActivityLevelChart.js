@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, Dimensions } from 'react-native';
-import Svg, { Line, Circle, Path, Text as SvgText } from 'react-native-svg';
+import Svg, { Line, Circle, Path, Text as SvgText, LinearGradient as SvgGradient, Stop, Defs } from 'react-native-svg';
 
 const { width } = Dimensions.get('window');
 const CHART_WIDTH = width - 64; // Matching CameraScreen horizontal padding (16*2) + card padding (16*2)
@@ -39,24 +39,52 @@ export default function ActivityLevelChart({ data }) {
         }
 
         let path = `M ${points[0].x} ${points[0].y}`;
-
         for (let i = 0; i < points.length - 1; i++) {
             const current = points[i];
             const next = points[i + 1];
             const controlPointX = (current.x + next.x) / 2;
-
-            path += ` Q ${controlPointX} ${current.y}, ${controlPointX} ${(current.y + next.y) / 2}`;
-            path += ` Q ${controlPointX} ${next.y}, ${next.x} ${next.y}`;
+            path += ` C ${controlPointX + (next.x - current.x) / 4} ${current.y}, ${controlPointX - (next.x - current.x) / 4} ${next.y}, ${next.x} ${next.y}`;
         }
-
         return path;
     };
 
-    const activityPath = createSmoothPath(activity);
+    const createAreaPath = (dataPoints) => {
+        if (dataPoints.length === 0) return '';
+        const points = dataPoints.map((value, index) => ({
+            x: PADDING_LEFT + index * xStep,
+            y: PADDING_TOP + chartHeight - (value / maxValue) * chartHeight
+        }));
+
+        let path = `M ${points[0].x} ${points[0].y}`;
+        for (let i = 0; i < points.length - 1; i++) {
+            const current = points[i];
+            const next = points[i + 1];
+            const controlPointX = (current.x + next.x) / 2;
+            path += ` C ${controlPointX + (next.x - current.x) / 4} ${current.y}, ${controlPointX - (next.x - current.x) / 4} ${next.y}, ${next.x} ${next.y}`;
+        }
+        // Close the path to form an area
+        path += ` L ${points[points.length - 1].x} ${PADDING_TOP + chartHeight}`;
+        path += ` L ${points[0].x} ${PADDING_TOP + chartHeight} Z`;
+        return path;
+    };
+
+    const activityLinePath = createSmoothPath(activity);
+    const activityAreaPath = createAreaPath(activity);
 
     return (
         <View style={styles.container}>
             <Svg width={CHART_WIDTH} height={CHART_HEIGHT}>
+                <Defs>
+                    <SvgGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                        <Stop offset="0" stopColor="#FF9800" stopOpacity="0.4" />
+                        <Stop offset="1" stopColor="#FF9800" stopOpacity="0.0" />
+                    </SvgGradient>
+                    <SvgGradient id="lineGradient" x1="0" y1="0" x2="1" y2="0">
+                        <Stop offset="0" stopColor="#FF6D00" />
+                        <Stop offset="1" stopColor="#FFAB40" />
+                    </SvgGradient>
+                </Defs>
+
                 {/* Grid lines */}
                 {[0, 1, 2].map((i) => {
                     const y = PADDING_TOP + (chartHeight / 2) * i;
@@ -67,34 +95,59 @@ export default function ActivityLevelChart({ data }) {
                             y1={y}
                             x2={CHART_WIDTH - PADDING_RIGHT}
                             y2={y}
-                            stroke="rgba(255, 255, 255, 0.15)"
+                            stroke="rgba(255, 255, 255, 0.1)"
                             strokeWidth="1"
+                            strokeDasharray="4,4"
                         />
                     );
                 })}
 
-                {/* Activity line (Greenish like the bars) */}
+                {/* Area Fill */}
+                <Path d={activityAreaPath} fill="url(#areaGradient)" />
+
+                {/* Activity line (Orange Vivid) */}
                 <Path
-                    d={activityPath}
-                    stroke="#A7F3D0"
-                    strokeWidth="3"
+                    d={activityLinePath}
+                    stroke="url(#lineGradient)"
+                    strokeWidth="4"
                     fill="none"
+                    strokeLinecap="round"
                 />
 
-                {/* Data points */}
+                {/* Data points and labels */}
                 {activity.map((value, index) => {
                     const x = PADDING_LEFT + index * xStep;
                     const y = PADDING_TOP + chartHeight - (value / maxValue) * chartHeight;
+
+                    // Paw proportions
+                    const pr = 3.5; // pad radius
+                    const tr = 1.8; // toe radius
+
                     return (
-                        <Circle
-                            key={`dot-${index}`}
-                            cx={x}
-                            cy={y}
-                            r="4"
-                            fill="#A7F3D0"
-                            stroke="rgba(0, 0, 0, 0.3)"
-                            strokeWidth="1"
-                        />
+                        <React.Fragment key={`point-group-${index}`}>
+                            {/* Paw Print SVG Shape */}
+                            <Circle cx={x} cy={y + 1} r={pr} fill="#FF6D00" />
+                            <Circle cx={x - 3.5} cy={y - 2.5} r={tr} fill="#FF6D00" />
+                            <Circle cx={x - 1} cy={y - 4.5} r={tr} fill="#FF6D00" />
+                            <Circle cx={x + 1} cy={y - 4.5} r={tr} fill="#FF6D00" />
+                            <Circle cx={x + 3.5} cy={y - 2.5} r={tr} fill="#FF6D00" />
+
+                            {/* Inner Highlight for Paw */}
+                            <Circle cx={x} cy={y + 1} r={pr * 0.6} fill="#FFB74D" />
+
+                            <SvgText
+                                x={x}
+                                y={y - 12}
+                                fontSize="12"
+                                fill="#FF6D00"
+                                textAnchor="middle"
+                                fontWeight="900"
+                                stroke="#FFFFFF"
+                                strokeWidth="0.5"
+                            >
+                                {value}
+                            </SvgText>
+                        </React.Fragment>
                     );
                 })}
 
@@ -106,10 +159,10 @@ export default function ActivityLevelChart({ data }) {
                             key={`label-${index}`}
                             x={x}
                             y={CHART_HEIGHT - 5}
-                            fontSize="10"
-                            fill="rgba(255, 255, 255, 0.6)"
+                            fontSize="11"
+                            fill="#FF6D00"
                             textAnchor="middle"
-                            fontWeight="bold"
+                            fontWeight="800"
                         >
                             {label}
                         </SvgText>

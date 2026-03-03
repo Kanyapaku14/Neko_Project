@@ -76,11 +76,11 @@ export default function CommunityScreen({ onBack, session, onNavigate }) {
         .from('posts')
         .select(`
           *,
-          user:profiles!user_id(id, name),
+          user:profiles!user_id(id, name, avatar_url),
           likes:post_likes(user_id),
           comments:comments(
             *,
-            user:profiles!user_id(name)
+            user:profiles!user_id(name, avatar_url)
           )
         `)
         .order('created_at', { ascending: false });

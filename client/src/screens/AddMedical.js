@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View,
     Text,
@@ -8,21 +8,148 @@ import {
     ScrollView,
     TextInput,
     Dimensions,
+    Alert,
+    ActivityIndicator,
+    Platform,
+    Image,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import supabase from './config/supabaseClient';
 
 const { width } = Dimensions.get('window');
 
-const AddMedical = ({ navigation }) => {
+const AddMedical = ({ navigation, onBack, initialDate }) => {
     const [eventType, setEventType] = useState('Vet Visit');
     const [notes, setNotes] = useState('');
+    const [eventDate, setEventDate] = useState(initialDate ? new Date(initialDate) : new Date());
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [image, setImage] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const [catId, setCatId] = useState(null);
+
+    useEffect(() => {
+        fetchCatId();
+    }, []);
+
+    const fetchCatId = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const { data, error } = await supabase
+                .from('cats')
+                .select('id')
+                .eq('owner_id', user.id)
+                .limit(1)
+                .single();
+
+            if (data) setCatId(data.id);
+        } catch (error) {
+            console.error('Error fetching catId:', error);
+        }
+    };
+
+    const formatDate = (date) => {
+        return date.toLocaleDateString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+        });
+    };
 
     const eventTypes = [
         { id: 'Vet Visit', label: 'Vet Visit', icon: 'chatbubbles-outline', plus: true },
         { id: 'Vaccine', label: 'Vaccine', icon: 'needle', type: 'material' },
         { id: 'Medicine', label: 'Medicine', icon: 'pill', type: 'material' },
     ];
+
+    const pickImage = async () => {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert('Permission Required', 'We need camera roll permissions to upload photos.');
+            return;
+        }
+
+        let result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            allowsEditing: true,
+            aspect: [4, 3],
+            quality: 0.8,
+        });
+
+        if (!result.canceled) {
+            setImage(result.assets[0].uri);
+        }
+    };
+
+    const onDateChange = (event, selectedDate) => {
+        const currentDate = selectedDate || eventDate;
+        setShowDatePicker(Platform.OS === 'ios');
+        setEventDate(currentDate);
+    };
+
+    const saveEvent = async () => {
+        if (!catId) {
+            Alert.alert('Error', 'No cat profile found.');
+            return;
+        }
+
+        setUploading(true);
+        try {
+            let imageUrl = null;
+
+            // 1. Upload Image to Supabase Storage
+            if (image) {
+                const fileName = `${catId}/${Date.now()}.jpg`;
+                const formData = new FormData();
+                formData.append('file', {
+                    uri: image,
+                    name: fileName,
+                    type: 'image/jpeg',
+                });
+
+                const { data: uploadData, error: uploadError } = await supabase.storage
+                    .from('medical_attachments')
+                    .upload(fileName, formData, { contentType: 'image/jpeg' });
+
+                if (uploadError) throw uploadError;
+
+                const { data: publicUrlData } = supabase.storage
+                    .from('medical_attachments')
+                    .getPublicUrl(fileName);
+
+                imageUrl = publicUrlData.publicUrl;
+            }
+
+            // 2. Insert into medical_events table
+            const formattedEventType = eventType.toLowerCase().replace(/\s+/g, '_');
+
+            const { error: insertError } = await supabase
+                .from('medical_events')
+                .insert({
+                    cat_id: catId,
+                    event_type: formattedEventType,
+                    event_date: eventDate.toISOString().split('T')[0],
+                    notes: notes,
+                    attachment_url: imageUrl,
+                });
+
+            if (insertError) throw insertError;
+
+            Alert.alert('Success', 'Medical event saved successfully!', [
+                { text: 'OK', onPress: () => handleBack() }
+            ]);
+        } catch (error) {
+            console.error('Error saving event:', error);
+            Alert.alert('Error', error.message || 'Failed to save event.');
+        } finally {
+            setUploading(false);
+        }
+    };
 
     const renderIcon = (event) => {
         if (event.id === 'Vet Visit') {
@@ -41,6 +168,14 @@ const AddMedical = ({ navigation }) => {
         }
     };
 
+    const handleBack = () => {
+        if (onBack) {
+            onBack();
+        } else if (navigation?.goBack) {
+            navigation.goBack();
+        }
+    };
+
     return (
         <SafeAreaView style={styles.safeArea}>
             <LinearGradient
@@ -49,7 +184,7 @@ const AddMedical = ({ navigation }) => {
             >
                 {/* Header */}
                 <View style={styles.header}>
-                    <TouchableOpacity onPress={() => navigation?.goBack()} style={styles.backButton}>
+                    <TouchableOpacity onPress={handleBack} style={styles.backButton}>
                         <Ionicons name="chevron-back" size={28} color="#2D6A64" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Add Medical Event</Text>
@@ -79,10 +214,19 @@ const AddMedical = ({ navigation }) => {
 
                     {/* Date section */}
                     <Text style={styles.labelTitle}>DATE</Text>
-                    <TouchableOpacity style={styles.datePicker}>
-                        <Text style={styles.dateText}>Today, Jan 17, 2026</Text>
+                    <TouchableOpacity style={styles.datePicker} onPress={() => setShowDatePicker(true)}>
+                        <Text style={styles.dateText}>{formatDate(eventDate)}</Text>
                         <Ionicons name="calendar" size={24} color="#000" />
                     </TouchableOpacity>
+
+                    {showDatePicker && (
+                        <DateTimePicker
+                            value={eventDate}
+                            mode="date"
+                            display="default"
+                            onChange={onDateChange}
+                        />
+                    )}
 
                     {/* Notes section */}
                     <Text style={styles.labelTitle}>NOTES</Text>
@@ -92,7 +236,7 @@ const AddMedical = ({ navigation }) => {
                         <TextInput
                             style={styles.notesInput}
                             multiline
-                            placeholder=""
+                            placeholder="Describe what happened..."
                             value={notes}
                             onChangeText={setNotes}
                             textAlignVertical="top"
@@ -101,17 +245,33 @@ const AddMedical = ({ navigation }) => {
 
                     {/* Upload section */}
                     <Text style={styles.labelTitle}>Upload</Text>
-                    <TouchableOpacity style={styles.uploadBox}>
-                        <View style={styles.cameraIconCircle}>
-                            <Ionicons name="camera" size={30} color="#2D6A64" />
-                        </View>
-                        <Text style={styles.uploadText}>Add Photo or Receipt</Text>
+                    <TouchableOpacity style={styles.uploadBox} onPress={pickImage}>
+                        {image ? (
+                            <Image source={{ uri: image }} style={styles.previewImage} resizeMode="cover" />
+                        ) : (
+                            <>
+                                <View style={styles.cameraIconCircle}>
+                                    <Ionicons name="camera" size={30} color="#2D6A64" />
+                                </View>
+                                <Text style={styles.uploadText}>Add Photo or Receipt</Text>
+                            </>
+                        )}
                     </TouchableOpacity>
 
                     {/* Save Button */}
-                    <TouchableOpacity style={styles.saveButton}>
-                        <Text style={styles.saveButtonText}>Save Event</Text>
-                        <Ionicons name="checkmark-circle-outline" size={24} color="#FFF" style={{ marginLeft: 8 }} />
+                    <TouchableOpacity
+                        style={[styles.saveButton, uploading && { opacity: 0.7 }]}
+                        onPress={saveEvent}
+                        disabled={uploading}
+                    >
+                        {uploading ? (
+                            <ActivityIndicator color="#FFF" />
+                        ) : (
+                            <>
+                                <Text style={styles.saveButtonText}>Save Event</Text>
+                                <Ionicons name="checkmark-circle-outline" size={24} color="#FFF" style={{ marginLeft: 8 }} />
+                            </>
+                        )}
                     </TouchableOpacity>
                 </ScrollView>
             </LinearGradient>
@@ -220,7 +380,7 @@ const styles = StyleSheet.create({
     },
     dateText: {
         fontSize: 16,
-        color: '#80A4A0',
+        color: '#2D6A64',
         fontWeight: '500',
     },
     notesContainer: {
@@ -262,6 +422,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: 40,
+        overflow: 'hidden',
     },
     cameraIconCircle: {
         backgroundColor: 'rgba(255, 255, 255, 0.3)',
@@ -277,8 +438,12 @@ const styles = StyleSheet.create({
         color: '#FFF',
         fontWeight: 'bold',
     },
+    previewImage: {
+        width: '100%',
+        height: '100%',
+    },
     saveButton: {
-        backgroundColor: '#8AB7B2',
+        backgroundColor: '#39A39A',
         height: 55,
         borderRadius: 15,
         flexDirection: 'row',

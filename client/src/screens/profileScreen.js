@@ -15,6 +15,9 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
     const [gender, setGender] = useState('');
     const [phone, setPhone] = useState('');
     const [birthDate, setBirthDate] = useState('');
+
+    const [showGenderPicker, setShowGenderPicker] = useState(false);
+
     const [email, setEmail] = useState('');
     const [avatarUrl, setAvatarUrl] = useState(null);
     const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -279,21 +282,41 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
                     </View>
 
                     {/* Gender Selection */}
-                    <View style={styles.inputGroup}>
+                    <View style={[styles.inputGroup, { zIndex: 3000 }]}>
                         <Text style={styles.labelprofile}>Gender</Text>
-                        <View style={[styles.input, { paddingHorizontal: 0, justifyContent: 'center' }]}>
-                            <Picker
-                                selectedValue={gender}
-                                onValueChange={(itemValue) => setGender(itemValue)}
-                                style={{ width: '100%', height: 50 }}
-                                dropdownIconColor="#2F6A62"
+                        <TouchableOpacity
+                            activeOpacity={0.8}
+                            onPress={() => setShowGenderPicker(!showGenderPicker)}
+                            style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                        >
+                            <Text
+                                style={{ fontSize: 16, color: gender ? '#333' : '#999', flexShrink: 1, paddingRight: 8 }}
+                                numberOfLines={1}
+                                ellipsizeMode="tail"
                             >
-                                <Picker.Item label="Select Gender" value="" color="#999" />
-                                <Picker.Item label="Male" value="Male" />
-                                <Picker.Item label="Female" value="Female" />
-                                <Picker.Item label="Other" value="Other" />
-                            </Picker>
-                        </View>
+                                {gender || "Select Gender"}
+                            </Text>
+                            <Text style={{ fontSize: 12, color: '#666' }}>{showGenderPicker ? "▲" : "▼"}</Text>
+                        </TouchableOpacity>
+
+                        {showGenderPicker && (
+                            <View style={{ backgroundColor: '#fff', borderRadius: 10, marginTop: 5, borderWidth: 1, borderColor: '#eee', overflow: 'hidden', position: 'absolute', top: 70, left: 0, right: 0, zIndex: 4000, elevation: 5 }}>
+                                {[{ label: 'Male', value: 'Male' }, { label: 'Female', value: 'Female' }, { label: 'Other', value: 'Other' }].map((item, index) => (
+                                    <TouchableOpacity
+                                        key={index}
+                                        style={{ padding: 12, borderBottomWidth: index === 2 ? 0 : 1, borderBottomColor: '#f0f0f0' }}
+                                        onPress={() => {
+                                            setGender(item.value);
+                                            setShowGenderPicker(false);
+                                        }}
+                                    >
+                                        <Text style={{ fontSize: 16, color: gender === item.value ? '#2F6A62' : '#333' }}>
+                                            {item.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        )}
                     </View>
 
                     {/* Phone Number */}

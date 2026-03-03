@@ -37,7 +37,7 @@ export default function BottomNav({ current, onNavigate }) {
       {/* Overview */}
       <TouchableOpacity
         style={styles.item}
-        onPress={() => onNavigate("Overview")}
+        onPress={() => onNavigate("Dashboard")}
       >
         <MaterialIcons name="bar-chart" size={33} color="#484C52" />
         <Text style={styles.label}>Overview</Text>

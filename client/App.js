@@ -1,6 +1,8 @@
+import 'react-native-gesture-handler';
 import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator, AppState } from 'react-native';
-// ✅ นำเข้า SafeAreaProvider ตรงนี้
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+// Import SafeAreaProvider here
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import SignInScreen from './src/screens/SignInScreen';
@@ -12,6 +14,7 @@ import supabase from './src/screens/config/supabaseClient';
 import Dashboard from './src/screens/Dashbord';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// 1. Import the LogDailyNormal file
 import LogDailyNormal from './src/screens/LogDailyNormal';
 import AddMedical from './src/screens/AddMedical'; // ✅ Import AddMedical
 import HomeScreen from './src/screens/HomeScreen';
@@ -21,6 +24,7 @@ import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScr
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
+import GalleryScreen from './src/screens/GalleryScreen';
 import SetcameraScreen from './src/screens/SetcameraScreen';
 import PhotoCheck from './src/screens/PhotoCheck';
 import AnalysisResult from './src/screens/AnalysisResult';
@@ -30,6 +34,9 @@ import MainTabNavigator from './src/screens/MainTabNavigator';
 import CommunityScreen from './src/screens/CommunityScreen';
 import RankingScreen from './src/screens/RankingScreen';
 import CommunityProfile from './src/screens/CommunityProfile';
+import { GlobalAlertQueueProvider } from './src/services/GlobalAlertQueue';
+import AlertScreen from './src/screens/AlertScreen';
+import EventDetailScreen from './src/screens/EventDetailScreen';
 
 import { useFonts } from 'expo-font';
 import {
@@ -220,8 +227,9 @@ export default function App() {
       }
       if (currentScreenName === 'AddMedical') {
         return <AddMedical
-          navigation={{ goBack: () => setAuthScreen('Home') }}
-          onBack={() => setAuthScreen('Home')}
+          navigation={{ goBack: () => setAuthScreen('Calendar') }}
+          onBack={() => setAuthScreen('Calendar')}
+          initialDate={screenParams?.initialDate}
         />;
       }
       if (currentScreenName === 'Calendar') {
@@ -255,24 +263,29 @@ export default function App() {
         return <CommunityScreen
           session={session}
           onBack={() => setAuthScreen('MainTabNavigator')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
         />;
       }
       if (currentScreenName === 'Ranking') {
         return <RankingScreen
           session={session}
           onBack={() => setAuthScreen('MainTabNavigator')}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
         />;
       }
       if (currentScreenName === 'CommunityProfile') {
         return <CommunityProfile
           session={session}
+          userId={screenParams?.userId}
           onBack={() => setAuthScreen('MainTabNavigator')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
         />;
       }
       if (currentScreenName === 'Camera') {
         return <CameraScreen session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+      }
+      if (currentScreenName === 'Gallery') {
+        return <GalleryScreen session={session} onBack={() => setAuthScreen('Camera')} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
       }
       if (currentScreenName === 'Setcamera') {
         return <SetcameraScreen session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
@@ -283,18 +296,45 @@ export default function App() {
       if (currentScreenName === 'AnalysisResult') {
         return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} />;
       }
+      if (currentScreenName === 'Alert') {
+        return <AlertScreen onBack={() => setAuthScreen('Camera')} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+      }
+      if (currentScreenName === 'EventDetail') {
+        return <EventDetailScreen onBack={() => setAuthScreen('Alert')} alertData={screenParams?.alertData} />;
+      }
+
+      // Dashboard Screen
+      if (authScreen === 'Dashboard') {
+        return <Dashboard
+          session={session}
+          onBack={() => setAuthScreen('Home')}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+
+      // Timeline Screen
+      if (authScreen === 'Timeline') {
+        return <TimelineScreen
+          session={session}
+          onBack={() => setAuthScreen('Dashboard')}
+        />;
+      }
+
       if (currentScreenName === 'Phone') {
         return (
           <Phone
             session={session}
             initialStep={screenParams?.initialStep}
-            onBack={() => setAuthScreen('Setting')}
-            onConfirm={() => setAuthScreen('Camera')}
+            brand={screenParams?.brand}
+            mode={screenParams?.mode}
+            isHideBackButton={screenParams?.isHideBackButton}
+            isHideSkipButton={screenParams?.isHideSkipButton}
+            onBack={() => setAuthScreen(screenParams?.returnTo || 'Setting')}
+            onConfirm={() => setAuthScreen(screenParams?.returnTo || 'Camera')}
           />
         );
       }
-
-      // Default Home for auth
+      // Default Home
       return <HomeScreen
         onLogout={handleSignOut}
         onLogDaily={() => setAuthScreen('LogDaily')}
@@ -318,10 +358,14 @@ export default function App() {
   };
 
 
-  // ✅ ครอบทั้งหมดด้วย SafeAreaProvider ที่นี่ครับ
+  // Wrap everything with SafeAreaProvider here
   return (
-    <SafeAreaProvider>
-      {renderScreen()}
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <GlobalAlertQueueProvider session={session}>
+          {renderScreen()}
+        </GlobalAlertQueueProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

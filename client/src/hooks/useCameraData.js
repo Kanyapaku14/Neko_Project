@@ -3,23 +3,32 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../screens/config/supabaseClient';
 import { analyzeHealthLog } from '../utils/healthLogic';
 
-export default function useCameraData(session) {
+export default function useCameraData(session, cameraStatus) {
   const [data, setData] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const fetchData = useCallback(async () => {
-    // Default structure (matches UI expectations)
+    // Default structure (matches UI expectations) - Initializing with this ensures immediate render
     let newData = {
       connectedAt: Date.now() - 120000,
       cats: 0,
       food: 0,
       litter: 0,
-      activity: [20, 45, 10, 80], // Mock graph data (DB lacks hourly activity)
+      activity: [20, 45, 10, 80, 50], // Mock graph data (5 points for 6h intervals)
       posture: {
         abnormal: { percent: 0, name: 'None' },
         normal: { percent: 100, name: 'Normal' }
       },
+      behaviorAnalytics: {
+        energy: { active: 50, resting: 50 },
+        routine: { score: 100, status: "Ideal" },
+        wellness: { score: 85, status: "Healthy" }
+      },
       settings: { monitoringMode: 'multi', selectedCats: [] }
     };
+
+    // Set initial data immediately to avoid blocking UI with a long spinner
+    if (!data) setData(newData);
 
     try {
       // 1. Load Local Settings
@@ -41,7 +50,8 @@ export default function useCameraData(session) {
 
         if (!catError && catsData) {
           newData.cats = catsData.length;
-          const catIds = catsData.map(c => c.id);
+          const catIdsList = catsData.map(c => c.id);
+          const catIds = catIdsList;
 
           // Get today's logs (local date string YYYY-MM-DD)
           const now = new Date();
@@ -71,7 +81,6 @@ export default function useCameraData(session) {
               const unifiedLog = { ...log, ...(details || {}) };
               totalFood += unifiedLog.food_amount || 0;
 
-              // Count as "visited" if there's any urine or stool level recorded
               if (unifiedLog.urine_level || unifiedLog.stool_level) {
                 totalLitter += 1;
               }
@@ -86,7 +95,6 @@ export default function useCameraData(session) {
             newData.food = totalFood;
             newData.litter = totalLitter;
 
-            // Map Posture based on the most concerning or recent log
             if (worstAnalysis && latestLogForPosture) {
               if (worstAnalysis.redFlags > 0) {
                 newData.posture.abnormal = {
@@ -108,24 +116,83 @@ export default function useCameraData(session) {
                 };
               }
             }
-          } else if (!logsError && logs?.length === 0) {
-            // If no logs today, maybe check latest for posture context but keep counters at 0
-            // For simplicity, we stick to today's insights as labeled
           }
         }
+
+        // 3. Fetch Behavior Analytics (Bypassing for speed on physical devices)
+        /* 
+        try {
+          const API_URL = "http://10.0.2.2:3000/api/analytics/behavior";
+          const res = await fetch(API_URL, { ... });
+          ...
+        } catch (apiErr) { ... }
+        */
       }
 
       setData(newData);
+      setLastUpdated(new Date());
 
     } catch (e) {
       console.error("Error fetching camera data:", e);
       setData(prev => prev || newData);
     }
-  }, [session]);
+  }, [session, data]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  return { data, refetch: fetchData };
+  // Simulate live camera stats when connected
+  useEffect(() => {
+    if (cameraStatus !== 'connected') return;
+
+    const interval = setInterval(() => {
+      setData(prev => {
+        if (!prev) return prev;
+
+        let newRecent = [...(prev.recentActivities || [
+          { id: 1, type: 'active', time: '2m ago', icon: 'run', color: '#00FF00' },
+          { id: 2, type: 'eating', time: '15m ago', icon: 'food', color: '#FFC800' },
+          { id: 3, type: 'grooming', time: '45m ago', icon: 'paw', color: '#00C8FF' },
+          { id: 4, type: 'toileting', time: '1h ago', icon: 'emoticon-poop', color: '#FF9600' },
+          { id: 5, type: 'resting', time: '3h ago', icon: 'sleep', color: '#C8C8C8' }
+        ])];
+
+        if (Math.random() > 0.8 && newRecent.length > 0) {
+          newRecent[0] = { ...newRecent[0], time: 'Just now' };
+        }
+
+        const newFood = prev.food + (Math.random() > 0.8 ? 1 : 0);
+        const newLitter = prev.litter + (Math.random() > 0.95 ? 1 : 0);
+
+        const act = [...(prev.activity || [20, 45, 10, 80, 50])];
+        if (Math.random() > 0.3) {
+          act[4] = Math.min(100, Math.max(0, act[4] + (Math.floor(Math.random() * 11) - 5)));
+        }
+
+        let norm = prev.posture.normal.percent;
+        if (Math.random() > 0.4) {
+          const diff = Math.floor(Math.random() * 7) - 3;
+          norm = Math.min(100, Math.max(0, norm + diff));
+        }
+
+        return {
+          ...prev,
+          recentActivities: newRecent,
+          food: newFood,
+          litter: newLitter,
+          activity: act,
+          posture: {
+            normal: { ...prev.posture.normal, percent: norm, name: prev.posture.normal.name || 'Normal' },
+            abnormal: { ...prev.posture.abnormal, percent: 100 - norm, name: prev.posture.abnormal.name || 'None' }
+          }
+        };
+      });
+      setLastUpdated(new Date());
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [cameraStatus]);
+
+  return { data, lastUpdated, refetch: fetchData };
 }

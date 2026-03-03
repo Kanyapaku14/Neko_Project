@@ -4,219 +4,238 @@ from google import genai
 from google.genai import types
 import os
 import json
+import traceback
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from datetime import datetime, date
+from datetime import datetime, timedelta, timezone
 
 # =====================================================
 # 1. SETUP & CONFIGURATION
 # =====================================================
 
-# Load Environment Variables from Root
+# ป้องกันปัญหา SSL Certificate บน Windows
+os.environ['CURL_CA_BUNDLE'] = ''
+os.environ['SSL_CERT_FILE'] = ''
+
+# โหลด Environment Variables จากไฟล์ .env ที่อยู่โฟลเดอร์นอกสุด
 current_dir = os.path.dirname(os.path.abspath(__file__))
 dotenv_path = os.path.join(current_dir, '..', '.env')
 load_dotenv(dotenv_path)
 
-# Retrieve Keys
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SUPABASE_URL = os.getenv("EXPO_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("EXPO_PUBLIC_ANON_KEY")
 
-# Validate Keys
-if not GEMINI_API_KEY:
-    print("❌ Error: Missing GEMINI_API_KEY")
-if not SUPABASE_URL or not SUPABASE_KEY:
-    print("❌ Error: Missing SUPABASE credentials")
+# 🚨 ใช้ Service Role Key เพื่อให้ Python ทะลุ RLS ของ Supabase เข้าไปอ่านข้อมูลได้
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
-# Initialize App
 app = Flask(__name__)
 CORS(app)
 
-# Initialize Clients
 try:
+    print("⏳ กำลังเชื่อมต่อ Gemini...")
     client = genai.Client(api_key=GEMINI_API_KEY)
+    print("✅ Gemini เชื่อมต่อสำเร็จ")
+    
+    print("⏳ กำลังเชื่อมต่อ Supabase...")
+    if not SUPABASE_KEY:
+        raise ValueError("หา SUPABASE_SERVICE_KEY ไม่พบ โปรดเช็คการตั้งค่าในไฟล์ .env")
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("✅ Gemini & Supabase initialized successfully")
+    print("✅ Supabase เชื่อมต่อสำเร็จ (โหมด Service Role)")
 except Exception as e:
-    print(f"❌ Error initializing services: {e}")
-
+    print(f"❌ Error initializing services:")
+    traceback.print_exc()
 
 # =====================================================
-# 2. HELPER FUNCTIONS
+# 2. LOGIC CALCULATION (ประมวลผลความเสี่ยง)
 # =====================================================
 
-def calculate_age(birthdate_str):
-    """คำนวณอายุจากวันเกิด (อ้างอิงจากหน้า CatProfile)"""
-    if not birthdate_str:
-        return "ไม่ระบุ"
+def calculate_age_years(birthdate_str):
+    if not birthdate_str: return 3.0
     try:
-        birthdate = datetime.strptime(birthdate_str, "%Y-%m-%d").date()
-        today = date.today()
-        years = today.year - birthdate.year - ((today.month, today.day) < (birthdate.month, birthdate.day))
-        return f"{years} ปี"
+        b_date = datetime.strptime(birthdate_str, "%Y-%m-%d").date()
+        tz_th = timezone(timedelta(hours=7))
+        today_date = datetime.now(tz_th).date()
+        return (today_date - b_date).days / 365.25
     except:
-        return "ไม่ระบุ"                                                        
+        return 3.0
 
 def assign_risk_label(score):
-    """แปลงคะแนน 0-100 เป็นระดับความเสี่ยง"""
-    if score <= 10: return "Normal"
-    elif score < 30: return "Low"
-    elif score <= 50: return "Moderate"
+    if score <= 20: return "Normal"
+    elif score <= 40: return "Low"
+    elif score <= 60: return "Moderate"
     elif score <= 80: return "High"
     else: return "Extreme"
 
-def format_log_data(logs):
-    """
-    แปลงข้อมูล Log จาก LogDailyNormal.js เป็นข้อความสรุป
-    ดึง field สำคัญ: food_type, water_level, urine_color, behavior ฯลฯ
-    """
-    if not logs:
-        return "ไม่พบข้อมูลบันทึกสุขภาพย้อนหลังในช่วง 7 วันนี้"
+def calculate_disease_risks(cat_data, daily_logs):
+    scores = {
+        "Kidney Disease": 0, "Diabetes": 0, "Urolithiasis": 0,
+        "Gum Disease": 0, "Feline Panleukopenia": 0
+    }
+
+    # ข้อมูลพื้นฐานจากโปรไฟล์แมว
+    age_years = calculate_age_years(cat_data.get('birthdate'))
+    gender = cat_data.get('gender', 'Male')
+    weights = cat_data.get('cat_weights', [])
+    current_weight = float(weights[0]['weight_kg']) if weights else 4.0
+
+    if age_years >= 7: 
+        scores["Kidney Disease"] += 20; scores["Gum Disease"] += 15
+    if age_years >= 10: scores["Kidney Disease"] += 15
+    if 5 <= age_years <= 10: scores["Diabetes"] += 15
+    if age_years >= 3: scores["Gum Disease"] += 10
+    if 1 <= age_years <= 7: scores["Urolithiasis"] += 15
+    if age_years <= 1.5: scores["Feline Panleukopenia"] += 40
     
-    summary = ""
-    for log in logs:
-        date_str = log.get('log_date', '-')
+    if gender == 'Male':
+        scores["Diabetes"] += 10; scores["Urolithiasis"] += 25
         
-        # แปลงข้อมูล Enum ให้เป็นข้อความที่อ่านง่าย
-        status = "ผิดปกติ (Something off)" if log.get('status') == 'Something off' else "ปกติ"
-        food = f"{log.get('food_type_enum', 'N/A')} ({log.get('food_intake', 0)}g)"
-        water = f"{log.get('water_level', 0)} ml"
+    if current_weight >= 6.0:
+        scores["Diabetes"] += 20; scores["Gum Disease"] += 15 
+
+    # ข้อมูลจาก Daily Log ย้อนหลัง
+    for daily in daily_logs:
+        normal = daily.get('normal_logs', [])
+        if isinstance(normal, list) and len(normal) > 0: normal = normal[0]
         
-        # ข้อมูลขับถ่ายและพฤติกรรม (สำคัญมากสำหรับการวิเคราะห์โรค)
-        urine = f"ระดับ: {log.get('urine_level_enum')}, สี: {log.get('urine_color_enum')}"
-        stool = f"ระดับ: {log.get('stool_level_enum')}, สี: {log.get('stool_color_enum')}"
-        behavior = log.get('behavior_enum', 'Normal')
-        note = log.get('notes', '-')
-        
-        summary += f"- วันที่ {date_str}: อาการ={status}, อาหาร={food}, น้ำ={water}, ปัสสาวะ=[{urine}], อุจจาระ=[{stool}], พฤติกรรม={behavior}, โน้ต={note}\n"
-    
-    return summary
+        off = daily.get('something_off_logs', [])
+        if isinstance(off, list) and len(off) > 0: off = off[0]
+
+        if normal:
+            water = normal.get('water_ml_per_day', 0) or 0
+            urine = normal.get('urine_level', 'normal')
+            food_type = normal.get('food_type', '')
+
+            if 0 < water < 30: 
+                scores["Urolithiasis"] += 5; scores["Kidney Disease"] += 5
+            elif water > 150: 
+                scores["Kidney Disease"] += 10; scores["Diabetes"] += 5
+
+            if urine in ['low', 'very_low']: scores["Urolithiasis"] += 15
+            elif urine in ['high', 'very_high']: scores["Kidney Disease"] += 10; scores["Diabetes"] += 5
+
+            if food_type == 'dry_food': scores["Urolithiasis"] += 5; scores["Diabetes"] += 5
+
+        if off:
+            vomit = off.get('has_vomit', False)
+            v_type = off.get('vomit_type', '')
+            diarrhea = off.get('has_diarrhea', False)
+            d_type = off.get('diarrhea_type', '')
+            behaviors = off.get('behavior_energy', []) or []
+
+            if vomit:
+                scores["Feline Panleukopenia"] += 15; scores["Kidney Disease"] += 10
+                if v_type in ['yellow', 'white_foam']: 
+                    scores["Feline Panleukopenia"] += 10; scores["Gum Disease"] += 10
+
+            if diarrhea:
+                scores["Feline Panleukopenia"] += 15
+                if d_type in ['watery', 'fresh_blood', 'black']: scores["Feline Panleukopenia"] += 20
+
+            if 'กินน้ำเยอะผิดปกติ' in behaviors: scores["Kidney Disease"] += 15; scores["Diabetes"] += 15
+            if 'โก่งตัว' in behaviors: scores["Urolithiasis"] += 30
+            if 'ร้องผิดปกติ' in behaviors: scores["Urolithiasis"] += 10; scores["Gum Disease"] += 10
+            if 'ไม่กินอาหารเลย' in behaviors: scores["Gum Disease"] += 20; scores["Feline Panleukopenia"] += 15
+            if 'ซึม' in behaviors: scores["Feline Panleukopenia"] += 10; scores["Kidney Disease"] += 5
+            if 'เบื่ออาหาร' in behaviors: scores["Gum Disease"] += 10
+            if 'กินจุผิดปกติ' in behaviors: scores["Diabetes"] += 15
+
+    # ลิมิตคะแนนสูงสุดไว้ที่ 100
+    for key in scores:
+        scores[key] = min(100, max(0, scores[key]))
+
+    return scores
 
 # =====================================================
-# 3. PROMPT BUILDERS
+# 3. PROMPT BUILDERS 
 # =====================================================
-
-def build_assessment_prompt(cat_data, logs_summary):
-    # ดึงข้อมูลจากตาราง cats (จากหน้า CatProfile)
-    name = cat_data.get('name', 'แมว')
-    breed = cat_data.get('breed', 'ไม่ระบุ')
-    gender = cat_data.get('gender', 'ไม่ระบุ')
-    age = calculate_age(cat_data.get('birthdate'))
-    
-    # หาน้ำหนักล่าสุดจากตาราง cat_weights
-    weight = "ไม่ระบุ"
-    if cat_data.get('cat_weights') and len(cat_data['cat_weights']) > 0:
-        # สมมติว่า query ถูก sort มาแล้ว หรือเลือก index 0
-        weight = f"{cat_data['cat_weights'][0].get('weight_kg')} กก."
-
+def build_summary_prompt(cat_data, computed_scores):
+    name = cat_data.get('name', 'น้องแมว')
     return f"""
-    คุณเป็นสัตวแพทย์ผู้เชี่ยวชาญ AI (NekoCare Doctor)
-    
-    จงวิเคราะห์ความเสี่ยงสุขภาพของแมวรายนี้ โดยอ้างอิงจาก "ข้อมูลส่วนตัว" และ "บันทึกประจำวัน" ที่ให้มา:
+    คุณเป็นสัตวแพทย์ผู้เชี่ยวชาญ AI
+    ระบบประมวลผลตรรกะทางการแพทย์ ได้วิเคราะห์ความเสี่ยงของ "{name}" ออกมาเป็นเปอร์เซ็นต์ดังนี้:
+    - โรคนิ่ว (Urolithiasis): {computed_scores['Urolithiasis']}%
+    - โรคไต (Kidney Disease): {computed_scores['Kidney Disease']}%
+    - โรคตับและฟัน (Gum Disease): {computed_scores['Gum Disease']}%
+    - โรคหัดแมว (Feline Panleukopenia): {computed_scores['Feline Panleukopenia']}%
+    - โรคเบาหวาน (Diabetes): {computed_scores['Diabetes']}%
 
-    [ข้อมูลส่วนตัว (จากหน้า Profile)]
-    - ชื่อ: {name}
-    - พันธุ์: {breed}
-    - เพศ: {gender}
-    - อายุ: {age}
-    - น้ำหนักปัจจุบัน: {weight}
-
-    [บันทึกสุขภาพย้อนหลัง 7 วันล่าสุด (จากหน้า Daily Log)]
-    {logs_summary}
-
-    [ภารกิจ]
-    วิเคราะห์ความสัมพันธ์ของ ข้อมูลกายภาพ (พันธุ์, น้ำหนัก, อายุ) และ อาการใน Log เพื่อประเมินความเสี่ยงของ 5 โรคต่อไปนี้ (ให้คะแนน 0-100):
-    
-    1. **Kidney Disease (โรคไต):** พิจารณาจาก อายุ, ปริมาณการกินน้ำ (ถ้ากินน้ำน้อยเสี่ยงสูง), ปริมาณปัสสาวะ
-    2. **Diabetes (เบาหวาน):** พิจารณาจาก น้ำหนักตัว, พฤติกรรมการกินอาหาร, การปัสสาวะบ่อย
-    3. **Urolithiasis (โรคนิ่ว):** พิจารณาจาก **สีปัสสาวะ** (bloody/dark_orange), พฤติกรรม (straining/painful), การกินน้ำ
-    4. **Gum Disease (โรคเหงือก):** พิจารณาจาก ประเภทอาหาร (เปียก/แห้ง), อายุ, อาการกินลำบาก
-    5. **Feline Panleukopenia (หัดแมว):** พิจารณาจาก อาการอาเจียน (vomit), ถ่ายเหลว/เป็นเลือด, ซึม (behavior)
-
-    [รูปแบบการตอบกลับ (JSON เท่านั้น)]
+    จงวิเคราะห์ภาพรวมจากตัวเลขเหล่านี้ และตอบกลับเป็น JSON Format เท่านั้น:
     {{
-      "risks": [
-        {{ "disease": "Kidney Disease", "score": 45 }},
-        {{ "disease": "Diabetes", "score": 10 }},
-        ... (ทำให้ครบ 5 โรค)
-      ],
-      "overallRisk": "Moderate Risk",
-      "summaryTitle": "หัวข้อสรุปผลการวิเคราะห์ (ภาษาไทย สั้นๆ กระชับ)",
-      "summaryDesc": "คำอธิบายผลลัพธ์แบบเจาะจง อ้างอิงข้อมูลจาก Log ที่พบ เช่น 'เนื่องจากน้อง {name} ดื่มน้ำน้อยเพียง ...ml และมีสีปัสสาวะเข้ม...' (ภาษาไทย ความยาว 2-3 ประโยค)"
+      "summaryTitle": "หัวข้อสรุปผล (เช่น 'มีความเสี่ยงโรคนิ่วสูง' หรือ 'สุขภาพโดยรวมแข็งแรงดี' ภาษาไทยสั้นๆ)",
+      "summaryDesc": "คำอธิบายภาพรวม 2-3 ประโยค อธิบายว่าทำไมน้องแมวถึงเสี่ยงโรคที่คะแนนสูงสุด โดยใช้ภาษาที่อบอุ่นและเป็นห่วง"
     }}
     """
 
 def build_disease_prompt(disease_name, cat_data):
     name = cat_data.get("name", "น้องแมว")
-    breed = cat_data.get("breed", "ไม่ระบุ")
-    
     return f"""
     คุณเป็นผู้ช่วยสัตวแพทย์อัจฉริยะ
-    
-    ภารกิจ: ให้คำแนะนำสุขภาพเฉพาะตัวสำหรับแมวชื่อ "{name}" (พันธุ์ {breed})
-    ที่กำลังมีความเสี่ยงหรือเป็น: "{disease_name}"
+    ภารกิจ: ให้คำแนะนำสุขภาพเฉพาะตัวสำหรับแมวชื่อ "{name}" ที่กำลังสนใจหรือมีความเสี่ยง: "{disease_name}"
 
     ตอบกลับเป็น JSON Format เท่านั้น:
     {{
       "prevention": {{
-        "title": "5 วิธีป้องกัน{disease_name}ฉบับคนรักแมว",
-        "intro": "เกริ่นนำสั้นๆ ให้อุ่นใจ เหมาะกับ{name}",
+        "title": "วิธีดูแลและป้องกัน {disease_name}",
+        "intro": "เกริ่นนำสั้นๆ ให้อุ่นใจ",
         "points": [
-          {{ "title": "หัวข้อ", "desc": "คำอธิบาย" }}
+          {{ "title": "หัวข้อ", "desc": "คำอธิบายสั้นๆ เข้าใจง่าย" }}
         ]
       }},
       "counseling": {{
         "title": "สัญญาณเตือนที่ต้องเฝ้าระวัง (Red Flags)",
-        "intro": "หากพบอาการเหล่านี้ ให้พา{name}ไปหาหมอทันที",
+        "intro": "หากพบอาการเหล่านี้ รีบพาไปหาหมอทันที",
         "red_flags": [
-          {{ "symptom": "ชื่ออาการ", "meaning": "อาการนี้บ่งบอกอะไร" }}
+          {{ "symptom": "ชื่ออาการ", "meaning": "บ่งบอกอะไร" }}
         ]
       }}
     }}
-    ใช้ภาษาไทยที่เข้าใจง่าย อบอุ่น และเป็นมืออาชีพ
     """
 
 # =====================================================
 # 4. API ENDPOINTS
 # =====================================================
-
 @app.route('/api/assessment', methods=['POST'])
 def get_assessment():
     try:
         data = request.json
         cat_id = data.get('catId')
+        if not cat_id: return jsonify({"error": "catId is required"}), 400
 
-        if not cat_id:
-            return jsonify({"error": "catId is required"}), 400
-
-        # --- 1. Fetch Real Data from Supabase ---
-        
-        # 1.1 Cat Info + Latest Weight
-        # ดึงข้อมูลจากตาราง cats และ join กับ cat_weights เพื่อเอาน้ำหนักล่าสุด
+        # ดึงข้อมูลแมว
         cat_response = supabase.table('cats').select(
             '*, cat_weights(weight_kg, measured_at)'
         ).eq('id', cat_id).order('measured_at', desc=True, foreign_table='cat_weights').limit(1, foreign_table='cat_weights').execute()
 
-        if not cat_response.data:
-            return jsonify({"error": "Cat not found"}), 404
-        
+        if not cat_response.data: return jsonify({"error": "Cat not found"}), 404
         cat_data = cat_response.data[0]
 
-        # 1.2 Daily Logs (Last 7 days)
-        # ดึงข้อมูลจากตาราง daily_logs เพื่อดูประวัติการกิน ขับถ่าย
-        logs_response = supabase.table('daily_logs').select('*')\
-            .eq('cat_id', cat_id)\
-            .order('log_date', desc=True)\
-            .limit(7)\
-            .execute()
-            
-        # =========================================================================
-        # 🚨 [เพิ่มใหม่] เงื่อนไขตรวจสอบ: ถ้าไม่มีบันทึกเลย ให้ส่งค่า Default กลับไปทันที 🚨
-        # =========================================================================
-        if not logs_response.data:
-            print(f"⚠️ ไม่พบประวัติบันทึกของแมว ID: {cat_id} -> ส่งคืนค่า No Data")
+        # ดึงข้อมูล Daily Log ย้อนหลัง 7 วัน
+        logs_response = supabase.table('daily_logs').select(
+            '*, normal_logs(*), something_off_logs(*)'
+        ).eq('cat_id', cat_id).order('log_date', desc=True).limit(7).execute()
+        
+        daily_logs = logs_response.data or []
+
+        # ==========================================
+        # 🚨 ตรวจสอบว่ามีการบันทึกข้อมูลของ "วันนี้" แล้วหรือยัง
+        # ==========================================
+        tz_th = timezone(timedelta(hours=7))
+        today_str = datetime.now(tz_th).strftime('%Y-%m-%d')
+        
+        has_today_log = False
+        for log in daily_logs:
+            # ใช้ [:10] เพื่อตัดเอาเฉพาะ 2026-03-01 เผื่อกรณีในฐานข้อมูลมีเวลา (Time) พ่วงมาด้วย
+            log_date = str(log.get('log_date', ''))[:10]
+            if log_date == today_str:
+                has_today_log = True
+                break
+
+        # ถ้าวันนี้ยังไม่ได้บันทึกข้อมูล ให้เตะกลับไปให้แอปโชว์แจ้งเตือน
+        if not has_today_log:
+            print(f"⚠️ ไม่พบข้อมูลของวันนี้ ({today_str}) สั่งให้แอปเด้งแจ้งเตือน")
             return jsonify({
                 "success": True,
+                "requireTodayLog": True, 
                 "riskData": [
                     {"label": "Kidney Disease", "value": "No Data", "score": 0},
                     {"label": "Diabetes", "value": "No Data", "score": 0},
@@ -224,39 +243,34 @@ def get_assessment():
                     {"label": "Gum Disease", "value": "No Data", "score": 0},
                     {"label": "Feline Panleukopenia", "value": "No Data", "score": 0}
                 ],
+                "overallScore": 0,
                 "overallRisk": "No Data",
-                "summaryTitle": "ยังไม่มีข้อมูลสุขภาพ",
-                "summaryDesc": "กรุณาบันทึกข้อมูลสุขภาพประจำวัน (Daily Log) ก่อนเพื่อให้ระบบเริ่มวิเคราะห์ความเสี่ยงได้ค่ะ"
+                "summaryTitle": "ขาดข้อมูลของวันนี้",
+                "summaryDesc": "กรุณาบันทึกข้อมูลสุขภาพประจำวัน (Daily Log) ของวันนี้ก่อน เพื่อให้ระบบประเมินความเสี่ยงได้แม่นยำ"
             })
-        # =========================================================================
-        
-        # แปลงข้อมูล Log เป็น Text ให้ AI อ่าน
-        logs_text = format_log_data(logs_response.data)
 
-        # --- 2. Generate Content with Gemini ---
-        prompt = build_assessment_prompt(cat_data, logs_text)
-        
+        # คำนวณเปอร์เซ็นต์ความเสี่ยง
+        computed_scores = calculate_disease_risks(cat_data, daily_logs)
+
+        # ส่งให้ Gemini สรุปผล
+        prompt = build_summary_prompt(cat_data, computed_scores)
         response = client.models.generate_content(
-            model="gemini-3-flash-preview", # ใช้ model ที่เร็วและเสถียร
+            model="gemini-3-flash-preview",
             contents=prompt,
             config=types.GenerateContentConfig(response_mime_type="application/json")
         )
+        ai_summary = json.loads(response.text)
 
-        # --- 3. Process Response ---
-        ai_result = json.loads(response.text)
-        
-        # Transform data to match Frontend Format
-        frontend_risk_data = []
         target_order = ["Kidney Disease", "Diabetes", "Urolithiasis", "Gum Disease", "Feline Panleukopenia"]
-        
-        # Map AI result to Dict for easy lookup
-        ai_risks_map = {item['disease']: item.get('score', 0) for item in ai_result.get("risks", [])}
+        frontend_risk_data = []
+        overall_score = 0
 
+        # จัดเตรียมข้อมูลส่งกลับให้หน้า ResultScreen.js
         for disease in target_order:
-            score = ai_risks_map.get(disease, 0)
+            score = computed_scores.get(disease, 0)
+            if score > overall_score: 
+                overall_score = score
             
-            # ถ้าไม่มี log ข้อมูล AI อาจจะให้ 0 หรือประเมินจากพันธุ์
-            # ใช้ Logic การแสดงผลตาม Score
             frontend_risk_data.append({
                 "label": disease,
                 "value": assign_risk_label(score),
@@ -265,16 +279,18 @@ def get_assessment():
 
         return jsonify({
             "success": True,
+            "requireTodayLog": False,
             "riskData": frontend_risk_data,
-            "overallRisk": ai_result.get("overallRisk", "Unknown"),
-            "summaryTitle": ai_result.get("summaryTitle", "Assessment Complete"),
-            "summaryDesc": ai_result.get("summaryDesc", "Based on analysis.")
+            "overallScore": overall_score,
+            "overallRisk": assign_risk_label(overall_score),
+            "summaryTitle": ai_summary.get("summaryTitle", ""),
+            "summaryDesc": ai_summary.get("summaryDesc", "")
         })
 
     except Exception as e:
         print(f"❌ Error in assessment: {e}")
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/api/guidance', methods=['POST'])
 def get_guidance():
@@ -283,36 +299,29 @@ def get_guidance():
         condition = data.get('condition')
         cat_id = data.get('catId')
         
-        # Fetch cat info for personalized guidance name (Optional but recommended)
         cat_data = {}
         if cat_id:
             try:
                 res = supabase.table('cats').select('name, breed').eq('id', cat_id).single().execute()
                 cat_data = res.data or {}
-            except:
-                pass 
+            except: pass 
 
-        # Mapping Disease Name
         disease_map = {
-            "Urolithiasis": "โรคนิ่ว",
-            "Kidney Disease": "โรคไต",
-            "Gum Disease": "โรคตับและฟัน",
+            "Urolithiasis": "โรคนิ่วในแมว",
+            "Kidney Disease": "โรคไตในแมว",
+            "Gum Disease": "โรคตับและช่องปากในแมว",
             "Feline Panleukopenia": "โรคหัดแมว",
-            "Diabetes": "โรคเบาหวาน"
+            "Diabetes": "โรคเบาหวานในแมว"
         }
         thai_disease_name = disease_map.get(condition, condition)
 
-        # สร้าง Prompt ขอคำแนะนำ
         prompt = build_disease_prompt(thai_disease_name, cat_data)
-
         response = client.models.generate_content(
             model="gemini-3-flash-preview",
             contents=prompt,
             config=types.GenerateContentConfig(response_mime_type="application/json")
         )
-
         return jsonify(json.loads(response.text))
-
     except Exception as e:
         print(f"❌ Error in guidance: {e}")
         return jsonify({"error": str(e)}), 500

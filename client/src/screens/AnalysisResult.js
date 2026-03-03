@@ -41,7 +41,7 @@ export default function AnalysisResult({ onNavigate, session }) {
 
             const { data: logData, error: logError } = await supabase
                 .from('daily_logs')
-                .select('*')
+                .select('*, normal_logs(*), something_off_logs(*)')
                 .eq('cat_id', catData.id)
                 .eq('log_date', localDateString)
                 .maybeSingle();
@@ -165,23 +165,23 @@ export default function AnalysisResult({ onNavigate, session }) {
                             <View style={{ flexDirection: 'row', backgroundColor: 'rgba(255, 255, 255, 0.5)', borderRadius: 20, padding: 20, marginTop: 20 }}>
                                 <View style={{ flex: 1, borderRightWidth: 1, borderColor: '#A0AEC0' }}>
                                     <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#2D6A64' }}>FOOD</Text>
-                                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#FFF' }}>{dailyLog.food_intake || 0} g</Text>
+                                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#FFF' }}>{dailyLog.normal_logs?.total_food_grams || 0} g</Text>
                                 </View>
                                 <View style={{ flex: 1, paddingLeft: 20 }}>
                                     <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#2D6A64' }}>WATER</Text>
-                                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#FFF' }}>{dailyLog.water_level || 0} ml</Text>
+                                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#FFF' }}>{dailyLog.normal_logs?.water_ml_per_day || 0} ml</Text>
                                 </View>
                             </View>
 
                             {/* Urine and Stool Row */}
-                            <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.5)', borderRadius: 20, padding: 20, marginTop: 15 }}>
+                             <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.5)', borderRadius: 20, padding: 20, marginTop: 15 }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
                                     <View style={{ width: 30 }}><Ionicons name="water" size={20} color="#00ACC1" /></View>
-                                    <Text style={{ color: '#2D3748' }}>Urine: <Text style={{ fontWeight: 'bold' }}>{dailyLog.urine_level_enum || 'Normal'}</Text></Text>
+                                    <Text style={{ color: '#2D3748' }}>Urine: <Text style={{ fontWeight: 'bold' }}>{dailyLog.normal_logs?.urine_level?.replace(/_/g, ' ') || '-'}</Text></Text>
                                 </View>
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                     <View style={{ width: 30 }}><Ionicons name="help-circle" size={20} color="#00ACC1" /></View>
-                                    <Text style={{ color: '#2D3748' }}>Stool: <Text style={{ fontWeight: 'bold' }}>{dailyLog.stool_level_enum || 'Normal'}</Text></Text>
+                                    <Text style={{ color: '#2D3748' }}>Stool: <Text style={{ fontWeight: 'bold' }}>{dailyLog.normal_logs?.stool_level?.replace(/_/g, ' ') || '-'}</Text></Text>
                                 </View>
                             </View>
                         </>
