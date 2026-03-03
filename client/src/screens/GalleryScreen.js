@@ -206,8 +206,9 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                     const cameraIds = cameras.map((c) => c.id);
                     const { data: reviews, error: reviewErr } = await supabase
                         .from('ai_cat_identity_review')
-                        .select('id, camera_id, behavior_label, confidence, occurred_at, snapshot_url, created_at, metadata')
+                        .select('id, camera_id, behavior_label, confidence, occurred_at, snapshot_url, created_at, metadata, reviewed')
                         .in('camera_id', cameraIds)
+                        .eq('reviewed', true)
                         .not('snapshot_url', 'is', null)
                         .order('occurred_at', { ascending: false })
                         .limit(400);
@@ -233,11 +234,12 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
 
             // Filter alerts that have snapshots
             const snapshotAlerts = allAlerts.filter(alert => alert.snapshotUrl || alert.cropSnapshot);
+            const confirmedSnapshotAlerts = snapshotAlerts.filter((alert) => !alert.pendingIdentityConfirm);
 
             // Sort by timestamp descending
-            snapshotAlerts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            confirmedSnapshotAlerts.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-            const formattedImages = snapshotAlerts.map(alert => ({
+            const formattedImages = confirmedSnapshotAlerts.map(alert => ({
                 id: alert.id,
                 uri: alert.snapshotUrl || alert.cropSnapshot,
                 date: alert.timestamp,
@@ -283,6 +285,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                 .from('ai_cat_identity_review')
                 .select('id, occurred_at, created_at, metadata')
                 .in('camera_id', cameraIds)
+                .eq('reviewed', true)
                 .gte('occurred_at', dayStartIso)
                 .order('occurred_at', { ascending: false })
                 .limit(5000);
