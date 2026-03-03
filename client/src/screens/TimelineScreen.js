@@ -253,10 +253,12 @@ export default function TimelineScreen({ session, onBack }) {
       };
     });
 
+
     const allItems = [...logItems, ...communityEvents, ...cameraEvents];
     const filtered = allItems.filter((item) => activeFilter === 'all' || item.source === activeFilter);
     return filtered.sort((a, b) => new Date(b.eventAt) - new Date(a.eventAt));
   }, [logs, communityEvents, cameraEvents, activeFilter]);
+
 
   const groupedItems = useMemo(() => (
     timelineItems.reduce((groups, item) => {

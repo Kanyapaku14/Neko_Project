@@ -20,6 +20,7 @@ import { PanResponder, Linking } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient';
+import AlertEngine from '../services/AlertEngine';
 
 const { width } = Dimensions.get("window");
 
@@ -33,6 +34,7 @@ const BRANDS = [
 ];
 
 export default function Phone({
+    session,
     onBack,
     onConfirm,
     initialStep,
@@ -67,6 +69,7 @@ export default function Phone({
     const [isDrawing, setIsDrawing] = useState(false);
     const [showUpdateConfirmModal, setShowUpdateConfirmModal] = useState(false);
     const [previewSize, setPreviewSize] = useState({ width: 1, height: 1 });
+    const [inlineNotice, setInlineNotice] = useState(null);
     const startPoint = useRef({ x: 0, y: 0 });
 
     // Animation values
@@ -86,6 +89,9 @@ export default function Phone({
     const loginRevealAnim = useRef(new Animated.Value(brand ? 1 : 0)).current;
 
     useEffect(() => {
+        if (session?.user?.id) {
+            AlertEngine.setScope(session.user.id);
+        }
         Animated.parallel([
             Animated.timing(fadeAnim, {
                 toValue: 1,
@@ -99,6 +105,10 @@ export default function Phone({
             })
         ]).start();
     }, []);
+
+    const showNotice = (message, tone = 'warning') => {
+        setInlineNotice({ message, tone });
+    };
 
     useEffect(() => {
         const loadSavedZones = async () => {
@@ -130,6 +140,84 @@ export default function Phone({
         }
     }, [selectedBrand]);
 
+    const ensureCameraWithSource = async (brandId, desiredStatus = 'online') => {
+        if (!session?.user?.id) {
+            showNotice('Please sign in first.', 'warning');
+            return null;
+        }
+        const effectiveBrand = brandId || selectedBrand || 'custom';
+        const payload = {
+            owner_id: session.user.id,
+            name: `${String(effectiveBrand).toUpperCase()} Camera`,
+            brand: effectiveBrand,
+            model: effectiveBrand,
+            mode: 'multi_cat',
+            assigned_by_user: true,
+            is_ai_enabled: true,
+            ai_mode: 'multi_cat',
+            ai_connection_status: desiredStatus === 'online' ? 'online' : 'offline',
+            is_primary: true,
+        };
+        try {
+            let resolvedCameraId = await AsyncStorage.getItem('camera_id');
+            if (resolvedCameraId) {
+                const { error: updateErr } = await supabase
+                    .from('cameras')
+                    .update(payload)
+                    .eq('id', resolvedCameraId)
+                    .eq('owner_id', session.user.id);
+                if (updateErr) throw updateErr;
+            } else {
+                const { data: latest, error: latestErr } = await supabase
+                    .from('cameras')
+                    .select('id')
+                    .eq('owner_id', session.user.id)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                if (latestErr) throw latestErr;
+                if (latest?.id) {
+                    resolvedCameraId = latest.id;
+                    const { error: updateErr } = await supabase
+                        .from('cameras')
+                        .update(payload)
+                        .eq('id', resolvedCameraId)
+                        .eq('owner_id', session.user.id);
+                    if (updateErr) throw updateErr;
+                } else {
+                    const { data: inserted, error: insertErr } = await supabase
+                        .from('cameras')
+                        .insert(payload)
+                        .select('id')
+                        .single();
+                    if (insertErr) throw insertErr;
+                    resolvedCameraId = inserted?.id || null;
+                }
+            }
+            if (!resolvedCameraId) return null;
+            await AsyncStorage.setItem('camera_id', resolvedCameraId);
+
+            const { data: cameraRow, error: readErr } = await supabase
+                .from('cameras')
+                .select('id,stream_source')
+                .eq('id', resolvedCameraId)
+                .eq('owner_id', session.user.id)
+                .maybeSingle();
+            if (readErr) throw readErr;
+            const source = (cameraRow?.stream_source || '').trim();
+            if (!source) {
+                showNotice('Camera source required: add video/webcam/rtsp link in DB first.', 'danger');
+                return null;
+            }
+            setInlineNotice(null);
+            return resolvedCameraId;
+        } catch (e) {
+            console.warn('Failed to ensure camera record/source:', e?.message || e);
+            showNotice('Database sync failed. Unable to verify camera source.', 'danger');
+            return null;
+        }
+    };
+
     const handleLogin = async () => {
         setIsConnecting(true);
         // Step 2: Open OEM App logic
@@ -145,6 +233,13 @@ export default function Phone({
         console.log("Mocking connection for:", selectedBrand);
 
         setTimeout(async () => {
+            const cameraId = await ensureCameraWithSource(selectedBrand, 'online');
+            if (!cameraId) {
+                setIsConnecting(false);
+                setConnected(false);
+                await AsyncStorage.setItem('camera_status', 'disconnected');
+                return;
+            }
             setIsConnecting(false);
             setConnected(true);
             await AsyncStorage.setItem('camera_status', 'connected');
@@ -179,7 +274,11 @@ export default function Phone({
         onConfirm();
     };
 
-    const handleNextStep = () => {
+    const handleNextStep = async () => {
+        if (currentStep === 2) {
+            const cameraId = await ensureCameraWithSource(selectedBrand, connected ? 'online' : 'offline');
+            if (!cameraId) return;
+        }
         Animated.timing(stepAnim, {
             toValue: 1,
             duration: 300,
@@ -376,6 +475,18 @@ export default function Phone({
                                         </View>
                                         <Text style={styles.title}>Choose Camera Brand</Text>
                                         <Text style={styles.subtitle}>Select the brand you are currently using</Text>
+                                        {!!inlineNotice?.message && (
+                                            <View style={[styles.inlineNotice, inlineNotice.tone === 'danger' ? styles.inlineNoticeDanger : styles.inlineNoticeWarning]}>
+                                                <MaterialCommunityIcons
+                                                    name={inlineNotice.tone === 'danger' ? 'alert-circle-outline' : 'information-outline'}
+                                                    size={16}
+                                                    color={inlineNotice.tone === 'danger' ? '#B42318' : '#0F766E'}
+                                                />
+                                                <Text style={[styles.inlineNoticeText, inlineNotice.tone === 'danger' ? styles.inlineNoticeTextDanger : styles.inlineNoticeTextWarning]}>
+                                                    {inlineNotice.message}
+                                                </Text>
+                                            </View>
+                                        )}
                                     </View>
                                     <View style={styles.cardContainer}>
                                         {BRANDS.map((brand) => {
@@ -422,9 +533,10 @@ export default function Phone({
                                                     Log in to {BRANDS.find(b => b.id === selectedBrand)?.name} to link your camera feed.
                                                 </Text>
                                                 <TouchableOpacity style={styles.loginButton} onPress={handleLogin} disabled={isConnecting}>
-                                                    <LinearGradient colors={["#00BFA5", "#00897B"]} style={styles.gradientBtn}>
-                                                        <Text style={styles.loginText}>Connect Account</Text>
-                                                    </LinearGradient>
+                                                    <View style={styles.gradientBtn}>
+                                                        <MaterialCommunityIcons name="link-variant-plus" size={18} color="#FFFFFF" />
+                                                        <Text style={styles.loginText}>Connect Now</Text>
+                                                    </View>
                                                 </TouchableOpacity>
                                             </View>
                                         )}
@@ -458,8 +570,8 @@ export default function Phone({
                                             />
                                         </View>
                                     </View>
-                                    <TouchableOpacity style={[styles.nextButton, { marginTop: 20 }]} onPress={() => setCurrentStep(3)}>
-                                        <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
+                                    <TouchableOpacity style={[styles.nextButton, { marginTop: 20 }]} onPress={handleNextStep}>
+                                        <LinearGradient colors={["#EAF7F2", "#EAF7F2"]} style={styles.gradientNext}>
                                             <Text style={styles.nextText}>Next: Set Zones</Text>
                                         </LinearGradient>
                                     </TouchableOpacity>
@@ -540,7 +652,7 @@ export default function Phone({
                                         style={[styles.nextButton, { marginTop: 20 }]}
                                         onPress={isUpdateMode ? handleUpdateZones : handleNextStep}
                                     >
-                                        <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
+                                        <LinearGradient colors={["#EAF7F2", "#EAF7F2"]} style={styles.gradientNext}>
                                             <Text style={styles.nextText}>{isUpdateMode ? 'Update Zones' : 'Next: Complete'}</Text>
                                         </LinearGradient>
                                     </TouchableOpacity>
@@ -563,7 +675,7 @@ export default function Phone({
                                         await AsyncStorage.setItem('camera_setup_complete', 'true');
                                         onConfirm();
                                     }}>
-                                        <LinearGradient colors={["#A5D6A7", "#4CAF50"]} style={styles.gradientNext}>
+                                        <LinearGradient colors={["#EAF7F2", "#EAF7F2"]} style={styles.gradientNext}>
                                             <Text style={styles.nextText}>Start Monitoring</Text>
                                         </LinearGradient>
                                     </TouchableOpacity>
@@ -889,16 +1001,56 @@ const styles = StyleSheet.create({
         marginTop: 20,
     },
     gradientBtn: {
-        paddingVertical: 14,
-        borderRadius: 16,
+        paddingVertical: 12,
+        borderRadius: 14,
         alignItems: "center",
         flexDirection: 'row',
         justifyContent: 'center',
+        backgroundColor: '#0F766E',
+        borderColor: '#0F766E',
+        borderWidth: 1,
+        gap: 8,
+        shadowColor: '#0F766E',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.18,
+        shadowRadius: 6,
+        elevation: 2,
     },
     loginText: {
-        color: "#fff",
+        color: "#FFFFFF",
         fontWeight: "700",
-        fontSize: 15,
+        fontSize: 14,
+    },
+    inlineNotice: {
+        marginTop: 10,
+        borderRadius: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        width: '100%',
+    },
+    inlineNoticeWarning: {
+        backgroundColor: '#ECFDF5',
+        borderColor: '#A7F3D0',
+        borderWidth: 1,
+    },
+    inlineNoticeDanger: {
+        backgroundColor: '#FEF2F2',
+        borderColor: '#FECACA',
+        borderWidth: 1,
+    },
+    inlineNoticeText: {
+        marginLeft: 8,
+        fontSize: 12,
+        flex: 1,
+        lineHeight: 16,
+    },
+    inlineNoticeTextWarning: {
+        color: '#0F766E',
+    },
+    inlineNoticeTextDanger: {
+        color: '#B42318',
     },
     skipButton: {
         marginTop: 12,
@@ -972,16 +1124,18 @@ const styles = StyleSheet.create({
         marginTop: 20,
     },
     gradientNext: {
-        paddingVertical: 18,
-        borderRadius: 20,
+        paddingVertical: 14,
+        borderRadius: 14,
         alignItems: "center",
         flexDirection: 'row',
         justifyContent: 'center',
+        borderColor: '#BFE7DA',
+        borderWidth: 1,
     },
     nextText: {
-        color: "#fff",
-        fontSize: 18,
-        fontWeight: "800",
+        color: "#0F766E",
+        fontSize: 15,
+        fontWeight: "700",
     },
     fixedBottomButton: {
         position: 'absolute',

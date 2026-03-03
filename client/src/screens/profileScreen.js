@@ -2,19 +2,21 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useState, useEffect } from 'react';
 import { styles } from './Style/authstyle';
 import supabase from './config/supabaseClient';
-import { View, Text, TextInput, TouchableOpacity, Image, Alert, SafeAreaView, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Image, Alert, SafeAreaView, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { decode } from 'base64-arraybuffer';
 // If you have icons, import them. For now using text placeholder or simple views for icons if needed.
-export default function ProfileScreen({ session, onBack, onNavigateToCatProfile }) {
+export default function ProfileScreen({ session, onBack, onNavigateToCatProfile, onComplete }) {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [username, setUsername] = useState('');
     const [gender, setGender] = useState('');
     const [phone, setPhone] = useState('');
     const [birthDate, setBirthDate] = useState('');
+    const [showDatePicker, setShowDatePicker] = useState(false);
 
     const [showGenderPicker, setShowGenderPicker] = useState(false);
 
@@ -103,8 +105,10 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
                 {
                     text: "OK",
                     onPress: () => {
-                        // สั่งเปลี่ยนหน้า (กลับหน้าเดิม)
-                        if (onBack) {
+                        // สั่งเปลี่ยนหน้าไป onComplete ถ้าออกแบบไว้ หรือกลับหน้าเดิม
+                        if (onComplete) {
+                            onComplete();
+                        } else if (onBack) {
                             onBack();
                         }
                     }
@@ -187,25 +191,31 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
     };
 
     // ฟังก์ชันจัดรูปแบบวันที่อัตโนมัติขณะพิมพ์
-    const handleDateChange = (text) => {
-        // 1. ลบทุกตัวอักษรที่ไม่ใช่ตัวเลขออกก่อน
-        const cleaned = text.replace(/[^0-9]/g, '');
+    const getPickerDateValue = () => {
+        if (!birthDate) return new Date();
+        const parts = birthDate.split('-').map((v) => parseInt(v, 10));
+        if (parts.length !== 3 || parts.some((v) => Number.isNaN(v))) return new Date();
+        const [year, month, day] = parts;
+        return new Date(year, month - 1, day);
+    };
 
-        // 2. จัดรูปแบบ YYYY-MM-DD
-        let formatted = cleaned;
-        if (cleaned.length > 4) {
-            formatted = cleaned.slice(0, 4) + '-' + cleaned.slice(4);
-        }
-        if (cleaned.length > 6) {
-            formatted = formatted.slice(0, 7) + '-' + formatted.slice(7);
-        }
-
-        // 3. จำกัดความยาวไม่ให้เกิน 10 ตัวอักษร (YYYY-MM-DD)
-        if (cleaned.length > 8) {
-            formatted = formatted.slice(0, 10);
+    const handlePickerChange = (event, selectedDate) => {
+        if (Platform.OS === 'android') {
+            setShowDatePicker(false);
         }
 
-        setBirthDate(formatted);
+        if (event?.type === 'dismissed' || !selectedDate) {
+            return;
+        }
+
+        const yyyy = selectedDate.getFullYear();
+        const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(selectedDate.getDate()).padStart(2, '0');
+        setBirthDate(`${yyyy}-${mm}-${dd}`);
+
+        if (Platform.OS === 'ios') {
+            setShowDatePicker(false);
+        }
     };
 
     return (
@@ -325,24 +335,39 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
                         <TextInput
                             style={styles.input}
                             value={phone}
-                            onChangeText={setPhone}
+                            onChangeText={(text) => {
+                                const onlyNumbers = text.replace(/[^0-9]/g, "");
+                                setPhone(onlyNumbers);
+                            }}
                             placeholder="Phone Number"
-                            keyboardType="phone-pad"
+                            keyboardType="numeric"
+                            maxLength={10}
                         />
                     </View>
 
                     {/* Date of Birth */}
                     <View style={styles.inputGroup}>
                         <Text style={styles.labelprofile}>Date of birth (YYYY-MM-DD)</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={birthDate}
-                            onChangeText={handleDateChange} // เปลี่ยนมาใช้ฟังก์ชันใหม่ที่นี่
-                            placeholder="YYYY-MM-DD"        // เปลี่ยน Placeholder ให้ชัดเจน
-                            placeholderTextColor="#999"
-                            keyboardType="numeric"          // บังคับขึ้นแป้นตัวเลข
-                            maxLength={10}                  // ห้ามพิมพ์เกิน
-                        />
+                        <TouchableOpacity
+                            activeOpacity={0.8}
+                            onPress={() => setShowDatePicker(true)}
+                            style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                        >
+                            <Text style={{ fontSize: 16, color: birthDate ? '#333' : '#999' }}>
+                                {birthDate || 'Select date of birth'}
+                            </Text>
+                            <Ionicons name="calendar-outline" size={20} color="#666" />
+                        </TouchableOpacity>
+
+                        {showDatePicker && (
+                            <DateTimePicker
+                                value={getPickerDateValue()}
+                                mode="date"
+                                display="default"
+                                onChange={handlePickerChange}
+                                maximumDate={new Date()}
+                            />
+                        )}
                     </View>
 
                     {/* Save Button */}
@@ -363,3 +388,5 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
         </SafeAreaView>
     );
 }
+
+

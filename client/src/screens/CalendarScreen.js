@@ -7,9 +7,9 @@ import {
   ScrollView,
   Dimensions,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-// ลบบรรทัด useFocusEffect ออกไปแล้วครับ
 import BottomNav from "../components/BottomNav";
 import supabase from "./config/supabaseClient";
 
@@ -34,8 +34,11 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
   const [currentDate, setCurrentDate] = useState(parseInitialDate);
   const [selectedDate, setSelectedDate] = useState(parseInitialDate);
   const [dailyLog, setDailyLog] = useState(null);
+  const [medicalEvents, setMedicalEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [catId, setCatId] = useState(null);
+  const [loggedDates, setLoggedDates] = useState([]); // To store dates that have entries
+  const [photos, setPhotos] = useState([]); // To store photos for the selected date
 
 
   // Fetch Cat ID first
@@ -54,32 +57,93 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
     fetchCat();
   }, [session]);
 
-  // กลับมาใช้ useEffect ธรรมดาแบบเดิม
+  // Fetch Logs and Medical Events for selected date
   useEffect(() => {
-    const fetchLog = async () => {
+    const fetchData = async () => {
       if (!catId || !selectedDate) return;
-
       setLoading(true);
       const year = selectedDate.getFullYear();
       const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
       const day = String(selectedDate.getDate()).padStart(2, '0');
       const dateString = `${year}-${month}-${day}`;
 
+      // Fetch Daily Log
       const { data, error } = await supabase
         .from('daily_logs')
         .select('*, normal_logs(*), something_off_logs(*)')
         .eq('cat_id', catId)
         .eq('log_date', dateString)
         .maybeSingle();
-
       if (error) console.error("Error fetching calendar log:", error);
       setDailyLog(data || null);
+
+      // Fetch Medical Events
+      const { data: medicalData, error: medicalError } = await supabase
+        .from('medical_events')
+        .select('*')
+        .eq('cat_id', catId)
+        .eq('event_date', dateString);
+
+      if (medicalError) console.error("Error fetching medical events:", medicalError);
+      setMedicalEvents(medicalData || []);
+
+      // Fetch Photos (AI Snapshots)
+      const { data: photoData, error: photoError } = await supabase
+        .from('ai_cat_identity_review')
+        .select('*')
+        .eq('camera_id', catId)
+        .eq('reviewed', true)
+        .gte('occurred_at', `${dateString}T00:00:00Z`)
+        .lte('occurred_at', `${dateString}T23:59:59Z`);
+
+      if (photoError) console.error("Error fetching photos:", photoError);
+      setPhotos(photoData || []);
 
       setLoading(false);
     };
 
-    fetchLog();
+    fetchData();
   }, [selectedDate, catId]);
+
+  // Fetch all days with logs for the current displayed month
+  useEffect(() => {
+    const fetchMonthIndicators = async () => {
+      if (!catId || !currentDate) return;
+
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      const firstDay = new Date(year, month, 1).toISOString().split('T')[0];
+      const lastDay = new Date(year, month + 1, 0).toISOString().split('T')[0];
+
+      try {
+        // Fetch log dates
+        const { data: logDates, error: logError } = await supabase
+          .from('daily_logs')
+          .select('log_date')
+          .eq('cat_id', catId)
+          .gte('log_date', firstDay)
+          .lte('log_date', lastDay);
+
+        // Fetch medical event dates
+        const { data: medDates, error: medError } = await supabase
+          .from('medical_events')
+          .select('event_date')
+          .eq('cat_id', catId)
+          .gte('event_date', firstDay)
+          .lte('event_date', lastDay);
+
+        const combined = new Set();
+        logDates?.forEach(item => combined.add(item.log_date));
+        medDates?.forEach(item => combined.add(item.event_date));
+
+        setLoggedDates(Array.from(combined));
+      } catch (err) {
+        console.error("Error fetching month indicators:", err);
+      }
+    };
+
+    fetchMonthIndicators();
+  }, [currentDate, catId]);
 
   // Helper to change month
   const changeMonth = (direction) => {
@@ -114,9 +178,11 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
     // Days of current month
     for (let d = 1; d <= daysInMonth; d++) {
       const date = new Date(year, month, d);
+      const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const isSelected = selectedDate.getDate() === d &&
         selectedDate.getMonth() === month &&
         selectedDate.getFullYear() === year;
+      const hasData = loggedDates.includes(dateString);
 
       days.push(
         <TouchableOpacity
@@ -125,6 +191,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
           onPress={() => setSelectedDate(date)}
         >
           <Text style={[styles.dayText, isSelected && styles.selectedDayText]}>{d}</Text>
+          {hasData && <View style={[styles.indicator, isSelected && styles.selectedIndicator]} />}
         </TouchableOpacity>
       );
     }
@@ -168,11 +235,22 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
         contentContainerStyle={{ paddingBottom: 150 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Selected Date Header */}
-        <View style={styles.detailsHeader}>
-          <Text style={styles.dateTitle}>
-            {DAYS_OF_WEEK[selectedDate.getDay()]}, {MONTHS[selectedDate.getMonth()].substring(0, 3)} {selectedDate.getDate()}
-          </Text>
+        {/* Selected Date Header & Add Medical Button */}
+        <View style={styles.detailsHeaderRow}>
+          <View>
+            <Text style={styles.dateTitle}>
+              {DAYS_OF_WEEK[selectedDate.getDay()]}, {MONTHS[selectedDate.getMonth()].substring(0, 3)} {selectedDate.getDate()}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.addMedicalFabSmall}
+            onPress={() => {
+              const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+              onNavigate({ screen: 'AddMedical', params: { initialDate: dateStr } });
+            }}
+          >
+            <MaterialCommunityIcons name="medical-bag" size={26} color="#FFFFFF" />
+          </TouchableOpacity>
         </View>
 
         {loading ? (
@@ -218,7 +296,6 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
               {(dailyLog.something_off_logs?.[0] || dailyLog.something_off_logs) && (
                 <>
                   <View style={{ height: 1.5, backgroundColor: 'rgba(20, 124, 120, 0.2)', marginVertical: 10 }} />
-
                   {(() => {
                     const offLog = Array.isArray(dailyLog.something_off_logs) ? dailyLog.something_off_logs[0] : dailyLog.something_off_logs;
                     return (
@@ -232,7 +309,6 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                             </Text>
                           </View>
                         )}
-
                         {offLog?.has_diarrhea && (
                           <View style={styles.textLogRow}>
                             <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#D32F2F" />
@@ -242,7 +318,6 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                             </Text>
                           </View>
                         )}
-
                         {offLog?.behavior_energy && (
                           <View style={styles.textLogRow}>
                             <MaterialCommunityIcons name="cat" size={18} color="#147C78" />
@@ -254,7 +329,6 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                             </Text>
                           </View>
                         )}
-
                         {offLog?.notes && (
                           <View style={[styles.textLogRow, { alignItems: 'flex-start' }]}>
                             <MaterialCommunityIcons name="note-text" size={18} color="#147C78" />
@@ -268,6 +342,62 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                 </>
               )}
             </View>
+
+            {/* Medical Events Section (Moved above button) */}
+            {medicalEvents.length > 0 && (
+              <View style={{ marginTop: 10 }}>
+                {medicalEvents.map((event) => (
+                  <View key={event.id} style={[styles.textLogContainer, { borderLeftWidth: 4, borderLeftColor: '#D32F2F', backgroundColor: 'rgba(211, 47, 47, 0.05)', marginBottom: 15 }]}>
+                    <View style={[styles.textLogRow, { justifyContent: 'space-between' }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <MaterialCommunityIcons
+                          name={
+                            (event.event_type === 'vaccine' || event.event_type === 'vaccination')
+                              ? 'needle'
+                              : (event.event_type === 'medicine' || event.event_type === 'medication')
+                                ? 'pill'
+                                : 'hospital-marker'
+                          }
+                          size={20}
+                          color="#D32F2F"
+                        />
+                        <Text style={[styles.textLogLabel, { color: '#D32F2F', fontSize: 16 }]}>
+                          {event.event_type?.replace(/_/g, ' ')}
+                        </Text>
+                      </View>
+                      {event.attachment_url && (
+                        <Ionicons name="image" size={18} color="#D32F2F" />
+                      )}
+                    </View>
+                    {event.notes ? (
+                      <Text style={[styles.textLogValue, { fontSize: 14, marginTop: 5, color: '#444' }]}>
+                        {event.notes}
+                      </Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Photos section for Recorded Log */}
+            <Text style={styles.photosLabel}>Photos</Text>
+            {photos.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
+                {photos.map((photo) => (
+                  <View key={photo.id} style={{ marginRight: 10 }}>
+                    <Image
+                      source={{ uri: photo.snapshot_url }}
+                      style={{ width: 140, height: 140, borderRadius: 16 }}
+                      resizeMode="cover"
+                    />
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <TouchableOpacity style={styles.photoPlaceholder}>
+                <Ionicons name="camera" size={32} color="#147C78" />
+              </TouchableOpacity>
+            )}
 
             {/* Edit Recorded Log Button */}
             <TouchableOpacity
@@ -286,36 +416,85 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                 Edit Log for {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
               </Text>
             </TouchableOpacity>
-
           </View>
         ) : (
-          <Text style={styles.noRecordText}>There is no record for this day.</Text>
+          <View>
+            <Text style={styles.noRecordText}>There is no record for this day.</Text>
+            <Text style={styles.photosLabel}>Photos</Text>
+            {photos.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
+                {photos.map((photo) => (
+                  <View key={photo.id} style={{ marginRight: 10 }}>
+                    <Image
+                      source={{ uri: photo.snapshot_url }}
+                      style={{ width: 140, height: 140, borderRadius: 16 }}
+                      resizeMode="cover"
+                    />
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <TouchableOpacity style={styles.photoPlaceholder}>
+                <Ionicons name="camera" size={32} color="#147C78" />
+              </TouchableOpacity>
+            )}
+
+            {/* Medical Events Section (Moved above button) */}
+            {medicalEvents.length > 0 && (
+              <View style={{ marginTop: 10 }}>
+                {medicalEvents.map((event) => (
+                  <View key={event.id} style={[styles.textLogContainer, { borderLeftWidth: 4, borderLeftColor: '#D32F2F', backgroundColor: 'rgba(211, 47, 47, 0.05)', marginBottom: 15 }]}>
+                    <View style={[styles.textLogRow, { justifyContent: 'space-between' }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <MaterialCommunityIcons
+                          name={
+                            (event.event_type === 'vaccine' || event.event_type === 'vaccination')
+                              ? 'needle'
+                              : (event.event_type === 'medicine' || event.event_type === 'medication')
+                                ? 'pill'
+                                : 'hospital-marker'
+                          }
+                          size={20}
+                          color="#D32F2F"
+                        />
+                        <Text style={[styles.textLogLabel, { color: '#D32F2F', fontSize: 16 }]}>
+                          {event.event_type?.replace(/_/g, ' ')}
+                        </Text>
+                      </View>
+                      {event.attachment_url && (
+                        <Ionicons name="image" size={18} color="#D32F2F" />
+                      )}
+                    </View>
+                    {event.notes ? (
+                      <Text style={[styles.textLogValue, { fontSize: 14, marginTop: 5, color: '#444' }]}>
+                        {event.notes}
+                      </Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Add Log Button */}
+            <TouchableOpacity
+              style={[styles.editButton, { marginBottom: 20 }]}
+              onPress={() => {
+                const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+                onNavigate({
+                  screen: 'LogDaily',
+                  initialDate: dateStr,
+                  params: { date: dateStr }
+                });
+              }}
+            >
+              <Feather name="plus-circle" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+              <Text style={styles.editButtonText}>
+                Add Log for {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
 
-        <Text style={styles.photosLabel}>Photos</Text>
-        <TouchableOpacity style={styles.photoPlaceholder}>
-          <Ionicons name="camera" size={32} color="#147C78" />
-        </TouchableOpacity>
-
-        {/* Backdated Add Button */}
-        {!dailyLog && (
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={() => {
-              const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-              onNavigate({
-                screen: 'LogDaily',
-                initialDate: dateStr,
-                params: { date: dateStr }
-              });
-            }}
-          >
-            <Feather name="plus-circle" size={18} color="#147C78" style={{ marginRight: 8 }} />
-            <Text style={styles.editButtonText}>
-              Add Log for {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
-            </Text>
-          </TouchableOpacity>
-        )}
       </ScrollView>
 
       <BottomNav current="Calendar" onNavigate={onNavigate} />
@@ -395,9 +574,13 @@ const styles = StyleSheet.create({
   },
   indicator: {
     width: 6,
-    height: 2,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: "#1FB3A8",
     marginTop: 2,
+  },
+  selectedIndicator: {
+    backgroundColor: "#147C78",
   },
   detailsContainer: {
     flex: 1,
@@ -407,7 +590,10 @@ const styles = StyleSheet.create({
     paddingTop: 40,
     paddingHorizontal: 24,
   },
-  detailsHeader: {
+  detailsHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 16,
   },
   dateTitle: {
@@ -415,36 +601,23 @@ const styles = StyleSheet.create({
     color: "#147C78",
     fontWeight: "bold",
   },
+  addMedicalFabSmall: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#147C78',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 4,
+  },
   noRecordText: {
     fontSize: 14,
     color: "#8FA3A0",
     marginBottom: 24,
-  },
-  statsRow: {
-    flexDirection: "row",
-    marginBottom: 30,
-    justifyContent: 'flex-start',
-  },
-  statItem: {
-    marginRight: 60,
-  },
-  statLabel: {
-    fontSize: 14,
-    color: "#147C78",
-    fontWeight: "bold",
-    marginBottom: 8,
-  },
-  statValue: {
-    fontSize: 24,
-    color: "#FFFFFF",
-    fontWeight: "bold",
-  },
-  divider: {
-    width: 2,
-    height: "100%",
-    backgroundColor: "#147C78",
-    marginRight: 60,
-    opacity: 0.3,
   },
   textLogContainer: {
     backgroundColor: "rgba(255,255,255,0.4)",

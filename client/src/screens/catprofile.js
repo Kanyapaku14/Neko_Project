@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, SafeAreaView, Alert, ActivityIndicator, Platform } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from './Style/authstyle';
 import supabase from './config/supabaseClient';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 export default function CatProfile({ session, catId, onBack, onNavigateToHome }) { // Receiving session and callbacks
     const [catName, setCatName] = useState('');
     const [birthDate, setBirthDate] = useState('');
+    const [showDatePicker, setShowDatePicker] = useState(false);
     const [gender, setGender] = useState('Male'); // Male, Female
     const [isGenderDropdownOpen, setIsGenderDropdownOpen] = useState(false);
     const [isNeutered, setIsNeutered] = useState('Yes'); // Yes, No
@@ -235,6 +237,33 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
         }
     };
 
+    const getPickerDateValue = () => {
+        if (!birthDate) return new Date();
+        const parts = birthDate.split('-').map((v) => parseInt(v, 10));
+        if (parts.length !== 3 || parts.some((v) => Number.isNaN(v))) return new Date();
+        const [year, month, day] = parts;
+        return new Date(year, month - 1, day);
+    };
+
+    const handlePickerChange = (event, selectedDate) => {
+        if (Platform.OS === 'android') {
+            setShowDatePicker(false);
+        }
+
+        if (event?.type === 'dismissed' || !selectedDate) {
+            return;
+        }
+
+        const yyyy = selectedDate.getFullYear();
+        const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(selectedDate.getDate()).padStart(2, '0');
+        setBirthDate(`${yyyy}-${mm}-${dd}`);
+
+        if (Platform.OS === 'ios') {
+            setShowDatePicker(false);
+        }
+    };
+
     return (
         <SafeAreaView style={styles.safeArea}>
             <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
@@ -296,12 +325,26 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
                             <Text style={[styles.label, { marginLeft: 0 }]}>Birthdate (YYYY-MM-DD)</Text>
                             <Text style={[styles.label, { color: '#2F6A62', fontWeight: 'bold' }]}></Text>
                         </View>
-                        <TextInput
-                            style={styles.input}
-                            value={birthDate}
-                            onChangeText={setBirthDate}
-                            placeholder="2020-05-20"
-                        />
+                        <TouchableOpacity
+                            activeOpacity={0.8}
+                            onPress={() => setShowDatePicker(true)}
+                            style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                        >
+                            <Text style={{ fontSize: 16, color: birthDate ? '#333' : '#999' }}>
+                                {birthDate || 'Select birthdate'}
+                            </Text>
+                            <Ionicons name="calendar-outline" size={20} color="#666" />
+                        </TouchableOpacity>
+
+                        {showDatePicker && (
+                            <DateTimePicker
+                                value={getPickerDateValue()}
+                                mode="date"
+                                display="default"
+                                onChange={handlePickerChange}
+                                maximumDate={new Date()}
+                            />
+                        )}
                     </View>
                 </View>
 

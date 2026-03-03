@@ -16,10 +16,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // 1. Import the LogDailyNormal file
 import LogDailyNormal from './src/screens/LogDailyNormal';
-import HomeScreen from './src/screens/HomeScreen'; // อย่าลืม Import Home ด้วยถ้าจะใช้
+import AddMedical from './src/screens/AddMedical';
+import HomeScreen from './src/screens/HomeScreen';
+import HomeScreenNew from './src/screens/HomeScreenNew';
 import CalendarScreen from './src/screens/CalendarScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScreen
+import Tutorail from './src/screens/Tutorail';
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
@@ -61,8 +64,9 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState('SignIn');
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [authScreen, setAuthScreen] = useState('Home');
+  const [authScreen, setAuthScreen] = useState('Home'); // ✅ เปลี่ยนกลับเป็น Home
   const [catId, setCatId] = useState(null);
+  const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
   const [profileLoading, setProfileLoading] = useState(false); // ✅ Track if checking profile
   const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null); // null until loaded
 
@@ -141,24 +145,25 @@ export default function App() {
         .single();
 
       if (profileError || !profile || !profile.name) {
-        setAuthScreen('Profile'); // Go to Profile fill
+        setAuthScreen({ screen: 'Profile', params: { isFirstTime: true } }); // Go to Profile fill first
         return;
       }
 
       // 2. Check Cat
       const { data: cat, error: catError } = await supabase
         .from('cats')
-        .select('id')
+        .select('id, name') // ✅ ดึงชื่อแมวมาด้วย
         .eq('owner_id', session.user.id)
         .limit(1)
         .single();
 
       if (catError || !cat) {
-        setAuthScreen('CatProfile'); // Go to Cat Profile
+        setAuthScreen({ screen: 'CatProfile', params: { isFirstTime: true } }); // Go to Cat Profile
         return;
       }
 
       setCatId(cat.id); // ✅ Save catId
+      setCatName(cat.name); // ✅ Save catName
 
       // If all good, explicitly set to Home
       setAuthScreen('Home');
@@ -178,7 +183,6 @@ export default function App() {
     );
   }
 
-  // --- Helper function to render screens ---
   const renderScreen = () => {
     // 1. Session based (if logged in)
     if (session) {
@@ -187,21 +191,36 @@ export default function App() {
       const screenParams = typeof authScreen === 'object' ? authScreen.params : {};
 
       if (currentScreenName === 'CatProfile') {
+        const isFirstTime = screenParams?.isFirstTime;
         return (
           <CatProfile
             session={session}
             catId={screenParams?.catId || null}
-            onBack={() => setAuthScreen('Setting')}
-            onNavigateToHome={() => setAuthScreen('Home')}
+            onBack={isFirstTime ? undefined : () => setAuthScreen('Setting')}
+            onNavigateToHome={() => {
+              if (isFirstTime) {
+                setAuthScreen('Tutorail');
+              } else {
+                setAuthScreen('Home');
+              }
+            }}
           />
         );
       }
       if (currentScreenName === 'Profile' || currentScreenName === 'EditProfile') {
+        const isFirstTime = screenParams?.isFirstTime;
         return (
           <ProfileScreen
             session={session}
-            onBack={() => setAuthScreen('Setting')}
-            onNavigateToCatProfile={() => setAuthScreen('CatProfile')}
+            onBack={isFirstTime ? undefined : () => setAuthScreen('Setting')}
+            onNavigateToCatProfile={() => setAuthScreen({ screen: 'CatProfile', params: { isFirstTime: true } })}
+            onComplete={() => {
+              if (isFirstTime) {
+                setAuthScreen({ screen: 'CatProfile', params: { isFirstTime: true } });
+              } else {
+                setAuthScreen('Setting');
+              }
+            }}
           />
         );
       }
@@ -225,9 +244,18 @@ export default function App() {
       if (currentScreenName === 'LogDaily') {
         return <LogDailyNormal
           session={session}
-          onBack={() => setAuthScreen('Home')}
+          catId={catId}
+          catName={catName}
+          onBack={() => setAuthScreen('Calendar')}
           onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
           initialDate={screenParams?.date || null}
+        />;
+      }
+      if (currentScreenName === 'AddMedical') {
+        return <AddMedical
+          navigation={{ goBack: () => setAuthScreen('Calendar') }}
+          onBack={() => setAuthScreen('Calendar')}
+          initialDate={screenParams?.initialDate}
         />;
       }
       if (currentScreenName === 'Calendar') {
@@ -300,6 +328,21 @@ export default function App() {
       }
       if (currentScreenName === 'EventDetail') {
         return <EventDetailScreen onBack={() => setAuthScreen('Alert')} alertData={screenParams?.alertData} />;
+      }
+
+      if (currentScreenName === 'Tutorail') {
+        return <Tutorail onFinish={() => setAuthScreen('HomeScreenNew')} />;
+      }
+
+      if (currentScreenName === 'HomeScreenNew') {
+        return <HomeScreenNew
+          session={session}
+          onLogout={handleSignOut}
+          onLogDaily={() => setAuthScreen('LogDaily')}
+          onAssess={() => setAuthScreen('Result')}
+          onSetting={() => setAuthScreen('Setting')}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
       }
 
       // Dashboard Screen

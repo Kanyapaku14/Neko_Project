@@ -2,7 +2,7 @@
 // 1. ส่วนการนำเข้า Libraries และ Components (Imports)
 // ==============================================
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, TextInput, Animated, LayoutAnimation, UIManager, Platform, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, TextInput, Animated, LayoutAnimation, UIManager, Platform, Modal, Alert } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import supabase from './config/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
@@ -66,6 +66,9 @@ export default function SetcameraScreen({ onNavigate, session }) {
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [confirmTitle, setConfirmTitle] = useState('Confirm Connection');
     const [confirmMessage, setConfirmMessage] = useState('Connect or update this camera?');
+    const [showSourceRequiredModal, setShowSourceRequiredModal] = useState(false);
+    const [sourceRequiredTitle, setSourceRequiredTitle] = useState('Camera source required');
+    const [sourceRequiredMessage, setSourceRequiredMessage] = useState('');
     const [isChangingConnectedBrand, setIsChangingConnectedBrand] = useState(false);
     const [isDuplicateConnectAttempt, setIsDuplicateConnectAttempt] = useState(false);
     const [cameraId, setCameraId] = useState(null);
@@ -91,10 +94,17 @@ export default function SetcameraScreen({ onNavigate, session }) {
         });
     };
 
+    const openSourceRequiredModal = (title, message) => {
+        setSourceRequiredTitle(title || 'Camera source required');
+        setSourceRequiredMessage(message || '');
+        setShowSourceRequiredModal(true);
+    };
+
     // Load initial settings and fetch cats
     React.useEffect(() => {
         const load = async () => {
             try {
+                await AlertEngine.setScope(session?.user?.id || 'anonymous');
                 // Load saved selection settings (always, even before cats are loaded)
                 const mode = await AsyncStorage.getItem('camera_monitoringMode');
                 const savedCatsJson = await AsyncStorage.getItem('camera_selectedCats');
@@ -105,14 +115,16 @@ export default function SetcameraScreen({ onNavigate, session }) {
 
                 if (mode) setMonitoringMode(mode);
                 if (savedStatus) setCameraStatus(savedStatus);
-                if (savedBrand) {
+                if (savedBrand && savedStatus === 'connected') {
                     setSelectedCameraPreset(savedBrand);
                     setCommittedCameraBrand(savedBrand);
                     animateSelection(savedBrand);
-                    if (savedStatus === 'connected') {
-                        setIsUpdateMode(true);
-                        successAnim.setValue(1);
-                    }
+                    setIsUpdateMode(true);
+                    successAnim.setValue(1);
+                } else {
+                    setSelectedCameraPreset(null);
+                    setCommittedCameraBrand(null);
+                    animateSelection('');
                 }
                 if (savedCameraId) setCameraId(savedCameraId);
                 if (!savedCameraId && session?.user?.id) {
@@ -126,9 +138,10 @@ export default function SetcameraScreen({ onNavigate, session }) {
                     if (existingCamera?.id) {
                         setCameraId(existingCamera.id);
                         await AsyncStorage.setItem('camera_id', existingCamera.id);
-                        if (existingCamera.brand && !savedBrand) {
+                        if (existingCamera.brand && !savedBrand && existingCamera.ai_connection_status === 'online') {
                             setSelectedCameraPreset(existingCamera.brand);
                             setCommittedCameraBrand(existingCamera.brand);
+                            animateSelection(existingCamera.brand);
                         }
                         if (existingCamera.ai_connection_status === 'online') {
                             setCameraStatus('connected');
@@ -150,7 +163,14 @@ export default function SetcameraScreen({ onNavigate, session }) {
                     if (error) throw error;
                     setMyCats(cats || []);
 
-                    if (savedCatsJson) {
+                    if (cats && cats.length === 1) {
+                        // Hard rule: one-cat households should default to single mode.
+                        const onlyCat = [cats[0].id];
+                        setMonitoringMode('single');
+                        setSelectedCats(onlyCat);
+                        await AsyncStorage.setItem('camera_monitoringMode', 'single');
+                        await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(onlyCat));
+                    } else if (savedCatsJson) {
                         setSelectedCats(JSON.parse(savedCatsJson));
                     } else if (cats && cats.length > 0) {
                         // Default selection if none saved: first cat for single, all for multi
@@ -267,7 +287,34 @@ export default function SetcameraScreen({ onNavigate, session }) {
         }
     };
 
+    const ensureCameraSourceReady = async (targetCameraId) => {
+        if (!targetCameraId || !session?.user?.id) return false;
+        try {
+            const { data: cameraRow, error } = await supabase
+                .from('cameras')
+                .select('id, stream_source')
+                .eq('id', targetCameraId)
+                .eq('owner_id', session.user.id)
+                .maybeSingle();
+            if (error) throw error;
+            const source = (cameraRow?.stream_source || '').trim();
+            if (!source) {
+                openSourceRequiredModal(
+                    'Camera source required',
+                    'Please set stream_source (video/webcam/rtsp link) in DB for this account before entering Camera.'
+                );
+                return false;
+            }
+            return true;
+        } catch (err) {
+            console.warn('Failed to validate camera source:', err?.message || err);
+            openSourceRequiredModal('Validation failed', 'Could not validate camera stream source from DB.');
+            return false;
+        }
+    };
+
     const updateCameraStatus = async (status) => {
+        const previousStatus = cameraStatus;
         setCameraStatus(status);
         await AsyncStorage.setItem('camera_status', status);
 
@@ -285,7 +332,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
         }
 
         // Global Alert Engine Triggers
-        if (status === 'disconnected') {
+        if (status === 'disconnected' && previousStatus === 'connected') {
             await AlertEngine.logEvent({
                 type: 'camera_connection',
                 severity: 'critical',
@@ -293,7 +340,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
                 desc: 'Lost connection to Litter Box camera.',
                 details: 'The camera feed cannot be established. Please check power or Wi-Fi.'
             });
-        } else if (status === 'connected') {
+        } else if (status === 'connected' && previousStatus !== 'connected') {
             await AlertEngine.resolveActiveAlerts('camera_connection', {
                 title: 'System Online',
                 desc: 'Camera connection restored automatically.',
@@ -383,16 +430,36 @@ export default function SetcameraScreen({ onNavigate, session }) {
                 });
                 return;
             }
+            const resolvedCameraId = await upsertCameraConfig({
+                brand: selectedCameraPreset,
+                aiConnectionStatus: 'online',
+            });
+            if (!resolvedCameraId) {
+                Alert.alert('Connection failed', 'Unable to create/update camera in database.');
+                setSelectedCameraPreset(null);
+                setCommittedCameraBrand(null);
+                animateSelection('');
+                await updateCameraStatus('disconnected');
+                await AsyncStorage.removeItem('camera_brand');
+                await AsyncStorage.removeItem('camera_setup_complete');
+                return;
+            }
+            const sourceReady = await ensureCameraSourceReady(resolvedCameraId);
+            if (!sourceReady) {
+                setSelectedCameraPreset(null);
+                setCommittedCameraBrand(null);
+                animateSelection('');
+                await updateCameraStatus('disconnected');
+                await AsyncStorage.removeItem('camera_brand');
+                await AsyncStorage.removeItem('camera_setup_complete');
+                return;
+            }
             await updateCameraStatus('connected');
             await AsyncStorage.setItem('camera_brand', selectedCameraPreset);
             await AsyncStorage.setItem('camera_setup_complete', 'true');
             setCommittedCameraBrand(selectedCameraPreset);
             setIsUpdateMode(true);
             setLastScanAt(new Date());
-            await upsertCameraConfig({
-                brand: selectedCameraPreset,
-                aiConnectionStatus: 'online',
-            });
             onNavigate('Phone', {
                 initialStep: 2,
                 mode: 'new',
@@ -402,6 +469,11 @@ export default function SetcameraScreen({ onNavigate, session }) {
             });
         } catch (e) {
             console.error('Camera connection failed', e);
+            setSelectedCameraPreset(null);
+            setCommittedCameraBrand(null);
+            animateSelection('');
+            await AsyncStorage.removeItem('camera_brand');
+            await AsyncStorage.removeItem('camera_setup_complete');
         } finally {
             setIsConnecting(false);
         }
@@ -441,8 +513,8 @@ export default function SetcameraScreen({ onNavigate, session }) {
         successAnim.setValue(0);
         await updateCameraStatus("disconnected");
         await resetSetupForNewCamera(cameraId);
-        await AsyncStorage.setItem('camera_brand', brandId);
-        setCommittedCameraBrand(brandId);
+        await AsyncStorage.removeItem('camera_brand');
+        setCommittedCameraBrand(null);
         await upsertCameraConfig({
             brand: brandId,
             aiConnectionStatus: 'offline',
@@ -486,6 +558,10 @@ export default function SetcameraScreen({ onNavigate, session }) {
     };
 
     const handleModeChange = async (mode) => {
+        if (myCats.length === 1 && mode !== 'single') {
+            Alert.alert('Single-cat mode only', 'This account has one cat, so monitoring mode stays on Single Cat.');
+            return;
+        }
         setMonitoringMode(mode);
         await AsyncStorage.setItem('camera_monitoringMode', mode);
         if (cameraStatus === 'connected') {
@@ -662,8 +738,9 @@ export default function SetcameraScreen({ onNavigate, session }) {
                                 <TouchableOpacity
                                     style={[styles.toggleBtn, monitoringMode === 'multi' && styles.toggleBtnActive]}
                                     onPress={() => handleModeChange('multi')}
+                                    disabled={myCats.length === 1}
                                 >
-                                    <Text style={[styles.toggleText, monitoringMode === 'multi' && styles.toggleTextActive]}>Multi cat mode</Text>
+                                    <Text style={[styles.toggleText, monitoringMode === 'multi' && styles.toggleTextActive, myCats.length === 1 && { color: '#94A3B8' }]}>Multi cat mode</Text>
                                 </TouchableOpacity>
                             </View>
 
@@ -834,6 +911,27 @@ export default function SetcameraScreen({ onNavigate, session }) {
                                         onPress={handleConfirmConnect}
                                     >
                                         <Text style={styles.confirmPrimaryText}>Confirm</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </View>
+                    </Modal>
+                    <Modal
+                        transparent
+                        visible={showSourceRequiredModal}
+                        animationType="fade"
+                        onRequestClose={() => setShowSourceRequiredModal(false)}
+                    >
+                        <View style={styles.confirmOverlay}>
+                            <View style={styles.confirmCard}>
+                                <Text style={styles.dangerModalTitle}>{sourceRequiredTitle}</Text>
+                                <Text style={styles.dangerModalMessage}>{sourceRequiredMessage}</Text>
+                                <View style={styles.confirmActions}>
+                                    <TouchableOpacity
+                                        style={styles.dangerModalButton}
+                                        onPress={() => setShowSourceRequiredModal(false)}
+                                    >
+                                        <Text style={styles.dangerModalButtonText}>OK</Text>
                                     </TouchableOpacity>
                                 </View>
                             </View>
@@ -1084,6 +1182,29 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
     },
+    dangerModalTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#7F1D1D',
+        marginBottom: 8,
+    },
+    dangerModalMessage: {
+        fontSize: 13,
+        color: '#111827',
+        lineHeight: 19,
+        marginBottom: 16,
+    },
+    dangerModalButton: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 12,
+        backgroundColor: '#111827',
+    },
+    dangerModalButtonText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
+    },
     errorText: {
         color: '#374151',
         textAlign: 'center',
@@ -1183,7 +1304,6 @@ const styles = StyleSheet.create({
         fontSize: 10,
         marginLeft: 6,
     },
-
     // Hardware
     label: {
         color: '#3A3A3C',

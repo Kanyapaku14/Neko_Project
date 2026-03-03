@@ -5,22 +5,22 @@ import { Ionicons, MaterialIcons, Feather } from "@expo/vector-icons";
 export default function BottomNav({ current, onNavigate }) {
   return (
     <View style={styles.container}>
-      
+
       {/* Home */}
       <TouchableOpacity
         style={styles.item}
         onPress={() => onNavigate("Home")}
       >
-        <Ionicons name="home-outline" size={30} color="#484C52" />
+        <Ionicons name="home-outline" size={25} color="#484C52" />
         <Text style={styles.label}>Home</Text>
       </TouchableOpacity>
 
       {/* Calendar */}
       <TouchableOpacity
-        style={styles.item}
+        style={[styles.item, { paddingRight: 15 }]}
         onPress={() => onNavigate("Calendar")}
       >
-        <Feather name="calendar" size={30} color="#484C52" />
+        <Feather name="calendar" size={25} color="#484C52" />
         <Text style={styles.label}>Calendar</Text>
       </TouchableOpacity>
 
@@ -36,10 +36,10 @@ export default function BottomNav({ current, onNavigate }) {
 
       {/* Overview */}
       <TouchableOpacity
-        style={styles.item}
+        style={[styles.item, { paddingLeft: 15 }]}
         onPress={() => onNavigate("Dashboard")}
       >
-        <MaterialIcons name="bar-chart" size={33} color="#484C52" />
+        <MaterialIcons name="bar-chart" size={25} color="#484C52" />
         <Text style={styles.label}>Overview</Text>
       </TouchableOpacity>
 
@@ -48,7 +48,7 @@ export default function BottomNav({ current, onNavigate }) {
         style={styles.item}
         onPress={() => onNavigate("MainTabNavigator")}
       >
-        <Ionicons name="people-outline" size={30} color="#484C52" />
+        <Ionicons name="people-outline" size={25} color="#484C52" />
         <Text style={styles.label}>Community</Text>
       </TouchableOpacity>
 
@@ -59,7 +59,7 @@ export default function BottomNav({ current, onNavigate }) {
 const styles = StyleSheet.create({
   container: {
     width: "100%",
-   height: 90,
+    height: 90,
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 35,
     borderTopRightRadius: 35,
@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-around",
-    
+
     position: "absolute",
     bottom: 0,
     alignSelf: "center",
@@ -80,6 +80,7 @@ const styles = StyleSheet.create({
   },
 
   item: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -87,12 +88,13 @@ const styles = StyleSheet.create({
   label: {
     marginTop: 4,
     fontFamily: "Poppins-Regular",
-    fontSize: 12,
+    fontSize: 10,
     color: "#484C52",
   },
 
   cameraWrapper: {
     marginTop: -10,
+    alignItems: "center",
   },
 
   cameraButton: {

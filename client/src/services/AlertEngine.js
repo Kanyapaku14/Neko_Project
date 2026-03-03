@@ -21,7 +21,7 @@ class SimpleEmitter {
     setMaxListeners() { } // no-op for API compatibility
 }
 
-const ALERT_STORAGE_KEY = 'global_alerts';
+const ALERT_STORAGE_KEY_PREFIX = 'global_alerts';
 
 /**
  * Global Alert Engine Event Names
@@ -44,18 +44,35 @@ class AlertEngineService {
         this.pendingIdentityCount = 0;
         this.isReady = false;
         this.emitter = new SimpleEmitter();
+        this.scopeKey = 'anonymous';
 
         // Load persistency on boot
-        this._loadAlerts();
+        this._loadAlertsForScope(this.scopeKey);
     }
 
     // Public subscription API â€” clean and testable
     on(event, cb) { this.emitter.on(event, cb); }
     off(event, cb) { this.emitter.off(event, cb); }
 
-    async _loadAlerts() {
+    _storageKey() {
+        return `${ALERT_STORAGE_KEY_PREFIX}:${this.scopeKey}`;
+    }
+
+    async setScope(scopeKey) {
+        const next = (scopeKey || 'anonymous').toString();
+        if (next === this.scopeKey) return;
+        this.scopeKey = next;
+        this.alerts = [];
+        this.unreadCount = 0;
+        this.activeCriticalAlerts = false;
+        this.pendingIdentityCount = 0;
+        this.isReady = false;
+        await this._loadAlertsForScope(this.scopeKey);
+    }
+
+    async _loadAlertsForScope(scopeKey) {
         try {
-            const stored = await AsyncStorage.getItem(ALERT_STORAGE_KEY);
+            const stored = await AsyncStorage.getItem(`${ALERT_STORAGE_KEY_PREFIX}:${scopeKey}`);
             if (stored) {
                 this.alerts = JSON.parse(stored);
             }
@@ -70,7 +87,7 @@ class AlertEngineService {
     async _saveAlerts() {
         this._recalculateState(); // Emit UI update immediately before slow disk I/O
         try {
-            await AsyncStorage.setItem(ALERT_STORAGE_KEY, JSON.stringify(this.alerts));
+            await AsyncStorage.setItem(this._storageKey(), JSON.stringify(this.alerts));
         } catch (e) {
             console.error("AlertEngine: Failed to save alerts", e);
         }
