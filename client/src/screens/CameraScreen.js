@@ -22,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient';
 import HomeHeader from '../components/HomeHeader';
 
-
+import { WebView } from 'react-native-webview'; // <-- ต้องมี WebView ด้วย
 import BottomNav from '../components/BottomNav';
 import useCameraData from '../hooks/useCameraData';
 import ActivityLevelChart from '../components/ActivityLevelChart';
@@ -33,8 +33,8 @@ import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
 const { width } = Dimensions.get('window');
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-// Change 5000 to 3000 if using a proxy, or your PC's IP if on a physical device
-const VIDEO_STREAM_URL = `http://${HOST}:5000/api/video_feed`;
+// 🚨 เปลี่ยน 192.168.1.159 เป็น IP จริงของคอมพิวเตอร์คุณเสมอ
+const VIDEO_STREAM_URL = 'http://192.168.1.159:3000/api/video_feed';
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -49,7 +49,8 @@ const DecorativeCatEars = () => (
 export default function CameraScreen({ onNavigate, session }) {
   const [showSetupIntro, setShowSetupIntro] = useState(null); // null | true | false
   const [requireSetcamera, setRequireSetcamera] = useState(false);
-  const [cameraStatus, setCameraStatus] = useState('disconnected');
+  // 🚨 บังคับสถานะเป็น connected เพื่อเทสกล้อง
+  const [cameraStatus, setCameraStatus] = useState('connected');
   const [currentCamera, setCurrentCamera] = useState(1);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
   const [hasCriticalAlert, setHasCriticalAlert] = useState(false);
@@ -60,6 +61,9 @@ export default function CameraScreen({ onNavigate, session }) {
   const [environment, setEnvironment] = useState({ temperature: 25.4, humidity: 58 });
   const [proStats, setProStats] = useState({ ping: 42, bitrate: 1.2, fps: 30 });
   const [livePreviewUri, setLivePreviewUri] = useState(null);
+
+  // 🚨 ล็อค URL ไม่ให้ Re-render บ่อยเกินไป
+  const [stableStreamUrl] = useState(`${VIDEO_STREAM_URL}?t=${new Date().getTime()}`);
 
   const { data } = useCameraData(session, cameraStatus);
 
@@ -168,13 +172,13 @@ export default function CameraScreen({ onNavigate, session }) {
           return (prev === null || prev !== shouldShow) ? shouldShow : prev;
         });
 
-        // Check for camera connection status
-        const storedStatus = await AsyncStorage.getItem('camera_status');
-        if (storedStatus && hasValidSource) {
-          setCameraStatus((prev) => (prev !== storedStatus ? storedStatus : prev));
-        } else if (!hasValidSource) {
-          setCameraStatus('disconnected');
-        }
+        // 🚨 คอมเมนต์ไว้เพื่อให้การบังคับ Connected ทำงานตอนเทส
+        // const storedStatus = await AsyncStorage.getItem('camera_status');
+        // if (storedStatus && hasValidSource) {
+        //   setCameraStatus((prev) => (prev !== storedStatus ? storedStatus : prev));
+        // } else if (!hasValidSource) {
+        //   setCameraStatus('disconnected');
+        // }
       } catch (e) {
         console.error("Failed to fetch status from storage:", e);
       }
@@ -524,11 +528,47 @@ export default function CameraScreen({ onNavigate, session }) {
             {/* Main Content Animated Wrapper */}
             <Animated.View style={{ opacity, transform: [{ translateY }] }}>
 
-              {/* Camera Section */}
+              {/* 🚨 โซนกล้อง (ทำงานแยกตาม OS: Android ใช้ WebView, iOS ใช้ Image) */}
               <View style={styles.cameraContainer}>
                 <View style={styles.cameraFrame}>
                   {cameraStatus === 'connected' ? (
-                    <Image source={{ uri: VIDEO_STREAM_URL }} style={styles.livePreviewImage} resizeMode="cover" />
+                    Platform.OS === 'ios' ? (
+                      <Image
+                        source={{ uri: stableStreamUrl }}
+                        style={styles.livePreviewImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <WebView
+                        originWhitelist={['*']}
+                        source={{
+                          html: `
+                            <!DOCTYPE html>
+                            <html>
+                              <head>
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                                <style>
+                                  body { margin: 0; padding: 0; background-color: #E5E7EB; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+                                  img { width: 100%; height: 100%; object-fit: cover; }
+                                </style>
+                              </head>
+                              <body>
+                                <img src="${stableStreamUrl}" onerror="console.log('Image load failed')" />
+                              </body>
+                            </html>
+                          `,
+                          baseUrl: 'http://192.168.1.159:3000'
+                        }}
+                        style={styles.livePreviewImage}
+                        scrollEnabled={false}
+                        bounces={false}
+                        showsVerticalScrollIndicator={false}
+                        showsHorizontalScrollIndicator={false}
+                        mixedContentMode="always"
+                        javaScriptEnabled={true}
+                        domStorageEnabled={true}
+                      />
+                    )
                   ) : (
                     <View style={styles.videoPlaceholder}>
                       <Text style={styles.liveFeedLabel}>Live Feed</Text>
@@ -603,7 +643,7 @@ export default function CameraScreen({ onNavigate, session }) {
                   {(data?.recentActivities || [
                     { id: 1, type: 'Motion', time: '2m ago', icon: 'run', color: '#FFB74D' },
                     { id: 2, type: 'Eating', time: '15m ago', icon: 'food', color: '#81C784' },
-                    { id: 3, type: 'Litter', time: '1h ago', icon: 'delete-outline', color: '#BA68C8' }, // Fixed icon
+                    { id: 3, type: 'Litter', time: '1h ago', icon: 'delete-outline', color: '#BA68C8' },
                     { id: 4, type: 'Sleep', time: '3h ago', icon: 'sleep', color: '#90A4AE' },
                   ]).map((item, index) => (
                     <View key={item.id || index} style={styles.recentItem}>
