@@ -1,16 +1,6 @@
-import React, { useRef, useState } from "react";
-import {
-    View,
-    Text,
-    StyleSheet,
-    SafeAreaView,
-    Dimensions,
-    TouchableOpacity,
-    Image,
-    FlatList,
-    StatusBar
-} from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import React, { useRef, useState } from 'react';
+import { View, Text, StyleSheet, Dimensions, SafeAreaView, TouchableOpacity, Image, StatusBar, FlatList, Animated } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from "@expo/vector-icons";
 
 const { width, height } = Dimensions.get("window");
@@ -81,6 +71,7 @@ const TUTORIAL_SLIDES = [
 export default function Tutorail({ onFinish }) {
     const flatListRef = useRef(null);
     const [currentIndex, setCurrentIndex] = useState(0);
+    const scrollX = useRef(new Animated.Value(0)).current;
 
     const handleNext = () => {
         if (currentIndex < TUTORIAL_SLIDES.length - 1) {
@@ -107,16 +98,34 @@ export default function Tutorail({ onFinish }) {
 
     const viewConfig = useRef({ viewAreaCoveragePercentThreshold: 50 }).current;
 
-    const renderSlide = ({ item }) => {
+    const renderSlide = ({ item, index }) => {
         const dynamicStyle = {
             width: item.customWidth || width * 0.8,
             height: item.customHeight || width * 0.8
         };
 
+        const inputRange = [
+            (index - 1) * width,
+            index * width,
+            (index + 1) * width
+        ];
+
+        const scale = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.8, 1, 0.8],
+            extrapolate: 'clamp',
+        });
+
+        const opacity = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.4, 1, 0.4],
+            extrapolate: 'clamp',
+        });
+
         return (
             <View style={styles.slide}>
                 <View style={styles.imageFrame}>
-                    <View style={[styles.imageShadowWrapper, dynamicStyle]}>
+                    <Animated.View style={[styles.imageShadowWrapper, dynamicStyle, { transform: [{ scale }] }]}>
                         <View style={[styles.imageContainer, dynamicStyle]}>
                             {item.image ? (
                                 <Image source={item.image} style={styles.image} resizeMode="contain" />
@@ -124,10 +133,12 @@ export default function Tutorail({ onFinish }) {
                                 <Image source={{ uri: item.imageUri }} style={styles.image} resizeMode="cover" />
                             )}
                         </View>
-                    </View>
+                    </Animated.View>
                 </View>
-                <Text style={styles.title}>{item.title}</Text>
-                <Text style={styles.description}>{item.description}</Text>
+                <Animated.View style={{ opacity, alignItems: 'center' }}>
+                    <Text style={styles.title}>{item.title}</Text>
+                    <Text style={styles.description}>{item.description}</Text>
+                </Animated.View>
             </View>
         );
     };
@@ -153,7 +164,7 @@ export default function Tutorail({ onFinish }) {
 
                 {/* Carousel */}
                 <View style={{ flex: 1 }}>
-                    <FlatList
+                    <Animated.FlatList
                         ref={flatListRef}
                         data={TUTORIAL_SLIDES}
                         keyExtractor={(item) => item.id}
@@ -162,15 +173,35 @@ export default function Tutorail({ onFinish }) {
                         pagingEnabled
                         showsHorizontalScrollIndicator={false}
                         bounces={false}
+                        onScroll={Animated.event(
+                            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+                            { useNativeDriver: true }
+                        )}
                         onViewableItemsChanged={onViewableItemsChanged}
                         viewabilityConfig={viewConfig}
+                        scrollEventThrottle={16}
                     />
+                </View>
+
+                {/* Pagination Dots */}
+                <View style={styles.paginationContainer}>
+                    {TUTORIAL_SLIDES.map((_, index) => (
+                        <View
+                            key={index}
+                            style={[
+                                styles.dot,
+                                currentIndex === index ? styles.activeDot : styles.inactiveDot
+                            ]}
+                        />
+                    ))}
                 </View>
 
                 {/* Next Button */}
                 <View style={styles.footer}>
                     <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
-                        <Text style={styles.nextButtonText}>Next</Text>
+                        <Text style={styles.nextButtonText}>
+                            {currentIndex === TUTORIAL_SLIDES.length - 1 ? "Get Started" : "Next"}
+                        </Text>
                         <Ionicons name="arrow-forward" size={20} color="#000" style={{ marginLeft: 5 }} />
                     </TouchableOpacity>
                 </View>
@@ -248,6 +279,25 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         lineHeight: 22,
         paddingHorizontal: 10,
+    },
+    paginationContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 20,
+    },
+    dot: {
+        height: 8,
+        borderRadius: 4,
+        marginHorizontal: 4,
+    },
+    activeDot: {
+        width: 24,
+        backgroundColor: '#63B5A5',
+    },
+    inactiveDot: {
+        width: 8,
+        backgroundColor: '#D1D9E0',
     },
     footer: {
         paddingHorizontal: 24,
