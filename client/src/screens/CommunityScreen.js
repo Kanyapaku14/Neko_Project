@@ -366,7 +366,7 @@ export default function CommunityScreen({ onBack, session, onNavigate }) {
         title="Community"
         onBack={onBack}
         onProfile={() => onNavigate && onNavigate("CommunityProfile")}
-        onSettings={() => onNavigate && onNavigate("UserInfo")}
+        onSettings={() => onNavigate && onNavigate("Setting")}
         avatarUrl={userProfile?.avatar_url}
       />
 
