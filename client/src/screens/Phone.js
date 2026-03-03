@@ -11,6 +11,8 @@ import {
     Dimensions,
     ActivityIndicator,
     Modal,
+    Platform,
+    Image,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
@@ -20,6 +22,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient';
 
 const { width } = Dimensions.get("window");
+
+const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+const VIDEO_STREAM_URL = `http://${HOST}:5000/api/video_feed`;
 
 const BRANDS = [
     { id: "tapo", name: "TP-Link Tapo", icon: "link-variant" },
@@ -445,11 +450,12 @@ export default function Phone({
                                             <Text style={styles.title}>Test Live Feed</Text>
                                             <Text style={styles.subtitle}>Verify the camera feed is working correctly.</Text>
                                         </View>
-                                        <View style={styles.previewCard}>
-                                            <View style={styles.previewPlaceholder}>
-                                                <MaterialCommunityIcons name="cat" size={48} color="rgba(255,255,255,0.2)" />
-                                                <Text style={styles.previewText}>Camera Feed Optimized for Cats</Text>
-                                            </View>
+                                        <View style={[styles.previewCard, { overflow: 'hidden' }]}>
+                                            <Image
+                                                source={{ uri: VIDEO_STREAM_URL }}
+                                                style={{ width: '100%', height: '100%' }}
+                                                resizeMode="cover"
+                                            />
                                         </View>
                                     </View>
                                     <TouchableOpacity style={[styles.nextButton, { marginTop: 20 }]} onPress={() => setCurrentStep(3)}>
