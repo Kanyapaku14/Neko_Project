@@ -2,13 +2,14 @@
 // 1. ส่วนการนำเข้า Libraries และ Components (Imports)
 // ==============================================
 import React, { useState } from 'react';
-import { View, Text, SafeAreaView, TouchableOpacity, StyleSheet, ScrollView, Image, TextInput, Animated, LayoutAnimation, UIManager, Platform, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, TextInput, Animated, LayoutAnimation, UIManager, Platform, Modal } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import supabase from './config/supabaseClient';
 import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import AlertEngine from '../services/AlertEngine'; // Global Alert Manager
 
 const CAMERA_BRANDS = [
@@ -67,6 +68,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
     const [confirmMessage, setConfirmMessage] = useState('Connect or update this camera?');
     const [isChangingConnectedBrand, setIsChangingConnectedBrand] = useState(false);
     const [isDuplicateConnectAttempt, setIsDuplicateConnectAttempt] = useState(false);
+    const [cameraId, setCameraId] = useState(null);
 
     // Animation values
     const successAnim = React.useRef(new Animated.Value(0)).current;
@@ -98,6 +100,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
                 const savedCatsJson = await AsyncStorage.getItem('camera_selectedCats');
                 const savedStatus = await AsyncStorage.getItem('camera_status');
                 const savedBrand = await AsyncStorage.getItem('camera_brand');
+                const savedCameraId = await AsyncStorage.getItem('camera_id');
                 const savedZoneLabel = await AsyncStorage.getItem('camera_zone_summary');
 
                 if (mode) setMonitoringMode(mode);
@@ -109,6 +112,28 @@ export default function SetcameraScreen({ onNavigate, session }) {
                     if (savedStatus === 'connected') {
                         setIsUpdateMode(true);
                         successAnim.setValue(1);
+                    }
+                }
+                if (savedCameraId) setCameraId(savedCameraId);
+                if (!savedCameraId && session?.user?.id) {
+                    const { data: existingCamera } = await supabase
+                        .from('cameras')
+                        .select('id, brand, ai_connection_status')
+                        .eq('owner_id', session.user.id)
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+                    if (existingCamera?.id) {
+                        setCameraId(existingCamera.id);
+                        await AsyncStorage.setItem('camera_id', existingCamera.id);
+                        if (existingCamera.brand && !savedBrand) {
+                            setSelectedCameraPreset(existingCamera.brand);
+                            setCommittedCameraBrand(existingCamera.brand);
+                        }
+                        if (existingCamera.ai_connection_status === 'online') {
+                            setCameraStatus('connected');
+                            setIsUpdateMode(true);
+                        }
                     }
                 }
                 if (savedZoneLabel) {
@@ -152,9 +177,112 @@ export default function SetcameraScreen({ onNavigate, session }) {
         return () => clearInterval(timer);
     }, [cameraStatus]);
 
+    const syncCameraCatsAssignment = async (targetCameraId, catIds) => {
+        if (!targetCameraId || !Array.isArray(catIds)) return;
+        try {
+            const uniqueCatIds = [...new Set(catIds)].filter(Boolean);
+            const { error: deleteErr } = await supabase
+                .from('camera_cats')
+                .delete()
+                .eq('camera_id', targetCameraId);
+            if (deleteErr) throw deleteErr;
+
+            if (uniqueCatIds.length > 0) {
+                const rows = uniqueCatIds.map((id, idx) => ({
+                    camera_id: targetCameraId,
+                    cat_id: id,
+                    is_primary: idx === 0,
+                }));
+                const { error: insertErr } = await supabase.from('camera_cats').insert(rows);
+                if (insertErr) throw insertErr;
+            }
+        } catch (err) {
+            console.warn('Failed to sync camera_cats:', err?.message || err);
+        }
+    };
+
+    const clearCameraZonesInDb = async (targetCameraId) => {
+        if (!targetCameraId) return;
+        try {
+            const { error } = await supabase
+                .from('camera_zones')
+                .delete()
+                .eq('camera_id', targetCameraId);
+            if (error) throw error;
+        } catch (err) {
+            console.warn('Failed to clear camera_zones:', err?.message || err);
+        }
+    };
+
+    const upsertCameraConfig = async (overrides = {}) => {
+        if (!session?.user?.id) return null;
+        const effectiveBrand = overrides.brand || selectedCameraPreset || committedCameraBrand || 'custom';
+        const modeValue = (overrides.mode || monitoringMode) === 'single' ? 'single_cat' : 'multi_cat';
+        const connectionStatus = overrides.aiConnectionStatus || (cameraStatus === 'connected' ? 'online' : 'offline');
+        const name = overrides.name || `${effectiveBrand.toUpperCase()} Camera`;
+
+        try {
+            const payload = {
+                owner_id: session.user.id,
+                name,
+                brand: effectiveBrand,
+                model: effectiveBrand,
+                mode: modeValue,
+                assigned_by_user: true,
+                is_ai_enabled: true,
+                ai_mode: modeValue,
+                ai_connection_status: connectionStatus,
+                is_primary: true,
+            };
+
+            let resolvedCameraId = cameraId;
+
+            if (resolvedCameraId) {
+                const { error: updateErr } = await supabase
+                    .from('cameras')
+                    .update(payload)
+                    .eq('id', resolvedCameraId)
+                    .eq('owner_id', session.user.id);
+                if (updateErr) throw updateErr;
+            } else {
+                const { data: inserted, error: insertErr } = await supabase
+                    .from('cameras')
+                    .insert(payload)
+                    .select('id')
+                    .single();
+                if (insertErr) throw insertErr;
+                resolvedCameraId = inserted?.id || null;
+            }
+
+            if (resolvedCameraId) {
+                setCameraId(resolvedCameraId);
+                await AsyncStorage.setItem('camera_id', resolvedCameraId);
+                await syncCameraCatsAssignment(resolvedCameraId, selectedCats);
+            }
+
+            return resolvedCameraId;
+        } catch (err) {
+            console.warn('Failed to upsert camera config:', err?.message || err);
+            return null;
+        }
+    };
+
     const updateCameraStatus = async (status) => {
         setCameraStatus(status);
         await AsyncStorage.setItem('camera_status', status);
+
+        if (session?.user?.id && cameraId) {
+            const aiConnectionStatus = status === 'connected' ? 'online' : status === 'connecting' ? 'online' : 'offline';
+            try {
+                await supabase
+                    .from('cameras')
+                    .update({ ai_connection_status: aiConnectionStatus })
+                    .eq('id', cameraId)
+                    .eq('owner_id', session.user.id);
+            } catch (err) {
+                console.warn('Failed to update camera status in DB:', err?.message || err);
+            }
+        }
 
         // Global Alert Engine Triggers
         if (status === 'disconnected') {
@@ -261,6 +389,10 @@ export default function SetcameraScreen({ onNavigate, session }) {
             setCommittedCameraBrand(selectedCameraPreset);
             setIsUpdateMode(true);
             setLastScanAt(new Date());
+            await upsertCameraConfig({
+                brand: selectedCameraPreset,
+                aiConnectionStatus: 'online',
+            });
             onNavigate('Phone', {
                 initialStep: 2,
                 mode: 'new',
@@ -284,7 +416,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
         }
     };
 
-    const resetSetupForNewCamera = async () => {
+    const resetSetupForNewCamera = async (targetCameraId = null) => {
         await AsyncStorage.multiRemove([
             'camera_monitoringMode',
             'camera_selectedCats',
@@ -293,6 +425,9 @@ export default function SetcameraScreen({ onNavigate, session }) {
             'camera_zone_feeding',
             'camera_zone_litter',
         ]);
+        if (targetCameraId) {
+            await clearCameraZonesInDb(targetCameraId);
+        }
         setMonitoringMode('multi');
         setSelectedCats(myCats.map((cat) => cat.id));
         setZoneLabel(defaultZoneLabel);
@@ -305,9 +440,13 @@ export default function SetcameraScreen({ onNavigate, session }) {
         animateSelection(brandId);
         successAnim.setValue(0);
         await updateCameraStatus("disconnected");
-        await resetSetupForNewCamera();
+        await resetSetupForNewCamera(cameraId);
         await AsyncStorage.setItem('camera_brand', brandId);
         setCommittedCameraBrand(brandId);
+        await upsertCameraConfig({
+            brand: brandId,
+            aiConnectionStatus: 'offline',
+        });
     };
 
     const handleSelectCameraBrand = (brandId) => {
@@ -341,17 +480,26 @@ export default function SetcameraScreen({ onNavigate, session }) {
         }
         setSelectedCats(newSelected);
         await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(newSelected));
+        if (cameraStatus === 'connected' && cameraId) {
+            await syncCameraCatsAssignment(cameraId, newSelected);
+        }
     };
 
     const handleModeChange = async (mode) => {
         setMonitoringMode(mode);
         await AsyncStorage.setItem('camera_monitoringMode', mode);
+        if (cameraStatus === 'connected') {
+            await upsertCameraConfig({ mode });
+        }
         // Reset selection logic based on mode if needed
         if (mode === 'single') {
             if (myCats && myCats.length > 0) {
                 const first = [myCats[0].id];
                 setSelectedCats(first);
                 await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(first));
+                if (cameraStatus === 'connected' && cameraId) {
+                    await syncCameraCatsAssignment(cameraId, first);
+                }
             } else {
                 setSelectedCats([]);
             }
@@ -365,7 +513,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
                 colors={['#f5fffdff', '#f5fffdff']}
                 style={{ flex: 1 }}
             >
-                <SafeAreaView style={styles.container}>
+                <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
                     {/* Header */}
                     <View style={styles.header}>
                         <TouchableOpacity onPress={() => onNavigate('Camera')} style={styles.backBtnStyle} activeOpacity={0.85}>
@@ -709,10 +857,10 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        paddingTop: 12,
-        paddingBottom: 10,
-        backgroundColor: 'transparent',
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        paddingBottom: 8,
+        backgroundColor: '#f5fffdff',
     },
     backButton: {
         width: 36,
@@ -749,14 +897,14 @@ const styles = StyleSheet.create({
         marginHorizontal: 2,
     },
     headerTitle: {
-        fontSize: 18,
+        fontSize: 16,
         fontFamily: 'Inter-Bold',
         color: '#2F6A62',
         textAlign: 'center',
         flex: 1,
     },
     content: {
-        padding: 16,
+        padding: 12,
         paddingTop: 0,
     },
     // Cards
@@ -764,9 +912,9 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
         borderWidth: 1.5,
         borderColor: '#E0F2F1',
-        borderRadius: 16,
-        padding: 16,
-        marginBottom: 16,
+        borderRadius: 12,
+        padding: 12,
+        marginBottom: 10,
         overflow: 'hidden',
         shadowColor: '#0F172A',
         shadowOffset: { width: 0, height: 2 },
@@ -776,13 +924,13 @@ const styles = StyleSheet.create({
     },
     sectionTitle: {
         color: '#1C1C1E',
-        fontSize: 16,
+        fontSize: 13,
         fontWeight: '700',
-        marginBottom: 12,
+        marginBottom: 10,
     },
     sectionTitleWhite: {
         color: '#1C1C1E',
-        fontSize: 16,
+        fontSize: 13,
         fontWeight: '700',
     },
 
@@ -812,13 +960,13 @@ const styles = StyleSheet.create({
     },
     statusDesc: {
         color: '#3A3A3C',
-        fontSize: 13,
+        fontSize: 12,
         marginBottom: 16,
         lineHeight: 18,
     },
     actionButtonGray: {
         backgroundColor: '#EEF2FF',
-        paddingVertical: 12,
+        paddingVertical: 10,
         borderRadius: 999,
         alignItems: 'center',
         borderWidth: 1,
@@ -833,7 +981,7 @@ const styles = StyleSheet.create({
     previewHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 12,
+        padding: 10,
         backgroundColor: '#F8FAFC'
     },
     previewContent: {
@@ -1126,13 +1274,13 @@ const styles = StyleSheet.create({
     },
     // Brand Card Styles
     brandCardStack: {
-        gap: 12,
-        marginBottom: 20,
+        gap: 10,
+        marginBottom: 16,
     },
     brandCardSmall: {
         backgroundColor: "#fff",
-        borderRadius: 16,
-        padding: 12,
+        borderRadius: 13,
+        padding: 10,
         borderWidth: 1.5,
         borderColor: "rgba(0,0,0,0.05)",
         shadowColor: '#0F172A',
@@ -1152,21 +1300,21 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     brandIconBg: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
+        width: 32,
+        height: 32,
+        borderRadius: 9,
         backgroundColor: '#F5F7FA',
         justifyContent: 'center',
         alignItems: 'center',
     },
     brandNameTitle: {
-        fontSize: 15,
+        fontSize: 13,
         fontWeight: "700",
         color: "#37474F",
         color: "#546E7A",
     },
     brandApiSub: {
-        fontSize: 11,
+        fontSize: 10,
         color: "#78909C",
         marginTop: 1,
     },

@@ -22,6 +22,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import supabase from "./config/supabaseClient";
 
+const getLocalDateString = (date) => {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
 const { width } = Dimensions.get("window");
 const FRIENDS_KEY = "neko_friends_list";
 
@@ -112,6 +116,12 @@ export default function RankingScreen({ session, onBack }) {
           });
           const score = await calcScore(data.id);
           setMyScore(score);
+
+          // Sync dynamically calculated score to the profiles table so friends can see it accurately
+          if (score !== data.score) {
+            await supabase.from("profiles").update({ score }).eq("id", data.id);
+          }
+
           return;
         }
       }
@@ -163,7 +173,7 @@ export default function RankingScreen({ session, onBack }) {
         const userIds = incomingRows.map(r => r.user_id);
         const { data: profiles, error: profileError } = await supabase
           .from("profiles")
-          .select("id, name")
+          .select("id, name, avatar_url, score")
           .in("id", userIds);
 
         if (profileError) {
@@ -231,7 +241,7 @@ export default function RankingScreen({ session, onBack }) {
       if (friendIds.length > 0) {
         const { data: profiles, error: fetchError } = await supabase
           .from("profiles")
-          .select("id, name, avatar_url")
+          .select("id, name, avatar_url, score")
           .in("id", friendIds);
 
         if (fetchError) {
@@ -239,13 +249,11 @@ export default function RankingScreen({ session, onBack }) {
         }
 
         if (profiles) {
-          const withScores = await Promise.all(
-            profiles.map(async (f) => ({
-              ...f,
-              score: await calcScore(f.id),
-              status: 'accepted'
-            }))
-          );
+          const withScores = profiles.map((f) => ({
+            ...f,
+            score: f.score || 0,
+            status: 'accepted'
+          }));
           setFriends(withScores);
         } else {
           setFriends([]);
@@ -261,10 +269,11 @@ export default function RankingScreen({ session, onBack }) {
     try {
       if (!session?.user?.id) return;
 
-      // 1. Fetch profiles (limit 20 for performance)
+      // 1. Fetch profiles sorted by score (limit 20 for performance)
       const { data: profiles, error } = await supabase
         .from("profiles")
-        .select("id, name, avatar_url")
+        .select("id, name, avatar_url, score")
+        .order("score", { ascending: false })
         .limit(20);
 
       if (error) throw error;
@@ -297,22 +306,19 @@ export default function RankingScreen({ session, onBack }) {
         });
       }
 
-      // 4. Calculate scores & map status
-      const globalData = await Promise.all(
-        profiles.map(async (p) => {
-          const score = await calcScore(p.id);
-          let status = 'none';
-          if (p.id === session.user.id) status = 'me';
-          else if (relMap[p.id]) status = relMap[p.id];
+      // 4. Map statuses and scores
+      const globalData = profiles.map((p) => {
+        let status = 'none';
+        if (p.id === session.user.id) status = 'me';
+        else if (relMap[p.id]) status = relMap[p.id];
 
-          return {
-            ...p,
-            score,
-            status, // 'accepted', 'pending', 'incoming', 'none', 'me'
-            isMe: p.id === session.user.id
-          };
-        })
-      );
+        return {
+          ...p,
+          score: p.id === session.user.id ? myScore : (p.score || 0),
+          status, // 'accepted', 'pending', 'incoming', 'none', 'me'
+          isMe: p.id === session.user.id
+        };
+      });
 
       // Check if current user is in the list, if not, add them
       const isCurrentUserIncluded = globalData.some(p => p.id === session.user.id);
@@ -386,18 +392,19 @@ export default function RankingScreen({ session, onBack }) {
 
           if (logs && logs.length > 0) {
             const uniqueDates = [...new Set(logs.map(l => l.log_date))].sort((a, b) => new Date(b) - new Date(a));
-            const todayStr = new Date().toISOString().split('T')[0];
+            const todayStr = getLocalDateString(new Date());
             const yesterday = new Date();
             yesterday.setDate(yesterday.getDate() - 1);
-            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            const yesterdayStr = getLocalDateString(yesterday);
 
             let streak = 0;
             if (uniqueDates[0] === todayStr || uniqueDates[0] === yesterdayStr) {
               streak = 1;
-              let checkDate = new Date(uniqueDates[0]);
+              const [y, m, d] = uniqueDates[0].split('-');
+              let checkDate = new Date(y, m - 1, d);
               for (let i = 1; i < uniqueDates.length; i++) {
                 checkDate.setDate(checkDate.getDate() - 1);
-                if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+                if (uniqueDates[i] === getLocalDateString(checkDate)) {
                   streak++;
                 } else {
                   break;
@@ -457,10 +464,10 @@ export default function RankingScreen({ session, onBack }) {
 
       if (!checkinError && checkins && checkins.length > 0) {
         const uniqueDates = [...new Set(checkins.map(c => c.checkin_date))];
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getLocalDateString(new Date());
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        const yesterdayStr = getLocalDateString(yesterday);
 
         let streak = 0;
         let checkinScore = 0;
@@ -470,10 +477,11 @@ export default function RankingScreen({ session, onBack }) {
           streak = 1;
           checkinScore += streak; // Day 1 = +1
 
-          let checkDate = new Date(uniqueDates[0]);
+          const [y, m, d] = uniqueDates[0].split('-');
+              let checkDate = new Date(y, m - 1, d);
           for (let i = 1; i < uniqueDates.length; i++) {
             checkDate.setDate(checkDate.getDate() - 1);
-            if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+            if (uniqueDates[i] === getLocalDateString(checkDate)) {
               streak++;
               checkinScore += streak; // Day N = +N
             } else {
@@ -504,7 +512,7 @@ export default function RankingScreen({ session, onBack }) {
   const checkTodayStatus = async () => {
     if (!session?.user?.id) return;
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateString(new Date());
       const { data, error } = await supabase
         .from("daily_checkins")
         .select("*")
@@ -526,7 +534,7 @@ export default function RankingScreen({ session, onBack }) {
         const uniqueDates = [...new Set(allCheckins.map(c => c.checkin_date))];
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        const yesterdayStr = getLocalDateString(yesterday);
 
         if (uniqueDates[0] === today) {
           alreadyCheckedInToday = true;
@@ -536,10 +544,11 @@ export default function RankingScreen({ session, onBack }) {
         // The active streak calculation (base points for the next checkin)
         if (uniqueDates[0] === today || uniqueDates[0] === yesterdayStr) {
           currentStreak = 1;
-          let checkDate = new Date(uniqueDates[0]);
+          const [y, m, d] = uniqueDates[0].split('-');
+              let checkDate = new Date(y, m - 1, d);
           for (let i = 1; i < uniqueDates.length; i++) {
             checkDate.setDate(checkDate.getDate() - 1);
-            if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+            if (uniqueDates[i] === getLocalDateString(checkDate)) {
               currentStreak++;
             } else {
               break;
@@ -571,14 +580,15 @@ export default function RankingScreen({ session, onBack }) {
         const uniqueDates = [...new Set(previousCheckins.map(c => c.checkin_date))];
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        const yesterdayStr = getLocalDateString(yesterday);
 
         if (uniqueDates[0] === yesterdayStr) {
           let streak = 1; // Yesterday is day 1 of history
-          let checkDate = new Date(uniqueDates[0]);
+          const [y, m, d] = uniqueDates[0].split('-');
+              let checkDate = new Date(y, m - 1, d);
           for (let i = 1; i < uniqueDates.length; i++) {
             checkDate.setDate(checkDate.getDate() - 1);
-            if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+            if (uniqueDates[i] === getLocalDateString(checkDate)) {
               streak++;
             } else {
               break;
@@ -593,7 +603,7 @@ export default function RankingScreen({ session, onBack }) {
         .from("daily_checkins")
         .insert({
           user_id: session.user.id,
-          checkin_date: new Date().toISOString().split('T')[0]
+          checkin_date: getLocalDateString(new Date())
         });
 
       if (error) throw error;
@@ -1148,7 +1158,7 @@ export default function RankingScreen({ session, onBack }) {
               })}
 
               {/* Small Empty State - Only show if no friends were found */}
-              {friends.length === 0 && (
+              {viewMode === 'friends' && friends.length === 0 && (
                 <View style={styles.emptyStateMini}>
                   <Text style={styles.emptySubMini}>
                     Tap + to add friends and compare rankings

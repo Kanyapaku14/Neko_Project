@@ -11,14 +11,20 @@ import {
     Dimensions,
     ActivityIndicator,
     Modal,
+    Platform,
+    Image,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { PanResponder, Linking } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import supabase from './config/supabaseClient';
 
 const { width } = Dimensions.get("window");
+
+const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+const VIDEO_STREAM_URL = `http://${HOST}:5000/api/video_feed`;
 
 const BRANDS = [
     { id: "tapo", name: "TP-Link Tapo", icon: "link-variant" },
@@ -60,6 +66,7 @@ export default function Phone({
     const [activeZoneType, setActiveZoneType] = useState('feeding'); // 'feeding' | 'litter'
     const [isDrawing, setIsDrawing] = useState(false);
     const [showUpdateConfirmModal, setShowUpdateConfirmModal] = useState(false);
+    const [previewSize, setPreviewSize] = useState({ width: 1, height: 1 });
     const startPoint = useRef({ x: 0, y: 0 });
 
     // Animation values
@@ -196,13 +203,86 @@ export default function Phone({
         setShowUpdateConfirmModal(true);
     };
 
-    const handleConfirmUpdateZones = async () => {
-        setShowUpdateConfirmModal(false);
+    const normalizeRect = (zone, canvas) => {
+        const w = Math.max(1, Number(canvas?.width || 1));
+        const h = Math.max(1, Number(canvas?.height || 1));
+        return {
+            x: Math.max(0, Math.min(1, Number(zone?.x || 0) / w)),
+            y: Math.max(0, Math.min(1, Number(zone?.y || 0) / h)),
+            w: Math.max(0, Math.min(1, Number(zone?.w || 0) / w)),
+            h: Math.max(0, Math.min(1, Number(zone?.h || 0) / h)),
+        };
+    };
+
+    const rectToPolygon = (zone, zoneType) => {
+        const n = normalizeRect(zone, previewSize);
+        const x1 = n.x;
+        const y1 = n.y;
+        const x2 = Math.min(1, n.x + n.w);
+        const y2 = Math.min(1, n.y + n.h);
+        return {
+            version: 1,
+            coord_space: "normalized_xywh",
+            shape: "rect",
+            zone_type: zoneType,
+            canvas: { width: Number(previewSize.width || 1), height: Number(previewSize.height || 1) },
+            rect: { x: x1, y: y1, w: Math.max(0, x2 - x1), h: Math.max(0, y2 - y1) },
+            points: [
+                { x: x1, y: y1 },
+                { x: x2, y: y1 },
+                { x: x2, y: y2 },
+                { x: x1, y: y2 },
+            ],
+        };
+    };
+
+    const persistZones = async () => {
         await AsyncStorage.multiSet([
             ['camera_zone_feeding', JSON.stringify(feedingZone)],
             ['camera_zone_litter', JSON.stringify(litterZone)],
             ['camera_zone_summary', 'Feeding + Litter'],
         ]);
+
+        try {
+            const cameraId = await AsyncStorage.getItem('camera_id');
+            if (!cameraId) return;
+
+            // Replace only managed zone types so data stays deterministic.
+            await supabase
+                .from('camera_zones')
+                .delete()
+                .eq('camera_id', cameraId)
+                .in('zone_type', ['food', 'litter']);
+
+            const rows = [];
+            if (feedingZone.w > 0 && feedingZone.h > 0) {
+                rows.push({
+                    camera_id: cameraId,
+                    zone_type: 'food',
+                    label: 'Feeding Zone',
+                    polygon: rectToPolygon(feedingZone, 'food'),
+                });
+            }
+            if (litterZone.w > 0 && litterZone.h > 0) {
+                rows.push({
+                    camera_id: cameraId,
+                    zone_type: 'litter',
+                    label: 'Litter Zone',
+                    polygon: rectToPolygon(litterZone, 'litter'),
+                });
+            }
+
+            if (rows.length > 0) {
+                await supabase.from('camera_zones').insert(rows);
+            }
+        } catch (e) {
+            console.warn('Failed to persist zones to DB:', e?.message || e);
+        }
+    };
+
+    const handleConfirmUpdateZones = async () => {
+        setShowUpdateConfirmModal(false);
+        await persistZones();
         onConfirm();
     };
 
@@ -370,11 +450,12 @@ export default function Phone({
                                             <Text style={styles.title}>Test Live Feed</Text>
                                             <Text style={styles.subtitle}>Verify the camera feed is working correctly.</Text>
                                         </View>
-                                        <View style={styles.previewCard}>
-                                            <View style={styles.previewPlaceholder}>
-                                                <MaterialCommunityIcons name="cat" size={48} color="rgba(255,255,255,0.2)" />
-                                                <Text style={styles.previewText}>Camera Feed Optimized for Cats</Text>
-                                            </View>
+                                        <View style={[styles.previewCard, { overflow: 'hidden' }]}>
+                                            <Image
+                                                source={{ uri: VIDEO_STREAM_URL }}
+                                                style={{ width: '100%', height: '100%' }}
+                                                resizeMode="cover"
+                                            />
                                         </View>
                                     </View>
                                     <TouchableOpacity style={[styles.nextButton, { marginTop: 20 }]} onPress={() => setCurrentStep(3)}>
@@ -415,7 +496,14 @@ export default function Phone({
 
                                         <View style={styles.minimalWorkspace}>
                                             {/* Universal Draw Responder on Background */}
-                                            <View style={styles.minimalPreviewBg} {...drawPanResponder}>
+                                            <View
+                                                style={styles.minimalPreviewBg}
+                                                onLayout={(evt) => {
+                                                    const { width: w, height: h } = evt.nativeEvent.layout;
+                                                    if (w > 0 && h > 0) setPreviewSize({ width: w, height: h });
+                                                }}
+                                                {...drawPanResponder}
+                                            >
                                                 {/* Grid Helper (Subtle) */}
                                                 <View style={styles.gridOverlay} pointerEvents="none" />
 
@@ -471,6 +559,7 @@ export default function Phone({
                                         </Text>
                                     </View>
                                     <TouchableOpacity style={[styles.nextButton, { width: '100%' }]} onPress={async () => {
+                                        await persistZones();
                                         await AsyncStorage.setItem('camera_setup_complete', 'true');
                                         onConfirm();
                                     }}>

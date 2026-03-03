@@ -190,8 +190,24 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
     };
 
     const fetchUserScore = async () => {
-        const score = await calcScore(profileId);
-        setUserScore(score);
+        if (profileId === session?.user?.id) {
+            const score = await calcScore(profileId);
+            setUserScore(score);
+            // Sync to database
+            try {
+                await supabase.from('profiles').update({ score }).eq('id', profileId);
+            } catch (e) {
+                console.log("Error syncing score:", e);
+            }
+        } else {
+            try {
+                const { data } = await supabase.from('profiles').select('score').eq('id', profileId).single();
+                setUserScore(data?.score || 0);
+            } catch (e) {
+                console.log("Error fetching friend score:", e);
+                setUserScore(0);
+            }
+        }
     };
 
     // ─── Score Calculation (matching RankingScreen) ───

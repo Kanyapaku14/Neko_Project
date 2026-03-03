@@ -2,7 +2,6 @@
 import {
   View,
   Text,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Dimensions,
@@ -12,10 +11,12 @@ import {
   Image,
   Modal,
   FlatList,
-  ActivityIndicator
+  ActivityIndicator,
+  Platform
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient';
@@ -30,6 +31,10 @@ import PendingIdentityBanner from '../components/alert/PendingIdentityBanner';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
 
 const { width } = Dimensions.get('window');
+
+const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+// Change 5000 to 3000 if using a proxy, or your PC's IP if on a physical device
+const VIDEO_STREAM_URL = `http://${HOST}:5000/api/video_feed`;
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -53,10 +58,9 @@ export default function CameraScreen({ onNavigate, session }) {
   const [showCatSwitcher, setShowCatSwitcher] = useState(false);
   const [environment, setEnvironment] = useState({ temperature: 25.4, humidity: 58 });
   const [proStats, setProStats] = useState({ ping: 42, bitrate: 1.2, fps: 30 });
-  const [retryCountdown, setRetryCountdown] = useState(15);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [livePreviewUri, setLivePreviewUri] = useState(null);
 
-  const { data, lastUpdated, refetch } = useCameraData(session, cameraStatus);
+  const { data } = useCameraData(session, cameraStatus);
 
   // Animations
   const bannerAnim = useRef(new Animated.Value(0)).current;
@@ -150,34 +154,52 @@ export default function CameraScreen({ onNavigate, session }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Offline Auto-Retry Mechanism
   useEffect(() => {
     let timer;
-    if (cameraStatus === 'connected' && isConnectedSignalLost) {
-      timer = setInterval(() => {
-        setRetryCountdown(prev => {
-          if (prev <= 1) {
-            handleManualRefresh();
-            return 15;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+    const fetchLatestPreview = async () => {
+      try {
+        const cameraId = await AsyncStorage.getItem('camera_id');
+        if (!cameraId) {
+          setLivePreviewUri(null);
+          return;
+        }
+
+        const { data: latest, error } = await supabase
+          .from('ai_cat_identity_review')
+          .select('snapshot_url, occurred_at')
+          .eq('camera_id', cameraId)
+          .not('snapshot_url', 'is', null)
+          .order('occurred_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          console.warn('Failed to load live preview:', error?.message || error);
+          return;
+        }
+
+        const uri = latest?.snapshot_url || null;
+        if (uri && /^https?:\/\//i.test(uri)) {
+          setLivePreviewUri(uri);
+        } else {
+          setLivePreviewUri(null);
+        }
+      } catch (e) {
+        console.warn('Failed to fetch live preview:', e?.message || e);
+      }
+    };
+
+    if (cameraStatus === 'connected') {
+      fetchLatestPreview();
+      timer = setInterval(fetchLatestPreview, 6000);
     } else {
-      setRetryCountdown(15);
+      setLivePreviewUri(null);
     }
-    return () => clearInterval(timer);
-  }, [cameraStatus, isConnectedSignalLost]);
 
-  const handleManualRefresh = async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setTimeout(() => setIsRefreshing(false), 500);
-    setRetryCountdown(15);
-  };
-
-  // Helper to check signal
-  const isConnectedSignalLost = cameraStatus === 'connected' && (!data || !lastUpdated || (Date.now() - lastUpdated.getTime() > 10000));
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [cameraStatus]);
 
   // Simulate environment data from camera stream
   useEffect(() => {
@@ -280,7 +302,7 @@ export default function CameraScreen({ onNavigate, session }) {
 
     return (
       <LinearGradient colors={['#F5FBFB', '#E8F5E9']} style={styles.introContainer}>
-        <SafeAreaView style={{ flex: 1 }}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={{ flex: 1 }}>
           <View style={styles.introHeader}>
             <TouchableOpacity onPress={onMaybeLater} style={styles.introBackButton}>
               <Ionicons name="close" size={24} color="#2F6A62" />
@@ -358,30 +380,6 @@ export default function CameraScreen({ onNavigate, session }) {
     );
   };
 
-  const OfflineBanner = () => (
-    <View style={styles.offlineBannerContainer}>
-      <LinearGradient colors={['#FF5252', '#D32F2F']} style={styles.offlineBannerGradient}>
-        <View style={styles.offlineMain}>
-          <MaterialCommunityIcons name="wifi-off" size={20} color="#FFF" />
-          <View style={styles.offlineTextContainer}>
-            <Text style={styles.offlineTitle}>Signal Lost</Text>
-            <Text style={styles.offlineSubtitle}>Reconnecting in {retryCountdown}s...</Text>
-          </View>
-        </View>
-        <TouchableOpacity style={styles.retryButton} onPress={handleManualRefresh} disabled={isRefreshing}>
-          {isRefreshing ? (
-            <ActivityIndicator size="small" color="#FFF" />
-          ) : (
-            <>
-              <MaterialCommunityIcons name="refresh" size={18} color="#FFF" />
-              <Text style={styles.retryText}>Try Again</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </LinearGradient>
-    </View>
-  );
-
   const SetupPromptCard = () => (
     <View style={styles.setupCardWrapper}>
       <LinearGradient colors={['#F4FCF9', '#EAF7F2']} style={styles.setupCardGradient}>
@@ -423,74 +421,71 @@ export default function CameraScreen({ onNavigate, session }) {
     <View style={{ flex: 1, backgroundColor: '#f5fffdff' }}>
       <StatusBar style="dark" translucent backgroundColor="transparent" />
       <LinearGradient colors={['#f5fffdff', '#f5fffdff']} style={{ flex: 1 }}>
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
+          <HomeHeader
+            leftComponent={
+              <TouchableOpacity
+                style={styles.catProfileCard}
+                onPress={() => setShowCatSwitcher(!showCatSwitcher)}
+                activeOpacity={0.8}
+              >
+                <View style={styles.catAvatarContainer}>
+                  <Image
+                    source={selectedCat?.image_url ? { uri: selectedCat.image_url } : require('../../assets/cioncat.jpg')}
+                    style={styles.catAvatar}
+                  />
+                  <View style={[styles.onlineIndicator, { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : '#B0BEC5' }]} />
+                </View>
+              </TouchableOpacity>
+            }
+            rightComponent={
+              <TouchableOpacity onPress={() => onNavigate('Alert')} style={styles.bellButton}>
+                <Ionicons name="notifications-outline" size={26} color="#00695C" />
+                {unreadAlerts > 0 ? <View style={styles.notificationDot} /> : null}
+              </TouchableOpacity>
+            }
+          />
+
+          {showCameraIssueBanner ? (
+            <Animated.View style={[
+              styles.overlayBannerWrapper,
+              {
+                opacity: bannerAnim,
+                transform: [{
+                  translateY: bannerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-20, 0]
+                  })
+                }, {
+                  scale: bannerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.95, 1]
+                  })
+                }]
+              }
+            ]}>
+              <TouchableOpacity
+                style={styles.overlayBanner}
+                activeOpacity={0.8}
+                onPress={() => onNavigate('Alert')}
+              >
+                <Ionicons name="warning" size={20} color="#fff" />
+                <View style={styles.overlayTextContainer}>
+                  <Text style={styles.overlayTitle}>Camera Issue Detected</Text>
+                  <Text style={styles.overlayDesc}>Litter Box camera is offline.</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#fff" />
+              </TouchableOpacity>
+            </Animated.View>
+          ) : null}
+
+          {/* Pending Identity Banner for normal behaviors (or missed popups) */}
+          <PendingIdentityBanner
+            count={pendingIdentityCount}
+            onPress={openPendingQueue}
+          />
+
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
-            {isConnectedSignalLost && <OfflineBanner />}
-
-            {/* Header */}
-            <HomeHeader
-              leftComponent={
-                <TouchableOpacity
-                  style={styles.catProfileCard}
-                  onPress={() => setShowCatSwitcher(!showCatSwitcher)}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.catAvatarContainer}>
-                    <Image
-                      source={selectedCat?.image_url ? { uri: selectedCat.image_url } : require('../../assets/cioncat.jpg')}
-                      style={styles.catAvatar}
-                    />
-                    <View style={[styles.onlineIndicator, { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : '#B0BEC5' }]} />
-                  </View>
-                </TouchableOpacity>
-              }
-              rightComponent={
-                <TouchableOpacity onPress={() => onNavigate('Alert')} style={styles.bellButton}>
-                  <Ionicons name="notifications-outline" size={26} color="#00695C" />
-                  {unreadAlerts > 0 ? <View style={styles.notificationDot} /> : null}
-                </TouchableOpacity>
-              }
-            />
-
-            {showCameraIssueBanner ? (
-              <Animated.View style={[
-                styles.overlayBannerWrapper,
-                {
-                  opacity: bannerAnim,
-                  transform: [{
-                    translateY: bannerAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-20, 0]
-                    })
-                  }, {
-                    scale: bannerAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0.95, 1]
-                    })
-                  }]
-                }
-              ]}>
-                <TouchableOpacity
-                  style={styles.overlayBanner}
-                  activeOpacity={0.8}
-                  onPress={() => onNavigate('Alert')}
-                >
-                  <Ionicons name="warning" size={20} color="#fff" />
-                  <View style={styles.overlayTextContainer}>
-                    <Text style={styles.overlayTitle}>Camera Issue Detected</Text>
-                    <Text style={styles.overlayDesc}>Litter Box camera is offline.</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="#fff" />
-                </TouchableOpacity>
-              </Animated.View>
-            ) : null}
-
-            {/* Pending Identity Banner for normal behaviors (or missed popups) */}
-            <PendingIdentityBanner
-              count={pendingIdentityCount}
-              onPress={openPendingQueue}
-            />
 
             {cameraStatus === 'disconnected' && <SetupPromptCard />}
 
@@ -500,9 +495,13 @@ export default function CameraScreen({ onNavigate, session }) {
               {/* Camera Section */}
               <View style={styles.cameraContainer}>
                 <View style={styles.cameraFrame}>
-                  <View style={styles.videoPlaceholder}>
-                    <Text style={styles.liveFeedLabel}>Live Feed</Text>
-                  </View>
+                  {cameraStatus === 'connected' ? (
+                    <Image source={{ uri: VIDEO_STREAM_URL }} style={styles.livePreviewImage} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.videoPlaceholder}>
+                      <Text style={styles.liveFeedLabel}>Live Feed</Text>
+                    </View>
+                  )}
 
                   <View style={[styles.cameraStatusBadge, { backgroundColor: cameraStatus === 'connected' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(30, 30, 30, 0.75)' }]}>
                     <Animated.View style={[styles.cameraStatusDot, {
@@ -701,6 +700,9 @@ export default function CameraScreen({ onNavigate, session }) {
                       <Text style={{ color: '#2E7D32', fontSize: 10, fontWeight: 'bold' }}>LIVE</Text>
                     </View>
                   </View>
+                  <Text style={[styles.cardSubtitle, { marginTop: -4, marginBottom: 8 }]}>
+                    Insights improve with more recorded behavior over time.
+                  </Text>
 
                   <View style={styles.insightsGrid}>
                     {/* Energy Distribution */}
@@ -801,7 +803,9 @@ export default function CameraScreen({ onNavigate, session }) {
             </Animated.View>
           </ScrollView>
 
-          <BottomNav current="Camera" onNavigate={onNavigate} />
+          <View style={styles.footerBar}>
+            <BottomNav current="Camera" onNavigate={onNavigate} />
+          </View>
 
           {/* Cat Switcher Modal */}
           <Modal
@@ -854,8 +858,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5fffdff',
   },
   scrollContent: {
-    padding: 16,
-    paddingBottom: 80,
+    padding: 14,
+    paddingBottom: 68,
+  },
+  footerBar: {
+    backgroundColor: '#FFFFFF',
   },
   headerContainer: {
     flexDirection: 'row',
@@ -990,6 +997,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
   },
+  livePreviewImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#E5E7EB',
+  },
   liveFeedLabel: {
     color: '#64748B',
     fontSize: 14,
@@ -1102,18 +1114,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sectionTitle: {
-    fontSize: 18,
-    marginTop: 20,
-    marginBottom: 12,
+    fontSize: 15,
+    marginTop: 16,
+    marginBottom: 10,
     fontWeight: '700',
     color: '#37474F',
     marginLeft: 4,
   },
   cardContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 16,
+    borderRadius: 15,
+    padding: 13,
+    marginBottom: 10,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -1124,28 +1136,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
     color: '#37474F',
     marginBottom: 4,
   },
   cardSubtitle: {
-    fontSize: 13,
+    fontSize: 11,
     color: '#78909C',
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   statCard: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 24,
+    padding: 11,
+    borderRadius: 14,
     alignItems: 'center',
     flexDirection: 'row', // Horizontal layout for better premium feel
     shadowColor: '#0F172A',
@@ -1165,7 +1177,7 @@ const styles = StyleSheet.create({
   statCardGlowFood: {
     flex: 1,
     marginRight: 6,
-    borderRadius: 24,
+    borderRadius: 18,
     shadowColor: '#FF6D00',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
@@ -1175,7 +1187,7 @@ const styles = StyleSheet.create({
   statCardGlowLitter: {
     flex: 1,
     marginLeft: 6,
-    borderRadius: 24,
+    borderRadius: 18,
     shadowColor: '#0288D1',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
@@ -1187,9 +1199,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1208,12 +1220,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '800',
     color: '#37474F',
   },
   statLabel: {
-    fontSize: 10,
+    fontSize: 8,
     color: '#78909C',
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -1222,13 +1234,13 @@ const styles = StyleSheet.create({
   postureGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
-    gap: 12,
+    marginTop: 6,
+    gap: 10,
   },
   postureCard: {
     flex: 1,
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: 16,
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -1239,18 +1251,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFEBEE', // Light Red
   },
   postureIconBgNormal: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   postureIconBgAbnormal: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
@@ -1260,37 +1272,37 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   postureValueNormal: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: '800',
     color: '#00695C',
   },
   postureValueAbnormal: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: '800',
     color: '#D32F2F',
   },
   postureLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#546E7A',
   },
   postureContext: {
-    marginTop: 16,
-    paddingTop: 12,
+    marginTop: 12,
+    paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: '#ECEFF1',
   },
   postureContextText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#78909C',
   },
   actionButton: {
     backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 18,
-    borderRadius: 24,
-    marginBottom: 16,
+    padding: 11,
+    borderRadius: 14,
+    marginBottom: 10,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -1299,8 +1311,8 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     flex: 1,
-    marginLeft: 16,
-    fontSize: 16,
+    marginLeft: 10,
+    fontSize: 13,
     color: '#37474F',
     fontWeight: '700',
   },
@@ -1309,9 +1321,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   weatherWidget: {
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    borderRadius: 15,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -1332,7 +1344,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   weatherCity: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '800',
     color: '#3D4A80',
     marginTop: 2,
@@ -1356,7 +1368,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   weatherTemp: {
-    fontSize: 20,
+    fontSize: 17,
     color: '#3D4A80',
     fontWeight: '800',
     marginTop: 6,
@@ -1390,9 +1402,9 @@ const styles = StyleSheet.create({
   },
   recentItem: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 10,
-    paddingRight: 16,
+    borderRadius: 14,
+    padding: 8,
+    paddingRight: 12,
     marginRight: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1403,15 +1415,15 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   recentIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 11,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10,
   },
   recentType: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#37474F',
   },
@@ -1508,6 +1520,7 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: 24,
+    minWidth: 24,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
@@ -1520,7 +1533,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
   progressPaw: {
-    marginRight: -12,
+    marginRight: -8,
     textShadowColor: 'rgba(0,0,0,0.15)',
     textShadowOffset: { width: 0, height: 1.5 },
     textShadowRadius: 3,
@@ -1775,56 +1788,6 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 14,
     fontWeight: '700',
-  },
-  // Offline Banner Styles
-  offlineBannerContainer: {
-    marginHorizontal: 20,
-    marginTop: 10,
-    borderRadius: 16,
-    overflow: 'hidden',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-  },
-  offlineBannerGradient: {
-    flexDirection: 'row',
-    padding: 12,
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  offlineMain: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  offlineTextContainer: {
-    marginLeft: 10,
-  },
-  offlineTitle: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  offlineSubtitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 11,
-    fontFamily: 'Inter-Medium',
-  },
-  retryButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  retryText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '700',
-    marginLeft: 6,
   },
   statusRow: {
     flexDirection: 'row',

@@ -1,4 +1,4 @@
-import { StyleSheet } from "react-native";
+import { StyleSheet, Dimensions } from "react-native";
 
 const styles = StyleSheet.create({
   /* ====== หน้า HOME ====== */
@@ -98,132 +98,258 @@ const styles = StyleSheet.create({
 
   /* ====== ASSESS BUTTON ====== */
   assessButton: {
-    width: 360,
-    height: 52,
-    marginTop: 32,
-    alignSelf: "center",
-    backgroundColor: "rgba(63,168,164,0.8)", // 3FA8A4 80%
-    borderRadius: 20,
+    width: '100%',
+    height: 60,
+    backgroundColor: "rgba(63, 168, 164, 0.8)", // #3FA8A4 80% transparent
+    borderRadius: 16,
+    flexDirection: 'row',
     justifyContent: "center",
     alignItems: "center",
-
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
+    marginBottom: 15,
+    shadowColor: "#3FA8A4",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 5,
   },
 
   assessButtonText: {
-    fontFamily: "Inter-SemiBold",
     fontSize: 18,
+    fontWeight: "700",
     color: "#FFFFFF",
+    marginLeft: 10,
+    letterSpacing: 0.5,
   },
-  /* ====== PHOTO CARD ====== *//* ===== Photo Health Check Card ===== */
-photoCard: {
-  width: 368,
-  height: 83,
-  marginTop: 24,
-  alignSelf: "center",
-  backgroundColor: "rgba(154,208,206,0.7)", // 9AD0CE 70%
-  borderRadius: 20,
-  paddingHorizontal: 16,
-  flexDirection: "row",
-  alignItems: "center",
-  justifyContent: "space-between",
 
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.12,
-  shadowRadius: 4,
-  elevation: 3,
-},
+  /* ====== PHOTO CARD ====== */
+  photoCard: {
+    width: '100%',
+    minHeight: 90,
+    backgroundColor: "rgba(154, 208, 206, 0.7)", // #9AD0CE at 70% opacity
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: "rgba(79, 209, 197, 0.3)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
 
-photoLeft: {
-  flexDirection: "row",
-  alignItems: "center",
-  flex: 1,
-},
+  photoLeft: {
+    flex: 1,
+    paddingRight: 10,
+  },
 
-photoIcon: {
-  fontSize: 28,
-  marginRight: 10,
-},
+  photoTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#2C7A7B", // Dark Teal
+    marginBottom: 0,
+    lineHeight: 20,
+  },
 
-photoTextGroup: {
-  flexShrink: 1,
-},
+  photoDesc: {
+    fontSize: 12,
+    color: "#4A5568",
+    lineHeight: 16,
+  },
 
-photoTitle: {
-  fontFamily: "Inter-SemiBold",
-  fontSize: 14,
-  color: "rgba(12,90,88,0.93)", // 0C5A58 93%
-},
+  photoBtn: {
+    backgroundColor: "#319795",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    shadowColor: "#319795",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+  },
 
-photoDesc: {
-  marginTop: 4,
-  fontFamily: "Inter-Regular",
-  fontSize: 10,
-  color: "#565619",
-},
+  photoBtnText: {
+    fontSize: 11,
+    fontWeight: "bold",
+    color: "#FFF",
+  },
+  /* ===== HORIZONTAL INFO CARDS (Obsolete) ===== */
+  /* Remove entire infoScroll/infoCard section */
 
-photoBtn: {
-  width: 101,
-  height: 38,
-  backgroundColor: "#0C5A58",
-  borderRadius: 12,
-  justifyContent: "center",
-  alignItems: "center",
-},
+  /* ====== HOMESCREENNEW SPECIFIC STYLES ====== */
+  /* ====== HERO SECTION (Circle Cat) ====== */
+  heroSection: {
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
 
-photoBtnText: {
-  fontFamily: "Inter-Bold",
-  fontSize: 10,
-  color: "#FFFFFF",
-},
-/* ===== HORIZONTAL INFO CARDS ===== */
-infoScroll: {
-  marginTop: 24,
-},
+  circleCatContainer: {
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: '#E0E0E0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 5,
+    position: 'relative',
+  },
 
-infoCard: {
-  width: 353, // ปรับให้เหมาะกับจอ แต่ layout เหมือน Figma
-  height: 186,
-  backgroundColor: "#FFFFFF",
-  borderRadius: 20,
-  marginLeft: 16,
-  marginRight: 8,
-  overflow: "hidden",
+  circleCat: {
+    width: 156,
+    height: 156,
+    borderRadius: 78,
+    borderWidth: 4,
+    borderColor: '#FFF',
+  },
 
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.12,
-  shadowRadius: 4,
-  elevation: 3,
-},
+  loveIcon: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    backgroundColor: '#E0E0E0',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#FFF',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
 
-infoImage: {
-  width: "100%",
-  height: "100%",
-  resizeMode: "cover",
-},
+  heroTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#2D3748', // Darker elegant text
+    textAlign: 'center',
+    width: 250,
+    lineHeight: 30,
+  },
 
-infoOverlay: {
-  position: "absolute",
-  bottom: 0,
-  width: "100%",
-  padding: 12,
-  backgroundColor: "rgba(0,0,0,0.35)",
-},
+  heroSubtitle: {
+    fontSize: 14,
+    color: "#4A5568",
+    textAlign: "center",
+    marginBottom: 4,
+  },
 
-infoTitle: {
-  fontFamily: "Inter-SemiBold",
-  fontSize: 14,
-  color: "#FFFFFF",
-},
+  lastCheckText: {
+    fontSize: 13,
+    color: '#A0AEC0',
+    marginLeft: 4,
+  },
 
+  /* ====== ACTION BUTTONS ====== */
+  actionContainer: {
+    width: '100%',
+    paddingHorizontal: 20, // Match CameraScreen's scrollContent padding
+    paddingBottom: 20,
+    marginTop: 10,
+  },
 
+  /* ====== 3. GETTING STARTED TIMELINE ====== */
+  gettingStartedSection: {
+    width: '100%',
+    paddingHorizontal: 15,
+    marginBottom: 20,
+    marginTop: 10,
+  },
+  gettingStartedTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#2C7A7B", // Match theme teal
+    marginBottom: 15,
+  },
+  timelineContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 25,
+    position: 'relative',
+  },
+  timelineCheck: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#A7D7C5", // Active green
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+    zIndex: 2,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  timelineEmpty: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#E2F0EA", // Inactive pale green
+    marginRight: 15,
+    zIndex: 2,
+  },
+  timelineLine: {
+    position: 'absolute',
+    left: 12, // center of circle
+    top: 26, // bottom of circle
+    bottom: -25, // extends to the next item
+    width: 2, // Width of line
+    backgroundColor: "#E2F0EA",
+    zIndex: 1,
+  },
+  timelineText: {
+    fontSize: 13,
+    color: "#2C7A7B",
+    fontWeight: "600",
+  },
 
+  /* ====== 4. SMART MONITORING CARD ====== */
+  smartMonitoringCard: {
+    width: '100%',
+    backgroundColor: "#B2DFDB", // Soft teal background
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 30, // Bottom padding for scroll
+    marginHorizontal: 15,
+    width: Dimensions.get('window').width - 30, // Dynamic width keeping margins
+  },
+  smartMonLeft: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  smartMonTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#2C7A7B",
+    marginBottom: 6,
+  },
+  smartMonDesc: {
+    fontSize: 11,
+    color: "#4A5568",
+    lineHeight: 16,
+  },
+  smartMonBtn: {
+    backgroundColor: "#8CCBB6", // Button color
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  smartMonBtnText: {
+    fontSize: 11,
+    fontWeight: "bold",
+    color: "#FFF",
+  }
 });
 
 export default styles;

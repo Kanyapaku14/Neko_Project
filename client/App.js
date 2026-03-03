@@ -35,6 +35,7 @@ import CommunityScreen from './src/screens/CommunityScreen';
 import RankingScreen from './src/screens/RankingScreen';
 import CommunityProfile from './src/screens/CommunityProfile';
 import { GlobalAlertQueueProvider } from './src/services/GlobalAlertQueue';
+import AlertRepository from './src/services/AlertRepository';
 import AlertScreen from './src/screens/AlertScreen';
 import EventDetailScreen from './src/screens/EventDetailScreen';
 
@@ -121,6 +122,13 @@ export default function App() {
     loadCameraStatus();
   }, []);
 
+  useEffect(() => {
+    AlertRepository.init();
+    if (session?.user?.id) {
+      AlertRepository.syncFromRemote();
+    }
+  }, [session?.user?.id]);
+
   // Check if user has profile and cat
   const checkUserProfileStatus = async (session) => {
     if (!session?.user) return;
@@ -167,7 +175,7 @@ export default function App() {
 
   if (!fontsLoaded || loading || (session && profileLoading)) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5fffdff' }}>
         <ActivityIndicator size="large" color="#00695C" />
       </View>
     );
@@ -221,7 +229,7 @@ export default function App() {
           session={session}
           catId={catId} // ✅ ส่ง catId ไปที่ LogDailyNormal
           catName={catName} // ✅ ส่ง catName ไปที่ LogDailyNormal
-          onBack={() => setAuthScreen('Home')}
+          onBack={() => setAuthScreen('Calendar')}
           initialDate={screenParams?.date || null}
         />;
       }
@@ -360,7 +368,7 @@ export default function App() {
 
   // Wrap everything with SafeAreaProvider here
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#f5fffdff' }}>
       <SafeAreaProvider>
         <GlobalAlertQueueProvider session={session}>
           {renderScreen()}

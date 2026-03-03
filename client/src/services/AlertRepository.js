@@ -1,190 +1,383 @@
-/**
- * AlertRepository.js
- *
- * Database bridge layer for the Alert system.
- * Sits between AlertEngine (local state) and a remote API/database.
- *
- * Design: local-first — AlertEngine is always the source of truth at runtime.
- * This repository syncs with the backend when available.
- *
- * Usage:
- *   await AlertRepository.push(alert);      // Send one alert to backend
- *   await AlertRepository.syncFromRemote(); // Pull from backend → AlertEngine
- *   await AlertRepository.syncToRemote();   // Push all local → backend
- */
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import AlertEngine, { AlertEvents } from './AlertEngine';
+import supabase from '../screens/config/supabaseClient';
 
-// ─── Config ──────────────────────────────────────────────────────────────────
-// Replace BASE_URL with your actual API endpoint when ready
-const BASE_URL = 'https://your-api.example.com/api';
-const DEFAULT_TIMEOUT_MS = 8000;
+const CAMERA_ID_KEY = 'camera_id';
+const RESOLVED_REVIEW_IDS_KEY = 'resolved_identity_review_ids';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const timeoutPromise = (ms) =>
-    new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), ms));
+const isUuid = (value) =>
+    typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
-const apiFetch = (path, options = {}) => {
-    const url = `${BASE_URL}${path}`;
-    return Promise.race([
-        fetch(url, {
-            headers: { 'Content-Type': 'application/json', ...options.headers },
-            ...options,
-        }),
-        timeoutPromise(DEFAULT_TIMEOUT_MS),
-    ]);
+const normalizeBehaviorLabel = (label) => {
+    const v = String(label || '').toLowerCase().trim();
+    if (['eat', 'eating', 'food', 'feeding'].includes(v)) return 'eat';
+    if (['litter', 'toilet', 'toileting', 'urine', 'stool'].includes(v)) return 'litter';
+    if (['sleep', 'rest', 'resting'].includes(v)) return 'sleep';
+    if (['activity', 'active', 'play', 'playing', 'grooming'].includes(v)) return 'activity';
+    if (['abnormal', 'warning', 'critical'].includes(v)) return 'abnormal';
+    return 'activity';
 };
 
-// ─── AlertRepository ─────────────────────────────────────────────────────────
-const AlertRepository = {
+const mapSeverity = (s) => {
+    const v = String(s || 'info').toLowerCase();
+    if (v === 'critical') return 'critical';
+    if (v === 'warning') return 'warning';
+    if (v === 'success') return 'success';
+    return 'info';
+};
 
-    /**
-     * Initialize the repository to listen for local alerts and sync them.
-     * Call this once at app startup (e.g. in App.js or a service initializer).
-     */
+const mapAlertToDb = (alert, ownerId, cameraId) => ({
+    id: isUuid(alert.id) ? alert.id : undefined,
+    owner_id: ownerId,
+    camera_id: isUuid(alert.cameraId) ? alert.cameraId : (isUuid(cameraId) ? cameraId : null),
+    cat_id: isUuid(alert.resolvedCatId) ? alert.resolvedCatId : null,
+    type: alert.type || 'system',
+    severity: mapSeverity(alert.severity),
+    title: alert.title || 'Notification',
+    description: alert.desc || '',
+    details: alert.details || '',
+    is_read: !!alert.isRead,
+    is_deleted: !!alert.isDeleted,
+    resolved: !!alert.resolved,
+    timestamp: alert.timestamp || new Date().toISOString(),
+    expires_at: alert.expiresAt || null,
+    source: alert.source || null,
+    session_id: alert.sessionId || null,
+    metadata: {
+        behaviorLabel: alert.behaviorLabel || null,
+        confidence: alert.confidence ?? null,
+        pendingIdentityConfirm: alert.pendingIdentityConfirm === true,
+        isAbnormal: alert.isAbnormal === true,
+        cropSnapshot: alert.cropSnapshot || null,
+        remoteReviewId: alert.remoteReviewId || null,
+        resolvedBy: alert.resolvedBy || null,
+        resolvedAt: alert.resolvedAt || null,
+        resolvedCatName: alert.resolvedCatName || null,
+        resolutionText: alert.resolutionText || null,
+    },
+});
+
+const mapDbAlertToLocal = (row) => ({
+    id: row.id,
+    type: row.type,
+    severity: row.severity,
+    title: row.title,
+    desc: row.description || row.desc || '',
+    details: row.details || '',
+    timestamp: row.timestamp || row.created_at || new Date().toISOString(),
+    expiresAt: row.expires_at || undefined,
+    isRead: row.is_read === true,
+    isDeleted: row.is_deleted === true,
+    resolved: row.resolved === true,
+    source: row.source || null,
+    sessionId: row.session_id || null,
+    pendingIdentityConfirm: row?.metadata?.pendingIdentityConfirm === true,
+    behaviorLabel: row?.metadata?.behaviorLabel || null,
+    confidence: row?.metadata?.confidence ?? null,
+    cropSnapshot: row?.metadata?.cropSnapshot || null,
+    isAbnormal: row?.metadata?.isAbnormal === true,
+    resolvedBy: row?.metadata?.resolvedBy || null,
+    resolvedAt: row?.metadata?.resolvedAt || null,
+    resolvedCatName: row?.metadata?.resolvedCatName || null,
+    resolutionText: row?.metadata?.resolutionText || null,
+    resolvedCatId: row.cat_id || null,
+    _fromRemote: true,
+});
+
+const mapIdentityReviewToLocalAlert = (row) => {
+    const confidencePct = row.confidence != null ? Math.round(Number(row.confidence) * 100) : null;
+    const confidenceStr = confidencePct != null ? ` (${confidencePct}% confidence)` : '';
+    const behavior = normalizeBehaviorLabel(row.behavior_label);
+    return {
+        id: row.id,
+        type: 'pending_identity',
+        severity: behavior === 'abnormal' ? 'warning' : 'info',
+        title: behavior === 'abnormal'
+            ? 'Abnormal behavior detected - Please identify the cat'
+            : 'Behavior detected - Please identify the cat',
+        desc: `Detected "${behavior}"${confidenceStr}, but the system is not sure which cat it is. Please identify the cat.`,
+        details: row.source ? `From model: ${row.source}` : '',
+        timestamp: row.occurred_at || row.created_at || new Date().toISOString(),
+        pendingIdentityConfirm: row.reviewed !== true,
+        behaviorLabel: behavior,
+        confidence: row.confidence ?? null,
+        cropSnapshot: row.snapshot_url || null,
+        sessionId: row.session_id || null,
+        source: row.source || null,
+        cameraId: row.camera_id || null,
+        resolvedCatId: row.resolved_cat_id || null,
+        resolvedBy: row.resolved_by || null,
+        resolvedAt: row.reviewed_at || null,
+        remoteReviewId: row.id,
+        isAbnormal: behavior === 'abnormal',
+        _fromRemote: true,
+    };
+};
+
+const AlertRepository = {
+    _isInit: false,
+
     init() {
+        if (this._isInit) return;
+        this._isInit = true;
         AlertEngine.on(AlertEvents.ALERT_ADDED, (alert) => {
-            // Only push if it didn't come from remote to avoid loops
-            if (!alert._fromRemote) {
-                this.push(alert);
-            }
+            if (!alert || alert._fromRemote) return;
+            this.push(alert);
         });
     },
 
-    /**
-     * Push a single alert to the remote database.
-     * Call this from AlertEngine.logEvent() when you're ready to connect.
-     *
-     * @param {Object} alert - Full alert object from AlertEngine
-     * @returns {Promise<Object|null>} Server response, or null on failure
-     */
-    async push(alert) {
+    async _getContext() {
+        const [{ data: userRes }, storedCameraId] = await Promise.all([
+            supabase.auth.getUser(),
+            AsyncStorage.getItem(CAMERA_ID_KEY),
+        ]);
+        const userId = userRes?.user?.id || null;
+        return {
+            userId,
+            cameraId: isUuid(storedCameraId) ? storedCameraId : null,
+        };
+    },
+
+    async _getResolvedReviewIds() {
         try {
-            const res = await apiFetch('/alerts', {
-                method: 'POST',
-                body: JSON.stringify(alert),
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const saved = await res.json();
-            console.log(`AlertRepository: Pushed alert [${alert.id}]`);
-            return saved;
-        } catch (err) {
-            console.warn(`AlertRepository: push failed — ${err.message}`);
-            return null; // graceful degradation, still works offline
+            const raw = await AsyncStorage.getItem(RESOLVED_REVIEW_IDS_KEY);
+            if (!raw) return new Set();
+            const arr = JSON.parse(raw);
+            if (!Array.isArray(arr)) return new Set();
+            return new Set(arr.map((v) => String(v)));
+        } catch (e) {
+            return new Set();
         }
     },
 
-    /**
-     * Pull alerts from remote and merge into AlertEngine.
-     * Useful on app launch or when coming back online.
-     *
-     * @param {string} [userId] - Optional filter by user
-     * @returns {Promise<boolean>} true if sync succeeded
-     */
-    async syncFromRemote(userId = null) {
+    async _markResolvedReviewId(reviewId) {
+        if (!reviewId) return;
         try {
-            const query = userId ? `?userId=${userId}` : '';
-            const res = await apiFetch(`/alerts${query}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const remoteAlerts = await res.json(); // expected: Alert[]
+            const set = await this._getResolvedReviewIds();
+            set.add(String(reviewId));
+            await AsyncStorage.setItem(RESOLVED_REVIEW_IDS_KEY, JSON.stringify(Array.from(set)));
+        } catch (e) {
+            // no-op
+        }
+    },
 
-            // Merge remote alerts into the engine (skip duplicates by id)
-            const localIds = new Set(AlertEngine.getHistory().map(a => a.id));
-            let added = 0;
-            for (const alert of remoteAlerts) {
-                if (!localIds.has(alert.id)) {
-                    // Inject directly (bypass duplicate check — remote is trusted)
-                    await AlertEngine.logEvent({ ...alert, _fromRemote: true });
-                    added++;
+    async push(alert) {
+        try {
+            const { userId, cameraId } = await this._getContext();
+            if (!userId) return null;
+
+            const payload = mapAlertToDb(alert, userId, cameraId);
+            const { data, error } = await supabase
+                .from('alerts')
+                .upsert(payload, { onConflict: 'id' })
+                .select('id')
+                .single();
+            if (error) throw error;
+
+            if (alert.pendingIdentityConfirm === true) {
+                const reviewPayload = {
+                    camera_id: isUuid(alert.cameraId) ? alert.cameraId : cameraId,
+                    snapshot_url: alert.cropSnapshot || null,
+                    pred_cat_id: null,
+                    confidence: alert.confidence ?? null,
+                    behavior_label: normalizeBehaviorLabel(alert.behaviorLabel),
+                    occurred_at: alert.timestamp || new Date().toISOString(),
+                    reviewed: false,
+                    source: alert.source || null,
+                    session_id: alert.sessionId || null,
+                    metadata: { local_alert_id: alert.id },
+                };
+
+                if (reviewPayload.camera_id) {
+                    const { data: review, error: reviewError } = await supabase
+                        .from('ai_cat_identity_review')
+                        .insert(reviewPayload)
+                        .select('id')
+                        .single();
+                    if (!reviewError && review?.id) {
+                        await AlertEngine.attachRemoteReviewId(alert.id, review.id);
+                    }
                 }
             }
-            console.log(`AlertRepository: Synced ${added} new alert(s) from remote`);
+            return data || null;
+        } catch (err) {
+            console.warn(`AlertRepository.push failed: ${err?.message || err}`);
+            return null;
+        }
+    },
+
+    async syncFromRemote() {
+        try {
+            const { userId, cameraId } = await this._getContext();
+            if (!userId) return false;
+
+            const localIds = new Set(AlertEngine.getHistory().map((a) => String(a.id)));
+            const localRemoteReviewIds = new Set(
+                AlertEngine.getHistory()
+                    .map((a) => a?.remoteReviewId)
+                    .filter(Boolean)
+                    .map((v) => String(v))
+            );
+            const resolvedReviewIds = await this._getResolvedReviewIds();
+
+            const { data: dbAlerts, error: alertsError } = await supabase
+                .from('alerts')
+                .select('*')
+                .eq('owner_id', userId)
+                .eq('is_deleted', false)
+                .order('timestamp', { ascending: false })
+                .limit(100);
+            if (alertsError) throw alertsError;
+
+            for (const row of (dbAlerts || [])) {
+                if (localIds.has(String(row.id))) continue;
+                await AlertEngine.logEvent(mapDbAlertToLocal(row));
+            }
+
+            if (cameraId) {
+                const { data: reviews, error: reviewErr } = await supabase
+                    .from('ai_cat_identity_review')
+                    .select('*')
+                    .eq('camera_id', cameraId)
+                    .eq('reviewed', false)
+                    .order('occurred_at', { ascending: false })
+                    .limit(100);
+                if (reviewErr) throw reviewErr;
+
+                for (const row of (reviews || [])) {
+                    if (resolvedReviewIds.has(String(row.id))) continue;
+                    if (localIds.has(String(row.id))) continue;
+                    if (localRemoteReviewIds.has(String(row.id))) continue;
+                    await AlertEngine.logEvent(mapIdentityReviewToLocalAlert(row));
+                }
+            }
+
             return true;
         } catch (err) {
-            console.warn(`AlertRepository: syncFromRemote failed — ${err.message}`);
+            console.warn(`AlertRepository.syncFromRemote failed: ${err?.message || err}`);
             return false;
         }
     },
 
-    /**
-     * Push all local alerts to remote.
-     * Useful for first-time sync after user logs in.
-     *
-     * @returns {Promise<number>} Count of successfully pushed alerts
-     */
     async syncToRemote() {
         const local = AlertEngine.getHistory();
-        let successCount = 0;
-        for (const alert of local) {
-            const result = await this.push(alert);
-            if (result) successCount++;
+        let ok = 0;
+        for (const a of local) {
+            const res = await this.push(a);
+            if (res) ok += 1;
         }
-        console.log(`AlertRepository: Pushed ${successCount}/${local.length} local alerts to remote`);
-        return successCount;
+        return ok;
     },
 
-    /**
-     * Sync identity feedback that has been resolved (user identified the cat)
-     * but not yet consumed for model training.
-     *
-     * Flow:
-     *   1. Find all local alerts where resolvedCatId != null && feedbackUsedForTraining === false
-     *   2. POST them to backend /feedback endpoint
-     *   3. On success, call AlertEngine.markFeedbackUsed(alertId) to prevent double-sending
-     *
-     * Call this:
-     *   - On app resume / network reconnect
-     *   - After user resolves an identity confirmation
-     *
-      @returns {Promise<number>} Count of successfully synced feedback items
-     */
-    async syncFeedbackUsed() {
-        const candidates = AlertEngine.getHistory().filter(
-            a => a.resolvedCatId != null && a.feedbackUsedForTraining === false
-        );
+    async resolveIdentityOnRemote(alert, catId, resolvedBy = 'user') {
+        try {
+            const reviewId = alert?.remoteReviewId || (isUuid(alert?.id) ? alert.id : null);
+            if (!reviewId) return false;
+            await this._markResolvedReviewId(reviewId);
 
-        if (candidates.length === 0) return 0;
+            const payload = {
+                reviewed: true,
+                reviewed_at: new Date().toISOString(),
+                resolved_by: resolvedBy,
+                resolved_cat_id: isUuid(catId) ? catId : null,
+            };
 
-        let successCount = 0;
-        for (const alert of candidates) {
-            try {
-                const res = await apiFetch('/feedback', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        alertId: alert.id,
-                        behaviorLabel: alert.behaviorLabel,
-                        resolvedCatId: alert.resolvedCatId,
-                        confidence: alert.confidence,
-                        source: alert.source,
-                        sessionId: alert.sessionId,
-                        resolvedAt: alert.resolvedAt,
-                        resolvedBy: alert.resolvedBy,
-                    }),
-                });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                await AlertEngine.markFeedbackUsed(alert.id);
-                successCount++;
-            } catch (err) {
-                // Non-fatal: will retry next time syncFeedbackUsed() is called
-                console.warn(`AlertRepository: syncFeedbackUsed failed for [${alert.id}] — ${err.message}`);
+            const { error } = await supabase
+                .from('ai_cat_identity_review')
+                .update(payload)
+                .eq('id', reviewId);
+            if (error) throw error;
+
+            // Resolve all pending rows in same session to avoid repetitive popups.
+            if (alert?.sessionId) {
+                await supabase
+                    .from('ai_cat_identity_review')
+                    .update(payload)
+                    .eq('camera_id', alert.cameraId || (await this._getContext()).cameraId)
+                    .eq('session_id', alert.sessionId)
+                    .eq('reviewed', false);
             }
-        }
 
-        console.log(`AlertRepository: Synced ${successCount}/${candidates.length} feedback item(s) for training`);
-        return successCount;
+            // Resolve every local alert that points to this same remote review.
+            const history = AlertEngine.getHistory();
+            const matches = history.filter((a) =>
+                (String(a?.remoteReviewId || '') === String(reviewId) || String(a?.id || '') === String(reviewId))
+                && a?.pendingIdentityConfirm === true
+            );
+            for (const a of matches) {
+                await AlertEngine.resolveIdentity(a.id, catId, resolvedBy);
+            }
+
+            // Keep alerts table in sync as resolved/read to avoid duplicate popup after re-sync.
+            const { userId } = await this._getContext();
+            if (userId) {
+                const alertResolvedPayload = {
+                    resolved: true,
+                    is_read: true,
+                    updated_at: new Date().toISOString(),
+                    cat_id: isUuid(catId) ? catId : null,
+                };
+
+                if (isUuid(alert?.id)) {
+                    await supabase
+                        .from('alerts')
+                        .update(alertResolvedPayload)
+                        .eq('owner_id', userId)
+                        .eq('id', alert.id);
+                }
+
+                await supabase
+                    .from('alerts')
+                    .update(alertResolvedPayload)
+                    .eq('owner_id', userId)
+                    .contains('metadata', { remoteReviewId: reviewId });
+
+                if (alert?.sessionId) {
+                    await supabase
+                        .from('alerts')
+                        .update(alertResolvedPayload)
+                        .eq('owner_id', userId)
+                        .eq('session_id', alert.sessionId)
+                        .eq('resolved', false);
+                }
+            }
+            return true;
+        } catch (err) {
+            console.warn(`AlertRepository.resolveIdentityOnRemote failed: ${err?.message || err}`);
+            return false;
+        }
     },
 
-    /**
-     * Mark an alert as resolved on the remote.
-     * @param {string} alertId
-     */
+    async resolveLocalIdentityGroup(alert, catId, resolvedBy = 'user', resolvedCatName = null) {
+        const history = AlertEngine.getHistory();
+        const sessionId = alert?.sessionId || null;
+        const reviewId = String(alert?.remoteReviewId || alert?.id || '');
+        const targets = history.filter((a) => {
+            if (a?.type !== 'pending_identity') return false;
+            if (sessionId && a?.sessionId === sessionId) return true;
+            const aid = String(a?.remoteReviewId || a?.id || '');
+            return reviewId && aid === reviewId;
+        });
+        for (const t of targets) {
+            await AlertEngine.resolveIdentity(t.id, catId, resolvedBy, resolvedCatName);
+        }
+    },
+
+    async syncFeedbackUsed() {
+        // Kept for compatibility with existing calls
+        return 0;
+    },
+
     async resolveOnRemote(alertId) {
         try {
-            const res = await apiFetch(`/alerts/${alertId}/resolve`, { method: 'PATCH' });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            console.log(`AlertRepository: Resolved [${alertId}] on remote`);
+            const { error } = await supabase
+                .from('alerts')
+                .update({ resolved: true, updated_at: new Date().toISOString() })
+                .eq('id', alertId);
+            if (error) throw error;
         } catch (err) {
-            console.warn(`AlertRepository: resolveOnRemote failed — ${err.message}`);
+            console.warn(`AlertRepository.resolveOnRemote failed: ${err?.message || err}`);
         }
     },
 };

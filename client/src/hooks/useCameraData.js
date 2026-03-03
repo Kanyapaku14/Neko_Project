@@ -3,196 +3,269 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../screens/config/supabaseClient';
 import { analyzeHealthLog } from '../utils/healthLogic';
 
+const CAMERA_ID_KEY = 'camera_id';
+
+const normalizeBehavior = (value) => {
+  const v = String(value || '').toLowerCase();
+  if (['eat', 'eating', 'food', 'feeding'].includes(v)) return 'eat';
+  if (['litter', 'toilet', 'toileting', 'urine', 'stool'].includes(v)) return 'litter';
+  if (['sleep', 'rest', 'resting'].includes(v)) return 'sleep';
+  if (['abnormal', 'warning', 'critical'].includes(v)) return 'abnormal';
+  return 'activity';
+};
+
+const toLocalDate = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const startOfDayIso = (d = new Date()) => {
+  const dt = new Date(d);
+  dt.setHours(0, 0, 0, 0);
+  return dt.toISOString();
+};
+
+const hourBinIndex = (iso) => {
+  const h = new Date(iso).getHours();
+  if (h < 6) return 0;
+  if (h < 12) return 1;
+  if (h < 18) return 2;
+  return 3;
+};
+
 export default function useCameraData(session, cameraStatus) {
   const [data, setData] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
   const fetchData = useCallback(async () => {
-    // Default structure (matches UI expectations) - Initializing with this ensures immediate render
     let newData = {
-      connectedAt: Date.now() - 120000,
+      connectedAt: Date.now(),
       cats: 0,
       food: 0,
       litter: 0,
-      activity: [20, 45, 10, 80, 50], // Mock graph data (5 points for 6h intervals)
+      activity: [0, 0, 0, 0, 0],
       posture: {
         abnormal: { percent: 0, name: 'None' },
         normal: { percent: 100, name: 'Normal' }
       },
       behaviorAnalytics: {
-        energy: { active: 50, resting: 50 },
-        routine: { score: 100, status: "Ideal" },
-        wellness: { score: 85, status: "Healthy" }
+        energy: { active: 0, resting: 100 },
+        routine: { score: 0, status: 'No Data' },
+        wellness: { score: 0, status: 'No Data' }
       },
-      settings: { monitoringMode: 'multi', selectedCats: [] }
+      settings: { monitoringMode: 'multi', selectedCats: [] },
+      recentActivities: [],
     };
 
-    // Set initial data immediately to avoid blocking UI with a long spinner
-    if (!data) setData(newData);
-
     try {
-      // 1. Load Local Settings
-      const mode = await AsyncStorage.getItem('camera_monitoringMode');
-      const savedCats = await AsyncStorage.getItem('camera_selectedCats');
+      const [mode, savedCats, storedCameraId] = await Promise.all([
+        AsyncStorage.getItem('camera_monitoringMode'),
+        AsyncStorage.getItem('camera_selectedCats'),
+        AsyncStorage.getItem(CAMERA_ID_KEY),
+      ]);
 
       newData.settings = {
         monitoringMode: mode || 'multi',
         selectedCats: savedCats ? JSON.parse(savedCats) : []
       };
 
-      // 2. Fetch Real Data if Session Exists
       if (session?.user) {
-        // A. Get Cat Count
         const { data: catsData, error: catError } = await supabase
           .from('cats')
           .select('id')
           .eq('owner_id', session.user.id);
 
-        if (!catError && catsData) {
-          newData.cats = catsData.length;
-          const catIdsList = catsData.map(c => c.id);
-          const catIds = catIdsList;
+        if (!catError && Array.isArray(catsData)) {
+          const catIds = catsData.map((c) => c.id);
+          newData.cats = catIds.length;
 
-          // Get today's logs (local date string YYYY-MM-DD)
-          const now = new Date();
-          const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          const selectedIds = newData.settings.selectedCats?.length
+            ? newData.settings.selectedCats.filter((id) => catIds.includes(id))
+            : catIds;
 
-          const { data: logs, error: logsError } = await supabase
-            .from('daily_logs')
-            .select(`
-              *,
-              normal_logs(*),
-              something_off_logs(*)
-            `)
-            .in('cat_id', catIds)
-            .eq('log_date', today);
+          const today = toLocalDate();
+          const dayStartIso = startOfDayIso();
 
-          if (!logsError && logs && logs.length > 0) {
-            let totalFood = 0;
-            let totalLitter = 0;
-            let worstAnalysis = null;
-            let latestLogForPosture = null;
+          let usedAiData = false;
+          let usedFallbackData = false;
+          if (storedCameraId && selectedIds.length > 0) {
+            const [{ data: summaries, error: summaryErr }, { data: events, error: eventErr }] = await Promise.all([
+              supabase
+                .from('ai_daily_summary')
+                .select('*')
+                .in('cat_id', selectedIds)
+                .eq('summary_date', today),
+              supabase
+                .from('ai_cat_events')
+                .select('*')
+                .eq('camera_id', storedCameraId)
+                .in('cat_id', selectedIds)
+                .gte('occurred_at', dayStartIso)
+                .order('occurred_at', { ascending: false }),
+            ]);
 
-            logs.forEach(log => {
-              const details = log.log_type === 'something_off'
-                ? (log.something_off_logs?.[0] || log.something_off_logs)
-                : (log.normal_logs?.[0] || log.normal_logs);
+            if (!summaryErr && !eventErr && (Array.isArray(summaries) || Array.isArray(events))) {
+              const aiEvents = Array.isArray(events) ? events : [];
+              const aiSummaries = Array.isArray(summaries) ? summaries : [];
 
-              const unifiedLog = { ...log, ...(details || {}) };
-              totalFood += unifiedLog.food_amount || 0;
+              if (aiEvents.length > 0 || aiSummaries.length > 0) {
+                usedAiData = true;
 
-              if (unifiedLog.urine_level || unifiedLog.stool_level) {
-                totalLitter += 1;
-              }
+                const bins = [0, 0, 0, 0];
+                let eatCount = 0;
+                let litterCount = 0;
+                let abnormalCount = 0;
 
-              const analysis = analyzeHealthLog(unifiedLog);
-              if (!worstAnalysis || analysis.redFlags > worstAnalysis.redFlags || analysis.score < worstAnalysis.score) {
-                worstAnalysis = analysis;
-                latestLogForPosture = unifiedLog;
-              }
-            });
+                aiEvents.forEach((e) => {
+                  const behavior = normalizeBehavior(e.behavior_label);
+                  bins[hourBinIndex(e.occurred_at)] += 1;
+                  if (behavior === 'eat') eatCount += 1;
+                  if (behavior === 'litter') litterCount += 1;
+                  if (behavior === 'abnormal' || e.abnormal === true) abnormalCount += 1;
+                });
 
-            newData.food = totalFood;
-            newData.litter = totalLitter;
+                const maxBin = Math.max(1, ...bins);
+                newData.activity = [...bins.map((v) => Math.round((v / maxBin) * 100)), bins[3]];
+                newData.food = eatCount;
+                newData.litter = litterCount;
 
-            if (worstAnalysis && latestLogForPosture) {
-              if (worstAnalysis.redFlags > 0) {
-                newData.posture.abnormal = {
-                  percent: worstAnalysis.score < 50 ? 80 : 40,
-                  name: latestLogForPosture.behavior || worstAnalysis.alerts[0] || 'At Risk'
+                const summaryAbnormal = aiSummaries.reduce((sum, s) => sum + (s.total_abnormal || 0), 0);
+                const totalSignals = Math.max(aiEvents.length, eatCount + litterCount + summaryAbnormal);
+                const abnormalPct = Math.min(100, Math.round(((abnormalCount + summaryAbnormal) / Math.max(1, totalSignals)) * 100));
+                const normalPct = 100 - abnormalPct;
+
+                newData.posture = {
+                  normal: {
+                    percent: normalPct,
+                    name: normalPct >= 80 ? 'Normal' : 'Low Activity'
+                  },
+                  abnormal: {
+                    percent: abnormalPct,
+                    name: abnormalPct > 0 ? 'At Risk' : 'None'
+                  }
                 };
-                newData.posture.normal = {
-                  percent: 100 - newData.posture.abnormal.percent,
-                  name: 'Low Activity'
+
+                const totalFeed = aiSummaries.reduce((sum, s) => sum + (s.total_feeding || 0), 0);
+                const totalLitter = aiSummaries.reduce((sum, s) => sum + (s.total_litter || 0), 0);
+                const routineScore = Math.max(55, 100 - abnormalPct);
+                const wellnessScore = Math.max(45, Math.round((routineScore + normalPct) / 2));
+
+                newData.behaviorAnalytics = {
+                  energy: { active: Math.max(10, normalPct), resting: Math.max(0, 100 - Math.max(10, normalPct)) },
+                  routine: { score: routineScore, status: routineScore >= 85 ? 'Ideal' : routineScore >= 70 ? 'Stable' : 'Watch' },
+                  wellness: { score: wellnessScore, status: wellnessScore >= 80 ? 'Healthy' : wellnessScore >= 60 ? 'Monitor' : 'At Risk' },
+                  totals: { feeding: totalFeed, litter: totalLitter },
                 };
-              } else {
-                newData.posture.normal = {
-                  percent: worstAnalysis.score,
-                  name: latestLogForPosture.behavior === 'normal' ? 'Active' : (latestLogForPosture.behavior || 'Normal')
-                };
-                newData.posture.abnormal = {
-                  percent: 100 - worstAnalysis.score,
-                  name: 'None'
-                };
+
+                newData.recentActivities = aiEvents.slice(0, 5).map((e, idx) => ({
+                  id: e.id || `evt_${idx}`,
+                  type: normalizeBehavior(e.behavior_label),
+                  time: new Date(e.occurred_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  icon: normalizeBehavior(e.behavior_label) === 'eat'
+                    ? 'food'
+                    : normalizeBehavior(e.behavior_label) === 'litter'
+                      ? 'emoticon-poop'
+                      : normalizeBehavior(e.behavior_label) === 'sleep'
+                        ? 'sleep'
+                        : 'run',
+                  color: normalizeBehavior(e.behavior_label) === 'abnormal' ? '#EF4444' : '#00C8FF',
+                }));
               }
             }
           }
-        }
 
-        // 3. Fetch Behavior Analytics (Bypassing for speed on physical devices)
-        /* 
-        try {
-          const API_URL = "http://10.0.2.2:3000/api/analytics/behavior";
-          const res = await fetch(API_URL, { ... });
-          ...
-        } catch (apiErr) { ... }
-        */
+          // Fallback: previous local daily_logs analytics if AI tables are not populated yet
+          if (!usedAiData && catIds.length > 0) {
+            const { data: logs, error: logsError } = await supabase
+              .from('daily_logs')
+              .select(`
+                *,
+                normal_logs(*),
+                something_off_logs(*)
+              `)
+              .in('cat_id', catIds)
+              .eq('log_date', today);
+
+            if (!logsError && logs && logs.length > 0) {
+              usedFallbackData = true;
+              let totalFood = 0;
+              let totalLitter = 0;
+              let worstAnalysis = null;
+              let latestLogForPosture = null;
+
+              logs.forEach((log) => {
+                const details = log.log_type === 'something_off'
+                  ? (log.something_off_logs?.[0] || log.something_off_logs)
+                  : (log.normal_logs?.[0] || log.normal_logs);
+
+                const unifiedLog = { ...log, ...(details || {}) };
+                totalFood += unifiedLog.food_amount || 0;
+
+                if (unifiedLog.urine_level || unifiedLog.stool_level) {
+                  totalLitter += 1;
+                }
+
+                const analysis = analyzeHealthLog(unifiedLog);
+                if (!worstAnalysis || analysis.redFlags > worstAnalysis.redFlags || analysis.score < worstAnalysis.score) {
+                  worstAnalysis = analysis;
+                  latestLogForPosture = unifiedLog;
+                }
+              });
+
+              newData.food = totalFood;
+              newData.litter = totalLitter;
+
+              if (worstAnalysis && latestLogForPosture) {
+                if (worstAnalysis.redFlags > 0) {
+                  newData.posture.abnormal = {
+                    percent: worstAnalysis.score < 50 ? 80 : 40,
+                    name: latestLogForPosture.behavior || worstAnalysis.alerts[0] || 'At Risk',
+                  };
+                  newData.posture.normal = {
+                    percent: 100 - newData.posture.abnormal.percent,
+                    name: 'Low Activity',
+                  };
+                } else {
+                  newData.posture.normal = {
+                    percent: worstAnalysis.score,
+                    name: latestLogForPosture.behavior === 'normal' ? 'Active' : (latestLogForPosture.behavior || 'Normal'),
+                  };
+                  newData.posture.abnormal = {
+                    percent: 100 - worstAnalysis.score,
+                    name: 'None',
+                  };
+                }
+              }
+            }
+          }
+
+          if (!usedAiData && !usedFallbackData) {
+            newData.recentActivities = [];
+            newData.behaviorAnalytics = {
+              energy: { active: 0, resting: 100 },
+              routine: { score: 0, status: 'No Data' },
+              wellness: { score: 0, status: 'No Data' },
+            };
+            newData.activity = [0, 0, 0, 0, 0];
+            newData.food = 0;
+            newData.litter = 0;
+            newData.posture = {
+              normal: { percent: 100, name: 'No Data' },
+              abnormal: { percent: 0, name: 'None' },
+            };
+          }
+        }
       }
 
       setData(newData);
       setLastUpdated(new Date());
-
     } catch (e) {
-      console.error("Error fetching camera data:", e);
-      setData(prev => prev || newData);
+      console.error('Error fetching camera data:', e);
+      setData((prev) => prev || newData);
     }
-  }, [session, data]);
+  }, [session, cameraStatus]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  // Simulate live camera stats when connected
-  useEffect(() => {
-    if (cameraStatus !== 'connected') return;
-
-    const interval = setInterval(() => {
-      setData(prev => {
-        if (!prev) return prev;
-
-        let newRecent = [...(prev.recentActivities || [
-          { id: 1, type: 'active', time: '2m ago', icon: 'run', color: '#00FF00' },
-          { id: 2, type: 'eating', time: '15m ago', icon: 'food', color: '#FFC800' },
-          { id: 3, type: 'grooming', time: '45m ago', icon: 'paw', color: '#00C8FF' },
-          { id: 4, type: 'toileting', time: '1h ago', icon: 'emoticon-poop', color: '#FF9600' },
-          { id: 5, type: 'resting', time: '3h ago', icon: 'sleep', color: '#C8C8C8' }
-        ])];
-
-        if (Math.random() > 0.8 && newRecent.length > 0) {
-          newRecent[0] = { ...newRecent[0], time: 'Just now' };
-        }
-
-        const newFood = prev.food + (Math.random() > 0.8 ? 1 : 0);
-        const newLitter = prev.litter + (Math.random() > 0.95 ? 1 : 0);
-
-        const act = [...(prev.activity || [20, 45, 10, 80, 50])];
-        if (Math.random() > 0.3) {
-          act[4] = Math.min(100, Math.max(0, act[4] + (Math.floor(Math.random() * 11) - 5)));
-        }
-
-        let norm = prev.posture.normal.percent;
-        if (Math.random() > 0.4) {
-          const diff = Math.floor(Math.random() * 7) - 3;
-          norm = Math.min(100, Math.max(0, norm + diff));
-        }
-
-        return {
-          ...prev,
-          recentActivities: newRecent,
-          food: newFood,
-          litter: newLitter,
-          activity: act,
-          posture: {
-            normal: { ...prev.posture.normal, percent: norm, name: prev.posture.normal.name || 'Normal' },
-            abnormal: { ...prev.posture.abnormal, percent: 100 - norm, name: prev.posture.abnormal.name || 'None' }
-          }
-        };
-      });
-      setLastUpdated(new Date());
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [cameraStatus]);
 
   return { data, lastUpdated, refetch: fetchData };
 }

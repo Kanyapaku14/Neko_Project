@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ScrollView, Image, Animated } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Animated } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import AlertEngine from '../services/AlertEngine';
 import CameraMetaBlock from '../components/alert/CameraMetaBlock';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
@@ -21,7 +24,12 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
     // Re-evaluate pending status if alert gets resolved while this screen is open
     useEffect(() => {
         const handler = () => {
-            const upToDateAlert = AlertEngine.getHistory().find(a => a.id === data?.id);
+            const upToDateAlert = AlertEngine.getHistory().find((a) => {
+                if (a.id === data?.id) return true;
+                if (data?.remoteReviewId && String(a?.remoteReviewId || '') === String(data.remoteReviewId)) return true;
+                if (data?.sessionId && a?.sessionId === data.sessionId && a?.type === data?.type) return true;
+                return false;
+            });
             if (upToDateAlert) {
                 setAlertView(upToDateAlert);
             }
@@ -33,19 +41,22 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
     if (!alertView) {
         return (
             <View style={styles.screenBg}>
-                <SafeAreaView style={styles.container}>
-                    <View style={styles.header}>
-                        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                            <Ionicons name="chevron-back" size={28} color="#333" />
-                        </TouchableOpacity>
-                        <Text style={styles.headerTitle}>Event Detail</Text>
-                        <View style={styles.headerRightSpacer} />
-                    </View>
-                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                        <MaterialCommunityIcons name="alert-circle-outline" size={64} color="#BDBDBD" />
-                        <Text style={{ marginTop: 16, color: '#757575', fontSize: 16 }}>No event data found.</Text>
-                    </View>
-                </SafeAreaView>
+                <StatusBar style="dark" translucent backgroundColor="transparent" />
+                <LinearGradient colors={['#f5fffdff', '#f5fffdff']} style={{ flex: 1 }}>
+                    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
+                        <View style={styles.header}>
+                            <TouchableOpacity onPress={onBack} style={styles.backButton}>
+                                <Ionicons name="chevron-back" size={28} color="#333" />
+                            </TouchableOpacity>
+                            <Text style={styles.headerTitle}>Event Detail</Text>
+                            <View style={styles.headerRightSpacer} />
+                        </View>
+                        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                            <MaterialCommunityIcons name="alert-circle-outline" size={64} color="#BDBDBD" />
+                            <Text style={{ marginTop: 16, color: '#757575', fontSize: 16 }}>No event data found.</Text>
+                        </View>
+                    </SafeAreaView>
+                </LinearGradient>
             </View>
         );
     }
@@ -66,8 +77,10 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
     const normalizedSeverity = (alertView.severity || '').toLowerCase();
     const sevConfig = getSeverityConfig(normalizedSeverity);
     const isIdentityAlert = alertView.type === 'pending_identity';
-    const isPending = alertView.pendingIdentityConfirm === true || (isIdentityAlert && alertView.resolvedBy === 'skipped');
+    const isPending = alertView.pendingIdentityConfirm === true;
+    const isRejectedIdentity = isIdentityAlert && !isPending && alertView.resolvedBy === 'skipped';
     const resolvedCatLabel = alertView.resolvedCatName || (alertView.resolvedCatId ? `ID: ${alertView.resolvedCatId}` : null);
+    const latestResolutionText = alertView.resolutionText || null;
 
     // Nicer timestamp format
     const formatTimeNice = (isoString) => {
@@ -104,160 +117,171 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
 
     return (
         <View style={styles.screenBg}>
-            <SafeAreaView style={styles.container}>
-                {/* Header */}
-                <View style={styles.header}>
-                    <TouchableOpacity
-                        onPress={onBack}
-                        onPressIn={() => animatePressIn(backBtnAnim)}
-                        onPressOut={() => animatePressOut(backBtnAnim)}
-                        style={styles.backButton}
-                    >
-                        <Animated.View
-                            style={{
-                                transform: [
-                                    {
-                                        scale: backBtnAnim.interpolate({
-                                            inputRange: [0, 1],
-                                            outputRange: [1, 0.88],
-                                        }),
-                                    },
-                                ],
-                            }}
+            <StatusBar style="dark" translucent backgroundColor="transparent" />
+            <LinearGradient colors={['#f5fffdff', '#f5fffdff']} style={{ flex: 1 }}>
+                <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
+                    {/* Header */}
+                    <View style={styles.header}>
+                        <TouchableOpacity
+                            onPress={onBack}
+                            onPressIn={() => animatePressIn(backBtnAnim)}
+                            onPressOut={() => animatePressOut(backBtnAnim)}
+                            style={styles.backButton}
                         >
-                            <Ionicons name="chevron-back" size={28} color="#333" />
-                        </Animated.View>
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Event Detail</Text>
-                    <View style={styles.headerRightSpacer} />
-                </View>
-
-                <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-
-                    {/* Status Badge - inline */}
-                    <View style={[styles.statusBadge, { backgroundColor: sevConfig.bg }]}>
-                        <MaterialCommunityIcons name={sevConfig.icon} size={18} color={sevConfig.color} />
-                        <Text style={[styles.statusText, { color: sevConfig.color }]}>{sevConfig.text}</Text>
-                    </View>
-
-                    {/* Main Info */}
-                    <View style={styles.card}>
-                        <Text style={styles.title}>{alertView.title}</Text>
-
-                        <View style={styles.metaRow}>
-                            <View style={styles.timeRow}>
-                                <MaterialCommunityIcons name="clock-outline" size={16} color="#757575" />
-                                <Text style={styles.metaText}>{formatTimeNice(alertView.timestamp || alertView.time)}</Text>
-                            </View>
-                        </View>
-
-                        <View style={styles.divider} />
-
-                        <Text style={styles.sectionTitle}>Summary</Text>
-                        <Text style={styles.descText}>{alertView.desc}</Text>
-
-                        {alertView.details ? (
-                            <>
-                                <View style={styles.dividerLight} />
-                                <Text style={styles.sectionTitle}>Details</Text>
-                                <Text style={styles.descText}>{alertView.details}</Text>
-                            </>
-                        ) : null}
-                    </View>
-
-                    {/* IoT Camera Status Block - extracted component */}
-                    <CameraMetaBlock
-                        cameraName={alertView.cameraName || alertView.metadata?.camera}
-                        cameraStatus={alertView.cameraStatus || alertView.metadata?.status}
-                        lastSeen={alertView.lastSeen || alertView.metadata?.lastSeen}
-                        signal={alertView.signal || alertView.metadata?.signal}
-                    />
-
-                    {/* Snapshot - inline, only renders if snapshotUrl exists */}
-                    {alertView.snapshotUrl && (
-                        <View style={styles.card}>
-                            <Text style={styles.sectionTitle}>Snapshot</Text>
-                            <Image source={{ uri: alertView.snapshotUrl }} style={styles.snapshotImage} resizeMode="cover" />
-                        </View>
-                    )}
-
-                    {/* Identify Cat Section — only for pending_identity alerts */}
-                    {isIdentityAlert && (
-                        <View style={styles.card}>
-                            <View style={styles.identifyHeader}>
-                                <MaterialCommunityIcons name="help-rhombus-outline" size={20} color="#E65100" style={{ marginRight: 8 }} />
-                                <Text style={[styles.sectionTitle, { color: '#E65100' }]}>Identify Cat</Text>
-                            </View>
-                            {resolvedCatLabel && !isPending ? (
-                                <View style={styles.selectedCatChip}>
-                                    <MaterialCommunityIcons name="paw" size={16} color="#1A56C5" />
-                                    <Text style={styles.selectedCatText}>Selected cat: {resolvedCatLabel}</Text>
-                                </View>
-                            ) : (
-                                <Text style={styles.descText}>
-                                    The system detected this behavior but is unsure which cat it is. Please identify to improve model accuracy.
-                                </Text>
-                            )}
-                            <TouchableOpacity
-                                style={styles.identifyButton}
-                                onPress={() => pushAlert(alertView)}
-                                onPressIn={() => animatePressIn(identifyBtnAnim)}
-                                onPressOut={() => animatePressOut(identifyBtnAnim)}
-                                activeOpacity={0.8}
+                            <Animated.View
+                                style={{
+                                    transform: [
+                                        {
+                                            scale: backBtnAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: [1, 0.88],
+                                            }),
+                                        },
+                                    ],
+                                }}
                             >
-                                <Animated.View
-                                    style={{
-                                        flexDirection: 'row',
-                                        alignItems: 'center',
-                                        transform: [
-                                            {
-                                                scale: identifyBtnAnim.interpolate({
-                                                    inputRange: [0, 1],
-                                                    outputRange: [1, 0.96],
-                                                }),
-                                            },
-                                        ],
-                                    }}
-                                >
-                                    <MaterialCommunityIcons name="paw" size={16} color="#FFF" style={{ marginRight: 6 }} />
-                                    <Text style={styles.identifyButtonText}>{resolvedCatLabel ? 'Edit selected cat' : 'Identify which cat'}</Text>
-                                </Animated.View>
-                            </TouchableOpacity>
-                        </View>
-                    )}
+                                <Ionicons name="chevron-back" size={28} color="#333" />
+                            </Animated.View>
+                        </TouchableOpacity>
+                        <Text style={styles.headerTitle}>Event Detail</Text>
+                        <View style={styles.headerRightSpacer} />
+                    </View>
 
-                    {/* Action Button - acknowledges alert and clears badge */}
-                    <TouchableOpacity
-                        style={styles.actionButton}
-                        activeOpacity={0.8}
-                        onPressIn={() => animatePressIn(actionBtnAnim)}
-                        onPressOut={() => animatePressOut(actionBtnAnim)}
-                        onPress={async () => {
-                            if (alertView.id) await AlertEngine.markAllAsRead();
-                            onBack();
-                        }}
-                    >
-                        <Animated.View
-                            style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                transform: [
-                                    {
-                                        scale: actionBtnAnim.interpolate({
-                                            inputRange: [0, 1],
-                                            outputRange: [1, 0.96],
-                                        }),
-                                    },
-                                ],
+                    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+
+                        {/* Status Badge - inline */}
+                        <View style={[styles.statusBadge, { backgroundColor: sevConfig.bg }]}>
+                            <MaterialCommunityIcons name={sevConfig.icon} size={18} color={sevConfig.color} />
+                            <Text style={[styles.statusText, { color: sevConfig.color }]}>{sevConfig.text}</Text>
+                        </View>
+
+                        {/* Main Info */}
+                        <View style={styles.card}>
+                            <Text style={styles.title}>{alertView.title}</Text>
+
+                            <View style={styles.metaRow}>
+                                <View style={styles.timeRow}>
+                                    <MaterialCommunityIcons name="clock-outline" size={16} color="#757575" />
+                                    <Text style={styles.metaText}>{formatTimeNice(alertView.timestamp || alertView.time)}</Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.divider} />
+
+                            <Text style={styles.sectionTitle}>Summary</Text>
+                            <Text style={styles.descText}>{alertView.desc}</Text>
+
+                            {alertView.details ? (
+                                <>
+                                    <View style={styles.dividerLight} />
+                                    <Text style={styles.sectionTitle}>Details</Text>
+                                    <Text style={styles.descText}>{alertView.details}</Text>
+                                </>
+                            ) : null}
+                        </View>
+
+                        {/* IoT Camera Status Block - extracted component */}
+                        <CameraMetaBlock
+                            cameraName={alertView.cameraName || alertView.metadata?.camera}
+                            cameraStatus={alertView.cameraStatus || alertView.metadata?.status}
+                            lastSeen={alertView.lastSeen || alertView.metadata?.lastSeen}
+                            signal={alertView.signal || alertView.metadata?.signal}
+                        />
+
+                        {/* Snapshot - inline, only renders if snapshotUrl exists */}
+                        {alertView.snapshotUrl && (
+                            <View style={styles.card}>
+                                <Text style={styles.sectionTitle}>Snapshot</Text>
+                                <Image source={{ uri: alertView.snapshotUrl }} style={styles.snapshotImage} resizeMode="cover" />
+                            </View>
+                        )}
+
+                        {/* Identify Cat Section — only for pending_identity alerts */}
+                        {isIdentityAlert && (
+                            <View style={styles.card}>
+                                <View style={styles.identifyHeader}>
+                                    <MaterialCommunityIcons name="help-rhombus-outline" size={20} color="#E65100" style={{ marginRight: 8 }} />
+                                    <Text style={[styles.sectionTitle, { color: '#E65100' }]}>Identify Cat</Text>
+                                </View>
+                                {isRejectedIdentity ? (
+                                    <View style={styles.selectedCatChip}>
+                                        <MaterialCommunityIcons name="close-circle" size={16} color="#B42318" />
+                                        <Text style={[styles.selectedCatText, { color: '#B42318' }]}>Marked as not your cat.</Text>
+                                    </View>
+                                ) : resolvedCatLabel && !isPending ? (
+                                    <View style={styles.selectedCatChip}>
+                                        <MaterialCommunityIcons name="paw" size={16} color="#1A56C5" />
+                                        <Text style={styles.selectedCatText}>Selected cat: {resolvedCatLabel}</Text>
+                                    </View>
+                                ) : (
+                                    <Text style={styles.descText}>
+                                        The system detected this behavior but is unsure which cat it is. Please identify to improve model accuracy.
+                                    </Text>
+                                )}
+                                {!isPending && !!latestResolutionText && (
+                                    <Text style={[styles.descText, { marginTop: 8 }]}>{latestResolutionText}</Text>
+                                )}
+                                <TouchableOpacity
+                                    style={styles.identifyButton}
+                                    onPress={() => pushAlert(alertView)}
+                                    onPressIn={() => animatePressIn(identifyBtnAnim)}
+                                    onPressOut={() => animatePressOut(identifyBtnAnim)}
+                                    activeOpacity={0.8}
+                                >
+                                    <Animated.View
+                                        style={{
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            transform: [
+                                                {
+                                                    scale: identifyBtnAnim.interpolate({
+                                                        inputRange: [0, 1],
+                                                        outputRange: [1, 0.96],
+                                                    }),
+                                                },
+                                            ],
+                                        }}
+                                    >
+                                        <MaterialCommunityIcons name="paw" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                                        <Text style={styles.identifyButtonText}>{(resolvedCatLabel || isRejectedIdentity) ? 'Edit selected cat' : 'Identify which cat'}</Text>
+                                    </Animated.View>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
+                        {/* Action Button - acknowledges alert and clears badge */}
+                        <TouchableOpacity
+                            style={styles.actionButton}
+                            activeOpacity={0.8}
+                            onPressIn={() => animatePressIn(actionBtnAnim)}
+                            onPressOut={() => animatePressOut(actionBtnAnim)}
+                            onPress={async () => {
+                                if (alertView.id) await AlertEngine.markAllAsRead();
+                                onBack();
                             }}
                         >
-                            <MaterialCommunityIcons name="check-all" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                            <Text style={styles.actionButtonText}>Acknowledge</Text>
-                        </Animated.View>
-                    </TouchableOpacity>
+                            <Animated.View
+                                style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    transform: [
+                                        {
+                                            scale: actionBtnAnim.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: [1, 0.96],
+                                            }),
+                                        },
+                                    ],
+                                }}
+                            >
+                                <MaterialCommunityIcons name="check-all" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                                <Text style={styles.actionButtonText}>Acknowledge</Text>
+                            </Animated.View>
+                        </TouchableOpacity>
 
-                </ScrollView>
-            </SafeAreaView>
+                    </ScrollView>
+                </SafeAreaView>
+            </LinearGradient>
 
             {/* CatPickerModal has been moved to GlobalAlertQueueProvider */}
         </View>
@@ -265,16 +289,16 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
 }
 
 const styles = StyleSheet.create({
-    screenBg: { flex: 1, backgroundColor: '#F5FBFB' },
-    container: { flex: 1, backgroundColor: '#F5FBFB' },
+    screenBg: { flex: 1, backgroundColor: '#f5fffdff' },
+    container: { flex: 1, backgroundColor: '#f5fffdff' },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        paddingTop: 12,
-        paddingBottom: 10,
-        backgroundColor: 'transparent',
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        paddingBottom: 8,
+        backgroundColor: '#f5fffdff',
     },
     backButton: {
         width: 40,
@@ -287,19 +311,19 @@ const styles = StyleSheet.create({
         height: 40,
     },
     headerTitle: {
-        fontSize: 18,
+        fontSize: 16,
         fontFamily: 'Inter-Bold',
         color: '#2F6A62',
         textAlign: 'center',
         flex: 1,
     },
-    content: { padding: 16, paddingBottom: 24 },
+    content: { padding: 12, paddingBottom: 18 },
     statusBadge: {
         flexDirection: 'row',
         alignItems: 'center',
         alignSelf: 'flex-start',
-        paddingHorizontal: 14,
-        paddingVertical: 7,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
         borderRadius: 999,
         marginBottom: 16,
         borderWidth: 1,
@@ -307,14 +331,14 @@ const styles = StyleSheet.create({
     },
     statusText: {
         fontFamily: 'Inter-Bold',
-        fontSize: 13,
+        fontSize: 12,
         marginLeft: 6,
     },
     card: {
         backgroundColor: '#FFFFFF',
-        borderRadius: 18,
-        padding: 20,
-        marginBottom: 14,
+        borderRadius: 14,
+        padding: 13,
+        marginBottom: 10,
         shadowColor: '#0F172A',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.05,
@@ -324,11 +348,11 @@ const styles = StyleSheet.create({
         borderColor: '#E5E5EA',
     },
     title: {
-        fontSize: 24,
+        fontSize: 17,
         fontFamily: 'Inter-Bold',
         color: '#1C1C1E',
-        marginBottom: 10,
-        lineHeight: 31,
+        marginBottom: 8,
+        lineHeight: 22,
     },
     metaRow: {
         marginBottom: 16,
@@ -338,7 +362,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     metaText: {
-        fontSize: 14,
+        fontSize: 12,
         color: '#6D6D72',
         marginLeft: 6,
         fontFamily: 'Inter-Medium',
@@ -354,7 +378,7 @@ const styles = StyleSheet.create({
         marginVertical: 14,
     },
     sectionTitle: {
-        fontSize: 13,
+        fontSize: 12,
         fontFamily: 'Inter-Bold',
         color: '#00695C',
         marginBottom: 8,
@@ -362,9 +386,9 @@ const styles = StyleSheet.create({
         textTransform: 'uppercase',
     },
     descText: {
-        fontSize: 15,
+        fontSize: 13,
         color: '#3A3A3C',
-        lineHeight: 22,
+        lineHeight: 19,
         fontFamily: 'Inter-Regular',
     },
     imagePlaceholder: {
@@ -393,7 +417,7 @@ const styles = StyleSheet.create({
     actionButton: {
         backgroundColor: '#3C8FDD',
         flexDirection: 'row',
-        paddingVertical: 14,
+        paddingVertical: 12,
         borderRadius: 999,
         justifyContent: 'center',
         alignItems: 'center',
@@ -406,7 +430,7 @@ const styles = StyleSheet.create({
     },
     actionButtonText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: 14,
         fontFamily: 'Inter-Bold',
         letterSpacing: 0.4,
     },
@@ -419,8 +443,8 @@ const styles = StyleSheet.create({
     identifyButton: {
         backgroundColor: '#E65100',
         flexDirection: 'row',
-        paddingVertical: 12,
-        paddingHorizontal: 16,
+        paddingVertical: 10,
+        paddingHorizontal: 14,
         borderRadius: 999,
         justifyContent: 'center',
         alignItems: 'center',
@@ -428,7 +452,7 @@ const styles = StyleSheet.create({
     },
     identifyButtonText: {
         color: '#FFFFFF',
-        fontSize: 15,
+        fontSize: 13,
         fontFamily: 'Inter-Bold',
     },
     selectedCatChip: {
@@ -439,13 +463,13 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#C8D8FF',
         borderRadius: 999,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
     },
     selectedCatText: {
         marginLeft: 8,
         color: '#1A56C5',
-        fontSize: 14,
+        fontSize: 12,
         fontFamily: 'Inter-Bold',
     },
 });
