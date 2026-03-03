@@ -7,6 +7,7 @@ import {
   ScrollView,
   Dimensions,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import BottomNav from "../components/BottomNav";
@@ -20,14 +21,25 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December"
 ];
 
-export default function CalendarScreen({ onNavigate, session }) {
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState(new Date());
+export default function CalendarScreen({ onNavigate, session, initialDate }) {
+  // ถ้ามี initialDate ให้ใช้เป็นวันที่เริ่มต้น ไม่งั้นใช้วันนี้
+  const parseInitialDate = () => {
+    if (initialDate) {
+      const d = new Date(initialDate + 'T00:00:00'); // Force local time
+      return isNaN(d.getTime()) ? new Date() : d;
+    }
+    return new Date();
+  };
+
+  const [currentDate, setCurrentDate] = useState(parseInitialDate);
+  const [selectedDate, setSelectedDate] = useState(parseInitialDate);
   const [dailyLog, setDailyLog] = useState(null);
   const [medicalEvents, setMedicalEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [catId, setCatId] = useState(null);
   const [loggedDates, setLoggedDates] = useState([]); // To store dates that have entries
+  const [photos, setPhotos] = useState([]); // To store photos for the selected date
+
 
   // Fetch Cat ID first
   useEffect(() => {
@@ -74,6 +86,18 @@ export default function CalendarScreen({ onNavigate, session }) {
 
       if (medicalError) console.error("Error fetching medical events:", medicalError);
       setMedicalEvents(medicalData || []);
+
+      // Fetch Photos (AI Snapshots)
+      const { data: photoData, error: photoError } = await supabase
+        .from('ai_cat_identity_review')
+        .select('*')
+        .eq('camera_id', catId)
+        .eq('reviewed', true)
+        .gte('occurred_at', `${dateString}T00:00:00Z`)
+        .lte('occurred_at', `${dateString}T23:59:59Z`);
+
+      if (photoError) console.error("Error fetching photos:", photoError);
+      setPhotos(photoData || []);
 
       setLoading(false);
     };
@@ -349,6 +373,26 @@ export default function CalendarScreen({ onNavigate, session }) {
               </View>
             )}
 
+            {/* Photos section for Recorded Log */}
+            <Text style={styles.photosLabel}>Photos</Text>
+            {photos.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
+                {photos.map((photo) => (
+                  <View key={photo.id} style={{ marginRight: 10 }}>
+                    <Image
+                      source={{ uri: photo.snapshot_url }}
+                      style={{ width: 140, height: 140, borderRadius: 16 }}
+                      resizeMode="cover"
+                    />
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <TouchableOpacity style={styles.photoPlaceholder}>
+                <Ionicons name="camera" size={32} color="#147C78" />
+              </TouchableOpacity>
+            )}
+
             {/* Edit Recorded Log Button */}
             <TouchableOpacity
               style={[styles.editButton, { marginTop: 0, marginBottom: 20 }]}
@@ -371,9 +415,23 @@ export default function CalendarScreen({ onNavigate, session }) {
           <View>
             <Text style={styles.noRecordText}>There is no record for this day.</Text>
             <Text style={styles.photosLabel}>Photos</Text>
-            <TouchableOpacity style={styles.photoPlaceholder}>
-              <Ionicons name="camera" size={32} color="#147C78" />
-            </TouchableOpacity>
+            {photos.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
+                {photos.map((photo) => (
+                  <View key={photo.id} style={{ marginRight: 10 }}>
+                    <Image
+                      source={{ uri: photo.snapshot_url }}
+                      style={{ width: 140, height: 140, borderRadius: 16 }}
+                      resizeMode="cover"
+                    />
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <TouchableOpacity style={styles.photoPlaceholder}>
+                <Ionicons name="camera" size={32} color="#147C78" />
+              </TouchableOpacity>
+            )}
 
             {/* Medical Events Section (Moved above button) */}
             {medicalEvents.length > 0 && (

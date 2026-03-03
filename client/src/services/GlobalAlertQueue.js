@@ -35,6 +35,16 @@ export function GlobalAlertQueueProvider({ children, session }) {
     const [dismissedCriticalIds, setDismissedCriticalIds] = useState({});
     const [autoPoppedPendingIds, setAutoPoppedPendingIds] = useState({});
 
+    useEffect(() => {
+        const userScope = session?.user?.id || 'anonymous';
+        AlertEngine.setScope(userScope);
+        setQueue([]);
+        setCurrentAlert(null);
+        setCriticalAlert(null);
+        setDismissedCriticalIds({});
+        setAutoPoppedPendingIds({});
+    }, [session?.user?.id]);
+
     const findTopCritical = useCallback(() => {
         const criticalList = AlertEngine
             .getHistory()
@@ -46,8 +56,9 @@ export function GlobalAlertQueueProvider({ children, session }) {
     const openCriticalIfNeeded = useCallback((candidate) => {
         if (!candidate?.id) return;
         if (dismissedCriticalIds[candidate.id]) return;
+        if (currentAlert) return; // do not stack critical over identity modal
         setCriticalAlert((prev) => (prev?.id === candidate.id ? prev : candidate));
-    }, [dismissedCriticalIds]);
+    }, [dismissedCriticalIds, currentAlert]);
 
     // 1. Fetch Cats from DB when session exists
     useEffect(() => {

@@ -3,7 +3,7 @@ import AlertEngine, { AlertEvents } from './AlertEngine';
 import supabase from '../screens/config/supabaseClient';
 
 const CAMERA_ID_KEY = 'camera_id';
-const RESOLVED_REVIEW_IDS_KEY = 'resolved_identity_review_ids';
+const RESOLVED_REVIEW_IDS_KEY_PREFIX = 'resolved_identity_review_ids';
 
 const isUuid = (value) =>
     typeof value === 'string'
@@ -117,6 +117,7 @@ const mapIdentityReviewToLocalAlert = (row) => {
 
 const AlertRepository = {
     _isInit: false,
+    _resolvedReviewIdsKey: `${RESOLVED_REVIEW_IDS_KEY_PREFIX}:anonymous`,
 
     init() {
         if (this._isInit) return;
@@ -141,7 +142,7 @@ const AlertRepository = {
 
     async _getResolvedReviewIds() {
         try {
-            const raw = await AsyncStorage.getItem(RESOLVED_REVIEW_IDS_KEY);
+            const raw = await AsyncStorage.getItem(this._resolvedReviewIdsKey);
             if (!raw) return new Set();
             const arr = JSON.parse(raw);
             if (!Array.isArray(arr)) return new Set();
@@ -156,7 +157,7 @@ const AlertRepository = {
         try {
             const set = await this._getResolvedReviewIds();
             set.add(String(reviewId));
-            await AsyncStorage.setItem(RESOLVED_REVIEW_IDS_KEY, JSON.stringify(Array.from(set)));
+            await AsyncStorage.setItem(this._resolvedReviewIdsKey, JSON.stringify(Array.from(set)));
         } catch (e) {
             // no-op
         }
@@ -211,6 +212,7 @@ const AlertRepository = {
         try {
             const { userId, cameraId } = await this._getContext();
             if (!userId) return false;
+            this._resolvedReviewIdsKey = `${RESOLVED_REVIEW_IDS_KEY_PREFIX}:${userId}:${cameraId || 'no_camera'}`;
 
             const localIds = new Set(AlertEngine.getHistory().map((a) => String(a.id)));
             const localRemoteReviewIds = new Set(

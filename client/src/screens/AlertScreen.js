@@ -462,9 +462,6 @@ export default function AlertScreen({ onBack, onNavigate }) {
             ? AlertEngine.getDeletedHistory()
             : AlertEngine.getHistory();
         setAlerts(dedupeAlerts(list || []));
-        if (filterMode !== 'deleted' && AlertEngine.markAllAsRead) {
-            AlertEngine.markAllAsRead();
-        }
 
         const handler = () => {
             const next = filterMode === 'deleted' && AlertEngine.getDeletedHistory

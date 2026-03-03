@@ -20,6 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import HomeHeader from "../components/HomeHeader";
 import Paw from "../components/Paw";
 import styles from "../styles/homeStyles";
+import useCameraData from "../hooks/useCameraData";
 
 const { width } = Dimensions.get('window');
 
@@ -32,7 +33,9 @@ const CAT_NEWS_POOL = [
     { id: 'n6', type: 'news', title: 'มนุษย์เริ่มเลี้ยงแมวตั้งแต่เมื่อไหร่? เชื่อไหมว่าเลี้ยงมาเป็น "หมื่นปี"...', link: 'https://www.sanook.com/news/9848342/', image: 'https://images.unsplash.com/photo-1573865526739-10659fec78a5?q=80&w=800&auto=format&fit=crop' }
 ];
 
-export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate }) {
+export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate, session }) {
+    const { data } = useCameraData(session, 'connected'); // 'connected' just to trigger fetch
+
     const [activeCat, setActiveCat] = useState(null);
     const [lastCheckText, setLastCheckText] = useState("Not assessed yet");
     const [activeBannerIndex, setActiveBannerIndex] = useState(0);
@@ -157,7 +160,13 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                     {/* 2. ส่วนข้อความ (Hero Section เดิม เหลือแค่ Text) */}
                     <View style={styles.heroSection}>
                         <Text style={styles.heroTitle}>
-                            Everything looks great todays!
+                            {((score) => {
+                                const name = activeCat?.name || "Luna";
+                                if (score >= 80) return "Everything looks great today!";
+                                if (score >= 60) return `${name} is doing well today.`;
+                                if (score >= 40) return `Keep an eye on ${name} today.`;
+                                return `${name} needs some extra care.`;
+                            })(data?.behaviorAnalytics?.wellness?.score ?? 100)}
                         </Text>
 
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>

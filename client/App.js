@@ -16,11 +16,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // 1. Import the LogDailyNormal file
 import LogDailyNormal from './src/screens/LogDailyNormal';
-import AddMedical from './src/screens/AddMedical'; // ✅ Import AddMedical
+import AddMedical from './src/screens/AddMedical';
 import HomeScreen from './src/screens/HomeScreen';
+import HomeScreenNew from './src/screens/HomeScreenNew';
 import CalendarScreen from './src/screens/CalendarScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import TimelineScreen from './src/screens/TimelineScreen'; // Import TimelineScreen
+import Tutorail from './src/screens/Tutorail';
 // import AssessmentScreen, HomeScreenOld... (Import หน้าอื่นๆ ตามที่มีในโปรเจกต์จริง)
 
 import CameraScreen from './src/screens/CameraScreen';
@@ -143,7 +145,7 @@ export default function App() {
         .single();
 
       if (profileError || !profile || !profile.name) {
-        setAuthScreen('Profile'); // Go to Profile fill
+        setAuthScreen({ screen: 'Profile', params: { isFirstTime: true } }); // Go to Profile fill first
         return;
       }
 
@@ -156,7 +158,7 @@ export default function App() {
         .single();
 
       if (catError || !cat) {
-        setAuthScreen('CatProfile'); // Go to Cat Profile
+        setAuthScreen({ screen: 'CatProfile', params: { isFirstTime: true } }); // Go to Cat Profile
         return;
       }
 
@@ -189,21 +191,36 @@ export default function App() {
       const screenParams = typeof authScreen === 'object' ? authScreen.params : {};
 
       if (currentScreenName === 'CatProfile') {
+        const isFirstTime = screenParams?.isFirstTime;
         return (
           <CatProfile
             session={session}
             catId={screenParams?.catId || null}
-            onBack={() => setAuthScreen('Setting')}
-            onNavigateToHome={() => setAuthScreen('Home')}
+            onBack={isFirstTime ? undefined : () => setAuthScreen('Setting')}
+            onNavigateToHome={() => {
+              if (isFirstTime) {
+                setAuthScreen('Tutorail');
+              } else {
+                setAuthScreen('Home');
+              }
+            }}
           />
         );
       }
       if (currentScreenName === 'Profile' || currentScreenName === 'EditProfile') {
+        const isFirstTime = screenParams?.isFirstTime;
         return (
           <ProfileScreen
             session={session}
-            onBack={() => setAuthScreen('Setting')}
-            onNavigateToCatProfile={() => setAuthScreen('CatProfile')}
+            onBack={isFirstTime ? undefined : () => setAuthScreen('Setting')}
+            onNavigateToCatProfile={() => setAuthScreen({ screen: 'CatProfile', params: { isFirstTime: true } })}
+            onComplete={() => {
+              if (isFirstTime) {
+                setAuthScreen({ screen: 'CatProfile', params: { isFirstTime: true } });
+              } else {
+                setAuthScreen('Setting');
+              }
+            }}
           />
         );
       }
@@ -227,9 +244,10 @@ export default function App() {
       if (currentScreenName === 'LogDaily') {
         return <LogDailyNormal
           session={session}
-          catId={catId} // ✅ ส่ง catId ไปที่ LogDailyNormal
-          catName={catName} // ✅ ส่ง catName ไปที่ LogDailyNormal
+          catId={catId}
+          catName={catName}
           onBack={() => setAuthScreen('Calendar')}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
           initialDate={screenParams?.date || null}
         />;
       }
@@ -244,6 +262,7 @@ export default function App() {
         return <CalendarScreen
           session={session}
           onNavigate={(screen) => setAuthScreen(screen)}
+          initialDate={screenParams?.date || null}
         />;
       }
       if (currentScreenName === 'Result') {
@@ -311,6 +330,21 @@ export default function App() {
         return <EventDetailScreen onBack={() => setAuthScreen('Alert')} alertData={screenParams?.alertData} />;
       }
 
+      if (currentScreenName === 'Tutorail') {
+        return <Tutorail onFinish={() => setAuthScreen('HomeScreenNew')} />;
+      }
+
+      if (currentScreenName === 'HomeScreenNew') {
+        return <HomeScreenNew
+          session={session}
+          onLogout={handleSignOut}
+          onLogDaily={() => setAuthScreen('LogDaily')}
+          onAssess={() => setAuthScreen('Result')}
+          onSetting={() => setAuthScreen('Setting')}
+          onNavigate={(screen) => setAuthScreen(screen)}
+        />;
+      }
+
       // Dashboard Screen
       if (authScreen === 'Dashboard') {
         return <Dashboard
@@ -344,6 +378,7 @@ export default function App() {
       }
       // Default Home
       return <HomeScreen
+        session={session}
         onLogout={handleSignOut}
         onLogDaily={() => setAuthScreen('LogDaily')}
         onAssess={() => setAuthScreen('Result')}

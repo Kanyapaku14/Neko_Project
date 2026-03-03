@@ -494,7 +494,8 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
 };
 
 export default function LogDaily(props) {
-    const { session, onBack, initialDate } = props;
+    const { session, onBack, onNavigate, initialDate } = props;
+
     const [status, setStatus] = useState('Normal');
     const [catId, setCatId] = useState(null);
     const [catName, setCatName] = useState('');
@@ -628,21 +629,28 @@ export default function LogDaily(props) {
                 .maybeSingle();
 
             if (checkError) throw checkError;
+            // เช็คว่า normal_logs มีข้อมูลอยู่ข้างในไหม (ใน DB)
+            const hasNormalInDB = existingData?.normal_logs && 
+                                  (Array.isArray(existingData.normal_logs) ? existingData.normal_logs.length > 0 : Object.keys(existingData.normal_logs).length > 0);
 
-            // เช็คว่า normal_logs มีข้อมูลอยู่ข้างในไหม
-            const hasNormalInDB = existingData?.normal_logs &&
-                (Array.isArray(existingData.normal_logs) ? existingData.normal_logs.length > 0 : Object.keys(existingData.normal_logs).length > 0);
+            // เช็คว่าข้อมูลใน State (หน้าจอ) กรอกครบหรือยัง?
+            const isNormalCompleteInState = foodType !== null && 
+                                           consumeMeals !== null && consumeMeals.toString().trim() !== '' && 
+                                           foodIntake !== null && foodIntake.toString().trim() !== '' && 
+                                           waterIntake !== null && waterIntake.toString().trim() !== '' && 
+                                           urineLevel !== null && 
+                                           stoolLevel !== null;
 
-            // เงื่อนไขเหล็ก: ถ้าใน DB ไม่มี Normal ให้บล็อคทันที!
-            if (!hasNormalInDB) {
+            // เงื่อนไขใหม่: ถ้าใน DB ไม่มี Normal "และ" ในเครื่องก็ยังกรอกไม่ครบ -> บล็อค!
+            if (!hasNormalInDB && !isNormalCompleteInState) {
                 setLoading(false);
                 return Alert.alert(
-                    "ไม่สามารถบันทึกได้",
-                    "ต้องกรอกและบันทึกข้อมูลหน้า 'Normal' (อาหาร/น้ำ/ขับถ่าย) ของวันนี้ให้เสร็จก่อน ถึงจะสามารถบันทึกอาการ Something off ได้"
+                    "ไม่สามารถบันทึกได้", 
+                    "ต้องกรอกข้อมูลหน้า 'Normal' (อาหาร/น้ำ/ขับถ่าย) ของวันนี้ให้ครบถ้วนก่อน ถึงจะสามารถบันทึก Something off ได้"
                 );
             }
 
-            // ถ้าเช็คผ่านหมด (มีข้อมูล Normal แล้ว) ก็ให้เซฟ Something Off ลง DB ได้เลย
+            // ถ้าเช็คผ่านหมด (มีข้อมูล Normal แล้ว หรือกรอกครบแล้ว) ก็เซฟได้เลย
             await saveData();
 
         } catch (error) {
@@ -672,8 +680,15 @@ export default function LogDaily(props) {
 
             if (dailyError) throw dailyError;
 
-            if (status === 'Normal') {
-                // Step 2: UPSERT normal_logs (child) - Use upsert with onConflict on daily_log_id
+            // Step 2: Save Normal Logs if complete
+            const isNormalComplete = foodType !== null && 
+                                     consumeMeals !== null && consumeMeals.toString().trim() !== '' && 
+                                     foodIntake !== null && foodIntake.toString().trim() !== '' && 
+                                     waterIntake !== null && waterIntake.toString().trim() !== '' && 
+                                     urineLevel !== null && 
+                                     stoolLevel !== null;
+
+            if (isNormalComplete) {
                 const { error: normalError } = await supabase
                     .from('normal_logs')
                     .upsert({
@@ -687,8 +702,15 @@ export default function LogDaily(props) {
                     }, { onConflict: 'daily_log_id' });
 
                 if (normalError) throw normalError;
-            } else {
-                // Step 3: UPSERT something_off_logs (child)
+            }
+
+            // Step 3: Save Something Off Logs if we are in 'Something off' mode or have data
+            const isSomethingOffActive = (status === 'Something off') || 
+                                          isVomitChecked || isDiarrheaChecked || 
+                                          behaviorTags.length > 0 || respiratoryTags.length > 0 || 
+                                          (notes && notes.trim() !== '');
+
+            if (isSomethingOffActive) {
                 const { error: offError } = await supabase
                     .from('something_off_logs')
                     .upsert({
@@ -697,18 +719,25 @@ export default function LogDaily(props) {
                         vomit_type: isVomitChecked ? formatToEnum(vomitColor) : null,
                         has_diarrhea: isDiarrheaChecked,
                         diarrhea_type: isDiarrheaChecked ? formatToEnum(diarrheaColor) : null,
-
-                        // 🌟 แก้ไขให้ใช้ Array เหมือนเดิม ตามฐานข้อมูลที่เป็น text[]
                         behavior_energy: behaviorTags.length > 0 ? behaviorTags : null,
                         respiratory_physical: respiratoryTags.length > 0 ? respiratoryTags : null,
-
                         notes: notes || null,
-                    }, { onConflict: 'daily_log_id' }); // อย่าลืมใส่ onConflict ด้วยนะครับ
+                    }, { onConflict: 'daily_log_id' });
 
                 if (offError) throw offError;
             }
-
-            Alert.alert('Success', 'Saved Event!', [{ text: 'OK', onPress: onBack }]);
+            
+            Alert.alert('Success', 'Saved Event!', [{
+              text: 'OK',
+              onPress: () => {
+                // ไปหน้า Calendar ที่วันที่บันทึก
+                if (onNavigate) {
+                  onNavigate('Calendar', { date: logDateStr });
+                } else if (onBack) {
+                  onBack();
+                }
+              }
+            }]);
         } catch (err) {
             console.error('Save error:', err);
             Alert.alert('Error', err.message);
