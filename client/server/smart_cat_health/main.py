@@ -1,6 +1,7 @@
 import os
 import cv2
 import time
+import json
 import argparse
 import mimetypes
 from collections import defaultdict
@@ -33,6 +34,19 @@ NORMAL_SNAPSHOT_COOLDOWN_SEC = 15.0
 ABNORMAL_SNAPSHOT_COOLDOWN_SEC = 8.0
 OVER_CAPACITY_ALERT_COOLDOWN_SEC = 180.0
 OVER_CAPACITY_MIN_PERSIST_SEC = 8.0
+PROCESS_EVERY_N_FRAMES = 2
+PENDING_IDENTITY_EXPIRE_MIN = 30
+PENDING_IDENTITY_SWEEP_SEC = 120.0
+HEALTH_WRITE_INTERVAL_SEC = 2.0
+
+# Optional hardcoded stream override by camera_id.
+# If set, this takes precedence over DB stream_source.
+# Examples:
+#   "camera-uuid": "webcam:0"
+#   "camera-uuid": "rtsp://user:pass@ip/stream"
+CAMERA_SOURCE_OVERRIDES = {
+    # "0a18fe9a-dcc0-4088-be6c-2aa44ca734d8": "webcam:0",
+}
 
 # Real-world health app event rules:
 # - Require sustained frames before counting one behavior event
@@ -122,6 +136,162 @@ def create_supabase_client():
     return create_client(url, key)
 
 
+def _runtime_dir(this_dir):
+    d = os.path.join(this_dir, "runtime")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _sanitize_name(raw):
+    return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(raw or "default"))
+
+
+def _is_pid_alive(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+
+
+def acquire_camera_lock(this_dir, camera_id):
+    """
+    Prevent duplicate pipeline runs on the same camera_id.
+    """
+    lock_name = f"camera_{_sanitize_name(camera_id)}.lock"
+    lock_path = os.path.join(_runtime_dir(this_dir), lock_name)
+    payload = {
+        "pid": os.getpid(),
+        "camera_id": camera_id,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    fd = None
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+        os.close(fd)
+        return lock_path
+    except FileExistsError:
+        try:
+            with open(lock_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except Exception:
+            existing = {}
+        existing_pid = existing.get("pid")
+        if existing_pid and _is_pid_alive(existing_pid):
+            raise SystemExit(
+                f"camera_id '{camera_id}' is already running (pid={existing_pid}). Stop old process first."
+            )
+        try:
+            os.remove(lock_path)
+        except Exception:
+            raise SystemExit(f"camera_id '{camera_id}' lock exists and cannot be removed: {lock_path}")
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+        os.close(fd)
+        return lock_path
+    finally:
+        try:
+            if fd is not None:
+                os.close(fd)
+        except Exception:
+            pass
+
+
+def release_camera_lock(lock_path):
+    if not lock_path:
+        return
+    try:
+        if os.path.exists(lock_path):
+            os.remove(lock_path)
+    except Exception as e:
+        print(f"Failed to release lock {lock_path}: {e}")
+
+
+def write_pipeline_health(this_dir, camera_id, health_state):
+    cam = _sanitize_name(camera_id or "local")
+    path = os.path.join(_runtime_dir(this_dir), f"pipeline_health_{cam}.json")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(health_state, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Failed to write health file: {e}")
+
+
+def set_camera_connection_status(supabase, camera_id, status):
+    if not (supabase and camera_id):
+        return
+    try:
+        supabase.table("cameras").update({"ai_connection_status": status}).eq("id", camera_id).execute()
+    except Exception as e:
+        print(f"Camera status update failed ({status}): {e}")
+
+
+def expire_stale_pending_identity_reviews(supabase, camera_id, older_than_minutes=PENDING_IDENTITY_EXPIRE_MIN):
+    """
+    Auto-resolve stale pending identity reviews so old unresolved rows do not keep resurfacing.
+    """
+    if not (supabase and camera_id):
+        return 0
+    now_utc = datetime.now(timezone.utc)
+    cutoff = datetime.fromtimestamp(now_utc.timestamp() - (older_than_minutes * 60.0), tz=timezone.utc).isoformat()
+    try:
+        rows = (
+            supabase.table("ai_cat_identity_review")
+            .select("id,metadata")
+            .eq("camera_id", camera_id)
+            .eq("reviewed", False)
+            .lt("occurred_at", cutoff)
+            .limit(500)
+            .execute()
+            .data
+            or []
+        )
+        if not rows:
+            return 0
+        updated = 0
+        for row in rows:
+            metadata = dict(row.get("metadata") or {})
+            metadata["auto_expired"] = True
+            metadata["auto_expired_at"] = now_utc.isoformat()
+            supabase.table("ai_cat_identity_review").update(
+                {
+                    "reviewed": True,
+                    "reviewed_at": now_utc.isoformat(),
+                    "resolved_by": "skipped",
+                    "metadata": metadata,
+                }
+            ).eq("id", row["id"]).execute()
+            updated += 1
+        return updated
+    except Exception as e:
+        print(f"Pending identity expiry failed: {e}")
+        return 0
+
+
+def get_pending_identity_count(supabase, camera_id):
+    if not (supabase and camera_id):
+        return 0
+    try:
+        rows = (
+            supabase.table("ai_cat_identity_review")
+            .select("id")
+            .eq("camera_id", camera_id)
+            .eq("reviewed", False)
+            .limit(5000)
+            .execute()
+            .data
+            or []
+        )
+        return len(rows)
+    except Exception:
+        return 0
+
+
 def normalize_source(raw_source):
     """
     Support per-camera source formats:
@@ -138,6 +308,13 @@ def normalize_source(raw_source):
         idx = source.split(":", 1)[1].strip()
         return int(idx) if idx.isdigit() else source
     return int(source) if source.isdigit() else source
+
+
+def load_camera_source_from_code(camera_id):
+    if not camera_id:
+        return None
+    raw = CAMERA_SOURCE_OVERRIDES.get(str(camera_id))
+    return normalize_source(raw) if raw else None
 
 
 def load_camera_owner_id(supabase, camera_id):
@@ -318,6 +495,10 @@ def insert_identity_review(
     behavior,
     confidence,
     snapshot_path,
+    reviewed=False,
+    resolved_by=None,
+    resolved_cat_id=None,
+    session_id=None,
     metadata=None,
 ):
     if not supabase or not camera_id:
@@ -329,9 +510,12 @@ def insert_identity_review(
         "behavior_label": map_behavior_to_db(behavior),
         "occurred_at": datetime.now(timezone.utc).isoformat(),
         "snapshot_url": snapshot_path,
-        "reviewed": False,
+        "reviewed": bool(reviewed),
         "source": "smart_cat_health_server",
-        "session_id": None,
+        "session_id": session_id,
+        "resolved_by": resolved_by,
+        "resolved_cat_id": resolved_cat_id if resolved_cat_id and "-" in str(resolved_cat_id) else None,
+        "reviewed_at": datetime.now(timezone.utc).isoformat() if reviewed else None,
         "metadata": metadata or {},
     }
     supabase.table("ai_cat_identity_review").insert(payload).execute()
@@ -468,7 +652,7 @@ def insert_over_capacity_alert(
     supabase.table("alerts").insert(payload).execute()
 
 
-def should_commit_behavior_event(event_state, cat_key, db_behavior, confidence, now_ts):
+def should_commit_behavior_event(event_state, cat_key, db_behavior, confidence, now_ts, frame_idx):
     """
     Count one event only when:
     1) behavior confidence passes threshold
@@ -485,6 +669,7 @@ def should_commit_behavior_event(event_state, cat_key, db_behavior, confidence, 
             "observed_label": None,
             "streak": 0,
             "last_event_at": {},  # label -> epoch seconds
+            "last_event_frame": {},  # label -> frame index
         },
     )
 
@@ -502,8 +687,12 @@ def should_commit_behavior_event(event_state, cat_key, db_behavior, confidence, 
     cooldown = BEHAVIOR_EVENT_COOLDOWN_SEC.get(db_behavior, 120.0)
     if (now_ts - last_at) < cooldown:
         return False
+    last_frame = int(state["last_event_frame"].get(db_behavior, -1))
+    if frame_idx == last_frame:
+        return False
 
     state["last_event_at"][db_behavior] = now_ts
+    state["last_event_frame"][db_behavior] = int(frame_idx)
     return True
 
 
@@ -603,6 +792,7 @@ def run(
     camera_zones = load_camera_zones(supabase, camera_id) if db_write and camera_id else []
     cat_name_map = load_cat_name_map(supabase, assigned_cat_ids) if db_write and assigned_cat_ids else {}
     owner_id = load_camera_owner_id(supabase, camera_id) if db_write and camera_id else None
+    code_source = load_camera_source_from_code(camera_id)
     db_source = load_camera_source_from_db(supabase, camera_id) if db_write and camera_id else None
     camera_mode = (camera_row or {}).get("mode")
     is_single_mode = camera_mode == "single_cat"
@@ -624,17 +814,23 @@ def run(
             "Assign cats from Setcamera UI first."
         )
 
-    # Use DB cat ids directly; never create more than assigned cats when db_write mode is enabled.
+    lock_path = acquire_camera_lock(this_dir, camera_id) if camera_id else None
+    set_camera_connection_status(supabase, camera_id, "online")
+
+    # Use DB cat ids directly for known cats.
+    # Unknown/excess detections are still tracked as local CATxxx for identity review flow.
     session = CatSessionManager(
         session_dir="sessions",
         known_cat_ids=assigned_cat_ids if db_write else None,
-        max_cats=len(assigned_cat_ids) if (db_write and assigned_cat_ids) else None,
+        max_cats=None,
     )
 
-    source = db_source if db_source is not None else source
+    source = code_source if code_source is not None else (db_source if db_source is not None else source)
     print(
         "[smart_cat_health] source resolved:",
         source,
+        "| from_code:",
+        code_source is not None,
         "| from_db:",
         db_source is not None,
         "| camera_id:",
@@ -659,10 +855,38 @@ def run(
         "activity_counts": defaultdict(int),  # cat_uuid -> events count in this active window
         "last_alert_at": 0.0,
     }
+    stale_expire_state = {
+        "last_sweep_at": 0.0,
+    }
+    health_state = {
+        "camera_id": camera_id,
+        "pid": os.getpid(),
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "source": str(source),
+        "frames_total": 0,
+        "frames_processed": 0,
+        "events_committed": 0,
+        "pending_identity_count": 0,
+        "fps": 0.0,
+        "last_frame_at": None,
+        "last_db_write_at": None,
+        "last_event_at": None,
+        "last_snapshot_at": None,
+        "over_capacity_active": False,
+        "last_error": None,
+    }
+    fps_window = deque(maxlen=30)
+    last_health_write = 0.0
+    if db_write and camera_id:
+        expired = expire_stale_pending_identity_reviews(supabase, camera_id, PENDING_IDENTITY_EXPIRE_MIN)
+        if expired:
+            print(f"[smart_cat_health] auto-expired stale pending identity rows: {expired}")
 
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         print(f"Cannot open source: {source}")
+        set_camera_connection_status(supabase, camera_id, "offline")
+        release_camera_lock(lock_path)
         return
 
     frame_count = 0
@@ -673,6 +897,8 @@ def run(
                 break
             now = time.time()
             frame_count += 1
+            health_state["frames_total"] = frame_count
+            health_state["last_frame_at"] = datetime.now(timezone.utc).isoformat()
 
             h, w = frame_orig.shape[:2]
             if w > PROCESS_WIDTH:
@@ -681,6 +907,19 @@ def run(
             else:
                 scale = 1.0
                 frame_small = frame_orig
+
+            if frame_count % PROCESS_EVERY_N_FRAMES != 0:
+                cv2.imshow("Smart Cat Health", frame_orig)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+                continue
+
+            health_state["frames_processed"] += 1
+            fps_window.append(now)
+            if len(fps_window) >= 2:
+                span = fps_window[-1] - fps_window[0]
+                if span > 0:
+                    health_state["fps"] = round((len(fps_window) - 1) / span, 2)
 
             tracked = tracker.update(frame_small)
             valid_tracks_in_frame = 0
@@ -713,10 +952,11 @@ def run(
                 behavior = cat["current_behavior"]
                 confidence = cat["current_confidence"]
                 abnormal = behavior_sys.is_abnormal(behavior)
+                is_known_cat_uuid = ("-" in str(cat_id)) and (not assigned_cat_ids or (str(cat_id) in assigned_cat_ids))
                 if abnormal:
                     session.increment_abnormal(cat_id)
 
-                should_snap = abnormal or session.can_snapshot(cat_id, now)
+                should_snap = is_known_cat_uuid and (abnormal or session.can_snapshot(cat_id, now))
                 snap_path = None
                 if should_snap and session.can_snapshot(cat_id, now):
                     snap_bbox = expand_bbox(bbox, frame_orig.shape)
@@ -729,13 +969,14 @@ def run(
                         now,
                         abnormal_snapshot_cooldown_sec if abnormal else normal_snapshot_cooldown_sec,
                     )
+                    health_state["last_snapshot_at"] = datetime.now(timezone.utc).isoformat()
 
                 if db_write and camera_id and "-" in str(camera_id):
                     try:
                         event_time = datetime.now(timezone.utc)
                         event_iso = event_time.isoformat()
                         now_event_ts = time.time()
-                        cat_uuid = cat_id if "-" in str(cat_id) else None
+                        cat_uuid = cat_id if is_known_cat_uuid else None
                         if cat_uuid:
                             frame_cat_counts[cat_uuid] += 1
                             frame_cat_last_bbox[cat_uuid] = bbox
@@ -749,6 +990,7 @@ def run(
                             db_behavior=db_behavior,
                             confidence=confidence,
                             now_ts=now_event_ts,
+                            frame_idx=frame_count,
                         )
                         if snap_path:
                             snap_path = upload_snapshot_to_storage(
@@ -758,6 +1000,7 @@ def run(
                                 cat_uuid=cat_uuid,
                                 event_time=event_time,
                             )
+                            health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
                         if should_commit and within_daily_cap(
                             daily_event_counts=daily_event_counts,
                             cat_key=cat_event_key,
@@ -766,6 +1009,9 @@ def run(
                         ):
                             insert_ai_event(supabase, camera_id, cat_uuid, behavior, confidence, abnormal)
                             committed = True
+                            health_state["events_committed"] += 1
+                            health_state["last_event_at"] = event_iso
+                            health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
                         else:
                             committed = False
                         if cat_uuid and committed:
@@ -810,9 +1056,26 @@ def run(
                                 insert_alert_if_needed(
                                     supabase, owner_id, camera_id, cat_uuid, behavior, confidence, abnormal, event_iso
                                 )
+                            health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
                         if snap_path:
-                            insert_identity_review(supabase, camera_id, cat_uuid, behavior, confidence, snap_path)
+                            insert_identity_review(
+                                supabase=supabase,
+                                camera_id=camera_id,
+                                pred_cat_uuid=cat_uuid,
+                                behavior=behavior,
+                                confidence=confidence,
+                                snapshot_path=snap_path,
+                                reviewed=True,
+                                resolved_by="auto",
+                                resolved_cat_id=cat_uuid,
+                                metadata={
+                                    "confirmed_cat": True,
+                                    "source": "pipeline_auto_confirm",
+                                },
+                            )
+                            health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
                     except Exception as e:
+                        health_state["last_error"] = str(e)
                         print(f"DB write error: {e}")
 
             # Over-capacity handling: detected tracks exceed assigned cats (aggregated + throttled)
@@ -820,6 +1083,7 @@ def run(
                 observed_count = valid_tracks_in_frame
                 allowed_count = len(assigned_cat_ids)
                 now_ts = time.time()
+                health_state["over_capacity_active"] = observed_count > allowed_count
                 if observed_count > allowed_count:
                     if over_capacity_state["active_since"] is None:
                         over_capacity_state["active_since"] = now_ts
@@ -842,45 +1106,52 @@ def run(
                             top_cat_name = cat_name_map.get(top_cat_uuid, top_cat_uuid)
                         try:
                             event_iso = datetime.now(timezone.utc).isoformat()
-                            if is_single_mode:
-                                # In single-cat mode, do not spam abnormal alerts.
-                                # Create a review task so user can confirm which detection is truly their cat
-                                # (or skip if it is a toy/false positive).
-                                review_cat_uuid = top_cat_uuid or (assigned_cat_ids[0] if assigned_cat_ids else None)
-                                snap_path = None
-                                review_bbox = frame_cat_last_bbox.get(review_cat_uuid) if review_cat_uuid else None
-                                if review_bbox:
-                                    snap_bbox = expand_bbox(review_bbox, frame_orig.shape)
-                                    snap_path = behavior_sys.create_snapshot(
-                                        frame_orig,
-                                        snap_bbox,
-                                        review_cat_uuid or "unassigned",
-                                        behavior_label="active",
-                                        confidence=0.51,
-                                        event_type="monitor",
-                                    )
-                                    if snap_path:
-                                        snap_path = upload_snapshot_to_storage(
-                                            supabase=supabase,
-                                            local_path=snap_path,
-                                            camera_id=camera_id,
-                                            cat_uuid=review_cat_uuid,
-                                            event_time=datetime.now(timezone.utc),
-                                        )
-                                insert_identity_review(
-                                    supabase=supabase,
-                                    camera_id=camera_id,
-                                    pred_cat_uuid=review_cat_uuid,
-                                    behavior="active",
+                            # Always create identity review task when over-capacity persists.
+                            # Single-cat and multi-cat both require user confirmation in this situation.
+                            review_cat_uuid = top_cat_uuid or (assigned_cat_ids[0] if assigned_cat_ids else None)
+                            snap_path = None
+                            review_bbox = frame_cat_last_bbox.get(review_cat_uuid) if review_cat_uuid else None
+                            if review_bbox:
+                                snap_bbox = expand_bbox(review_bbox, frame_orig.shape)
+                                snap_path = behavior_sys.create_snapshot(
+                                    frame_orig,
+                                    snap_bbox,
+                                    review_cat_uuid or "unassigned",
+                                    behavior_label="active",
                                     confidence=0.51,
-                                    snapshot_path=snap_path,
-                                    metadata={
-                                        "reason": "single_mode_over_capacity",
-                                        "observed_count": over_capacity_state["peak_observed"],
-                                        "allowed_count": allowed_count,
-                                    },
+                                    event_type="monitor",
                                 )
-                            else:
+                                if snap_path:
+                                    snap_path = upload_snapshot_to_storage(
+                                        supabase=supabase,
+                                        local_path=snap_path,
+                                        camera_id=camera_id,
+                                        cat_uuid=review_cat_uuid,
+                                        event_time=datetime.now(timezone.utc),
+                                    )
+                                    health_state["last_snapshot_at"] = datetime.now(timezone.utc).isoformat()
+                                    health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
+                            insert_identity_review(
+                                supabase=supabase,
+                                camera_id=camera_id,
+                                pred_cat_uuid=review_cat_uuid,
+                                behavior="active",
+                                confidence=0.51,
+                                snapshot_path=snap_path,
+                                reviewed=False,
+                                resolved_by=None,
+                                resolved_cat_id=None,
+                                session_id=f"over_capacity_{int(now_ts)}",
+                                metadata={
+                                    "reason": "over_capacity",
+                                    "observed_count": over_capacity_state["peak_observed"],
+                                    "allowed_count": allowed_count,
+                                    "top_cat_uuid": top_cat_uuid,
+                                    "top_cat_name": top_cat_name,
+                                    "requires_confirm": True,
+                                },
+                            )
+                            if not is_single_mode:
                                 insert_over_capacity_alert(
                                     supabase=supabase,
                                     owner_id=owner_id,
@@ -891,11 +1162,14 @@ def run(
                                     allowed_count=allowed_count,
                                     event_time_iso=event_iso,
                                 )
+                            health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
+                            health_state["pending_identity_count"] += 1
                             over_capacity_state["last_alert_at"] = now_ts
                             over_capacity_state["active_since"] = now_ts
                             over_capacity_state["peak_observed"] = observed_count
                             over_capacity_state["activity_counts"].clear()
                         except Exception as e:
+                            health_state["last_error"] = str(e)
                             print(f"Over-capacity alert insert failed: {e}")
                 else:
                     over_capacity_state["active_since"] = None
@@ -910,10 +1184,24 @@ def run(
             if frame_count % 60 == 0:
                 session.cleanup_expired_pool(now)
 
+            if db_write and camera_id:
+                if (now - stale_expire_state["last_sweep_at"]) >= PENDING_IDENTITY_SWEEP_SEC:
+                    expired = expire_stale_pending_identity_reviews(supabase, camera_id, PENDING_IDENTITY_EXPIRE_MIN)
+                    stale_expire_state["last_sweep_at"] = now
+                    if expired:
+                        print(f"[smart_cat_health] auto-expired stale pending identity rows: {expired}")
+                    health_state["pending_identity_count"] = get_pending_identity_count(supabase, camera_id)
+
+            if (now - last_health_write) >= HEALTH_WRITE_INTERVAL_SEC:
+                write_pipeline_health(this_dir, camera_id, health_state)
+                last_health_write = now
+
             cv2.imshow("Smart Cat Health", frame_orig)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     finally:
+        health_state["ended_at"] = datetime.now(timezone.utc).isoformat()
+        write_pipeline_health(this_dir, camera_id, health_state)
         if db_write and supabase:
             summary_date = datetime.now(timezone.utc).date().isoformat()
             for cat_uuid, metrics in summary_rollup.items():
@@ -924,9 +1212,11 @@ def run(
                     upsert_daily_summary(supabase, cat_uuid, summary_date, metrics)
                 except Exception as e:
                     print(f"Daily summary upsert error ({cat_uuid}): {e}")
+            set_camera_connection_status(supabase, camera_id, "offline")
         session.save_session()
         cap.release()
         cv2.destroyAllWindows()
+        release_camera_lock(lock_path)
 
 
 if __name__ == "__main__":
