@@ -351,7 +351,13 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                     <View style={[styles.textLogRow, { justifyContent: 'space-between' }]}>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <MaterialCommunityIcons
-                          name={event.event_type === 'vaccine' ? 'needle' : event.event_type === 'medicine' ? 'pill' : 'hospital-marker'}
+                          name={
+                            (event.event_type === 'vaccine' || event.event_type === 'vaccination')
+                              ? 'needle'
+                              : (event.event_type === 'medicine' || event.event_type === 'medication')
+                                ? 'pill'
+                                : 'hospital-marker'
+                          }
                           size={20}
                           color="#D32F2F"
                         />
@@ -441,7 +447,13 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                     <View style={[styles.textLogRow, { justifyContent: 'space-between' }]}>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <MaterialCommunityIcons
-                          name={event.event_type === 'vaccine' ? 'needle' : event.event_type === 'medicine' ? 'pill' : 'hospital-marker'}
+                          name={
+                            (event.event_type === 'vaccine' || event.event_type === 'vaccination')
+                              ? 'needle'
+                              : (event.event_type === 'medicine' || event.event_type === 'medication')
+                                ? 'pill'
+                                : 'hospital-marker'
+                          }
                           size={20}
                           color="#D32F2F"
                         />

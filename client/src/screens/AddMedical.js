@@ -67,6 +67,15 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
         { id: 'Medicine', label: 'Medicine', icon: 'pill', type: 'material' },
     ];
 
+    const normalizeEventType = (value) => {
+        const key = String(value || '').trim().toLowerCase();
+        if (['vet visit', 'vet_visit'].includes(key)) return 'vet_visit';
+        if (['vaccine', 'vaccination'].includes(key)) return 'vaccination';
+        if (['medicine', 'medication'].includes(key)) return 'medication';
+        if (['surgery'].includes(key)) return 'surgery';
+        return 'other';
+    };
+
     const pickImage = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
@@ -126,7 +135,7 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
             }
 
             // 2. Insert into medical_events table
-            const formattedEventType = eventType.toLowerCase().replace(/\s+/g, '_');
+            const formattedEventType = normalizeEventType(eventType);
 
             const { error: insertError } = await supabase
                 .from('medical_events')
