@@ -22,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient';
 import HomeHeader from '../components/HomeHeader';
 
-
+import { WebView } from 'react-native-webview';
 import BottomNav from '../components/BottomNav';
 import useCameraData from '../hooks/useCameraData';
 import ActivityLevelChart from '../components/ActivityLevelChart';
@@ -34,7 +34,7 @@ const { width } = Dimensions.get('window');
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 // Change 5000 to 3000 if using a proxy, or your PC's IP if on a physical device
-const VIDEO_STREAM_URL = `http://${HOST}:5000/api/video_feed`;
+const VIDEO_STREAM_URL = 'http://192.168.1.159:3000/api/video_feed';
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -49,7 +49,7 @@ const DecorativeCatEars = () => (
 export default function CameraScreen({ onNavigate, session }) {
   const [showSetupIntro, setShowSetupIntro] = useState(null); // null | true | false
   const [requireSetcamera, setRequireSetcamera] = useState(false);
-  const [cameraStatus, setCameraStatus] = useState('disconnected');
+  const [cameraStatus, setCameraStatus] = useState('connected');
   const [currentCamera, setCurrentCamera] = useState(1);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
   const [hasCriticalAlert, setHasCriticalAlert] = useState(false);
@@ -60,6 +60,7 @@ export default function CameraScreen({ onNavigate, session }) {
   const [environment, setEnvironment] = useState({ temperature: 25.4, humidity: 58 });
   const [proStats, setProStats] = useState({ ping: 42, bitrate: 1.2, fps: 30 });
   const [livePreviewUri, setLivePreviewUri] = useState(null);
+  const [stableStreamUrl] = useState(`${VIDEO_STREAM_URL}?t=${new Date().getTime()}`);
 
   const { data } = useCameraData(session, cameraStatus);
 
@@ -528,7 +529,45 @@ export default function CameraScreen({ onNavigate, session }) {
               <View style={styles.cameraContainer}>
                 <View style={styles.cameraFrame}>
                   {cameraStatus === 'connected' ? (
-                    <Image source={{ uri: VIDEO_STREAM_URL }} style={styles.livePreviewImage} resizeMode="cover" />
+                    Platform.OS === 'ios' ? (
+                      /* สำหรับ iOS: ใช้ Image ปกติ จะสตรีมได้ลื่นและไม่ติดบล็อกความปลอดภัย */
+                      <Image
+                        source={{ uri: stableStreamUrl }}
+                        style={styles.livePreviewImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      /* สำหรับ Android: ใช้ WebView ครอบ HTML เหมือนเดิม เพราะเสถียรกว่า */
+                      <WebView
+                        originWhitelist={['*']}
+                        source={{
+                          html: `
+                            <!DOCTYPE html>
+                            <html>
+                              <head>
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                                <style>
+                                  body { margin: 0; padding: 0; background-color: #E5E7EB; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+                                  img { width: 100%; height: 100%; object-fit: cover; }
+                                </style>
+                              </head>
+                              <body>
+                                <img src="${stableStreamUrl}" onerror="console.log('Image load failed')" />
+                              </body>
+                            </html>
+                          `,
+                          baseUrl: 'http://192.168.1.159:3000'
+                        }}
+                        style={styles.livePreviewImage}
+                        scrollEnabled={false}
+                        bounces={false}
+                        showsVerticalScrollIndicator={false}
+                        showsHorizontalScrollIndicator={false}
+                        mixedContentMode="always"
+                        javaScriptEnabled={true}
+                        domStorageEnabled={true}
+                      />
+                    )
                   ) : (
                     <View style={styles.videoPlaceholder}>
                       <Text style={styles.liveFeedLabel}>Live Feed</Text>
@@ -1032,6 +1071,7 @@ const styles = StyleSheet.create({
   livePreviewImage: {
     width: '100%',
     height: '100%',
+    resizeMode: 'cover',
     backgroundColor: '#E5E7EB',
   },
   liveFeedLabel: {

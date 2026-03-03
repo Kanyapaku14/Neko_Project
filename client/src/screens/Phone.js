@@ -25,7 +25,7 @@ import AlertEngine from '../services/AlertEngine';
 const { width } = Dimensions.get("window");
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-const VIDEO_STREAM_URL = `http://${HOST}:5000/api/video_feed`;
+const VIDEO_STREAM_URL = 'http://192.168.1.159:3000/api/video_feed';
 
 const BRANDS = [
     { id: "tapo", name: "TP-Link Tapo", icon: "link-variant" },
