@@ -1,10 +1,11 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response # <-- เพิ่ม Response ตรงนี้
 from flask_cors import CORS
 from google import genai
 from google.genai import types
 import os
 import json
 import traceback
+import cv2 # <-- เพิ่มไลบรารี OpenCV สำหรับดึงภาพกล้อง
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 # ป้องกันปัญหา SSL Certificate บน Windows
 os.environ['CURL_CA_BUNDLE'] = ''
 os.environ['SSL_CERT_FILE'] = ''
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 # โหลด Environment Variables จากไฟล์ .env ที่อยู่โฟลเดอร์นอกสุด
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -30,6 +32,9 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 app = Flask(__name__)
 CORS(app)
+
+# 🚨 กำหนด URL ของกล้อง
+RTSP_URL = "rtsp://testt1:1234test@192.168.1.145:554/stream2"
 
 try:
     print("⏳ กำลังเชื่อมต่อ Gemini...")
@@ -194,6 +199,41 @@ def build_disease_prompt(disease_name, cat_data):
 # =====================================================
 # 4. API ENDPOINTS
 # =====================================================
+
+# 🚨 เพิ่มฟังก์ชันสำหรับดึงภาพจากกล้องและส่งออกเป็น Stream
+def generate_camera_frames():
+    print(f"กำลังพยายามเชื่อมต่อกล้อง: {RTSP_URL}")
+    # ใช้ cv2.CAP_FFMPEG เพื่อให้รองรับ RTSP ได้ดีขึ้น
+    cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
+    
+    if not cap.isOpened():
+        print("❌ ERROR: ไม่สามารถเปิดกล้อง RTSP ได้ โปรดเช็ครหัสผ่าน หรือ IP กล้อง")
+        return
+
+    print("✅ เชื่อมต่อกล้องสำเร็จ! กำลังเริ่มสตรีม...")
+    while True:
+        success, frame = cap.read()
+        if not success:
+            print("⚠️ สัญญาณภาพขาดหาย กำลังลองใหม่...")
+            time.sleep(1)
+            continue # ถ้าภาพหลุดให้ลองวนใหม่ ไม่หยุดสตรีม
+            
+        # แปลงภาพเป็น JPG
+        ret, buffer = cv2.imencode('.jpg', frame)
+        if not ret:
+            continue
+            
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+# 🚨 เพิ่ม Route สำหรับหน้าแอปมาดึงภาพไปแสดง
+@app.route('/api/video_feed')
+def video_feed():
+    # ใช้ Response ของ Flask เพื่อสตรีมข้อมูลออกไปต่อเนื่อง (mimetype='multipart/x-mixed-replace')
+    return Response(generate_camera_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
 @app.route('/api/assessment', methods=['POST'])
 def get_assessment():
     try:
@@ -328,4 +368,5 @@ def get_guidance():
 
 if __name__ == '__main__':
     print("🚀 Server is running on port 3000...")
-    app.run(host='0.0.0.0', port=3000, debug=True)
+    # เปิดการทำงานแบบ Threaded ให้ Flask รองรับการสตรีมพร้อมกับ Request อื่นๆ ได้
+    app.run(host='0.0.0.0', port=3000, debug=True, threaded=True)
