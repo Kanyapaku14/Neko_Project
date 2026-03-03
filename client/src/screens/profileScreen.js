@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
 // If you have icons, import them. For now using text placeholder or simple views for icons if needed.
-export default function ProfileScreen({ session, onBack, onNavigateToCatProfile }) {
+export default function ProfileScreen({ session, onBack, onNavigateToCatProfile, onComplete }) {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [username, setUsername] = useState('');
@@ -103,8 +103,10 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile 
                 {
                     text: "OK",
                     onPress: () => {
-                        // สั่งเปลี่ยนหน้า (กลับหน้าเดิม)
-                        if (onBack) {
+                        // สั่งเปลี่ยนหน้าไป onComplete ถ้าออกแบบไว้ หรือกลับหน้าเดิม
+                        if (onComplete) {
+                            onComplete();
+                        } else if (onBack) {
                             onBack();
                         }
                     }
