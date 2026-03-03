@@ -133,13 +133,12 @@ const CustomDropdown = ({ value, onValueChange }) => {
     );
 };
 
-
 const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) => {
     const { session, onBack, initialDate } = props;
     const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
 
     const {
-        foodType, consumeMeals, foodIntake, waterIntake, urineLevel, stoolLevel
+        foodType, consumeMeals, foodIntake, waterIntake, urineLevel, stoolLevel, catName
     } = state;
 
     const {
@@ -147,7 +146,6 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
     } = setters;
 
     // Simplified: No internal fetchCatId or handleSave needed as they are lifted to LogDaily
-
 
     const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34', textLabel: '#333' };
 
@@ -168,7 +166,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
 
                 <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingBottom: insets.bottom + 20 }]}>
                     <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#1A3B34', textAlign: 'center', marginBottom: 20 }}>
-                        How was <Text style={{ color: '#4CAF50' }}>Luna</Text> today
+                        How was <Text style={{ color: '#4CAF50' }}>{catName || "your cat"}</Text> today
                     </Text>
 
                     {/* Status Toggle */}
@@ -271,18 +269,18 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                     </View>
 
                     {/* --- Save Button --- */}
-                    <TouchableOpacity 
-                        style={{ 
-                            backgroundColor: (foodType && consumeMeals && foodIntake && waterIntake && urineLevel && stoolLevel) ? '#00796B' : '#4DB6AC', 
-                            borderRadius: 12, 
-                            height: 55, 
-                            flexDirection: 'row', 
-                            justifyContent: 'center', 
-                            alignItems: 'center', 
+                    <TouchableOpacity
+                        style={{
+                            backgroundColor: (foodType && consumeMeals && foodIntake && waterIntake && urineLevel && stoolLevel) ? '#00796B' : '#4DB6AC',
+                            borderRadius: 12,
+                            height: 55,
+                            flexDirection: 'row',
+                            justifyContent: 'center',
+                            alignItems: 'center',
                             marginBottom: 20,
                             opacity: (foodType && consumeMeals && foodIntake && waterIntake && urineLevel && stoolLevel) ? 1 : 0.7
-                        }} 
-                        onPress={handleSave} 
+                        }}
+                        onPress={handleSave}
                         disabled={loading}
                     >
                         <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#fff', marginRight: 8 }}>{loading ? "Saving..." : "Save Event"}</Text>
@@ -294,8 +292,6 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
     );
 };
 
-
-
 const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loading }) => {
     const { session, onBack, initialDate } = props;
     const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
@@ -305,7 +301,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
         isVomitChecked, vomitColor,
         isDiarrheaChecked, diarrheaColor,
         behaviorTags, respiratoryTags,
-        notes
+        notes, catName
     } = state;
 
     const {
@@ -323,9 +319,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
         }
     };
 
-
     // Simplified: No internal catId or handleSave needed as they are lifted to LogDaily
-
 
     const theme = { cardBg: '#FFFDFB', borderColor: '#E8DED6', textDark: '#D46B13', textLabel: '#333' };
 
@@ -346,7 +340,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
 
                 <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingBottom: insets.bottom + 20 }]}>
                     <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#1A3B34', textAlign: 'center', marginBottom: 20 }}>
-                        How was <Text style={{ color: '#FBC02D' }}>Luna</Text> today
+                        How was <Text style={{ color: '#FBC02D' }}>{catName || "your cat"}</Text> today
                     </Text>
 
                     {/* Status Toggle */}
@@ -503,8 +497,8 @@ export default function LogDaily(props) {
     const { session, onBack, onNavigate, initialDate } = props;
 
     const [status, setStatus] = useState('Normal');
-
     const [catId, setCatId] = useState(null);
+    const [catName, setCatName] = useState('');
     const [loading, setLoading] = useState(false);
 
     // --- Normal State ---
@@ -525,16 +519,17 @@ export default function LogDaily(props) {
     const [notes, setNotes] = useState(null);
     const [hasSavedNormalData, setHasSavedNormalData] = useState(false); // Track if normal data exists in DB
 
-    useEffect(() => { 
+    useEffect(() => {
         if (session?.user) {
             fetchCatIdAndLog();
-        } 
+        }
     }, [session, initialDate]);
 
     const fetchCatIdAndLog = async () => {
-        const { data: catData } = await supabase.from('cats').select('id').eq('owner_id', session.user.id).single();
+        const { data: catData } = await supabase.from('cats').select('id, name').eq('owner_id', session.user.id).single();
         if (catData) {
             setCatId(catData.id);
+            setCatName(catData.name || 'your cat');
             await fetchExistingLog(catData.id);
         }
     };
@@ -563,13 +558,13 @@ export default function LogDaily(props) {
                 setConsumeMeals(normal.meals_per_day !== null && normal.meals_per_day !== undefined ? String(normal.meals_per_day) : '');
                 setFoodIntake(normal.total_food_grams !== null && normal.total_food_grams !== undefined ? String(normal.total_food_grams) : '');
                 setWaterIntake(normal.water_ml_per_day !== null && normal.water_ml_per_day !== undefined ? String(normal.water_ml_per_day) : '');
-                
+
                 const levelToNum = (lvl) => {
-                    if(lvl === 'very_high') return 5;
-                    if(lvl === 'high') return 4;
-                    if(lvl === 'normal') return 3;
-                    if(lvl === 'low') return 2;
-                    if(lvl === 'very_low') return 1;
+                    if (lvl === 'very_high') return 5;
+                    if (lvl === 'high') return 4;
+                    if (lvl === 'normal') return 3;
+                    if (lvl === 'low') return 2;
+                    if (lvl === 'very_low') return 1;
                     return null;
                 };
 
@@ -634,7 +629,6 @@ export default function LogDaily(props) {
                 .maybeSingle();
 
             if (checkError) throw checkError;
-
             // เช็คว่า normal_logs มีข้อมูลอยู่ข้างในไหม (ใน DB)
             const hasNormalInDB = existingData?.normal_logs && 
                                   (Array.isArray(existingData.normal_logs) ? existingData.normal_logs.length > 0 : Object.keys(existingData.normal_logs).length > 0);
@@ -665,7 +659,7 @@ export default function LogDaily(props) {
             setLoading(false);
         }
     };
-    
+
     const saveData = async () => {
         if (!catId) return Alert.alert("Error", "No cat profile found");
         setLoading(true);
@@ -719,7 +713,7 @@ export default function LogDaily(props) {
             if (isSomethingOffActive) {
                 const { error: offError } = await supabase
                     .from('something_off_logs')
-                    .upsert({  
+                    .upsert({
                         daily_log_id: dailyLog.id,
                         has_vomit: isVomitChecked,
                         vomit_type: isVomitChecked ? formatToEnum(vomitColor) : null,
@@ -754,7 +748,8 @@ export default function LogDaily(props) {
 
     const state = {
         foodType, consumeMeals, foodIntake, waterIntake, urineLevel, stoolLevel,
-        isVomitChecked, vomitColor, isDiarrheaChecked, diarrheaColor, behaviorTags, respiratoryTags, notes
+        isVomitChecked, vomitColor, isDiarrheaChecked, diarrheaColor, behaviorTags, respiratoryTags, notes,
+        catName
     };
 
     const setters = {

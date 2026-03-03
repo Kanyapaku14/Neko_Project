@@ -157,12 +157,12 @@ export default function TimelineScreen({ session, onBack }) {
                                                 </View>
                                                 <Text style={styles.cardDetail}>
 
-                                                    Appetite {log.normal_logs?.total_food_grams > 80 ? 'good' : 'fair'}, 
-                                                    energy levels {log.something_off_logs?.behavior_energy 
-                                                        ? (Array.isArray(log.something_off_logs.behavior_energy) 
-                                                            ? log.something_off_logs.behavior_energy.join(', ') 
+                                                    Appetite {log.normal_logs?.total_food_grams > 80 ? 'good' : 'fair'},
+                                                    energy levels {log.something_off_logs?.behavior_energy
+                                                        ? (Array.isArray(log.something_off_logs.behavior_energy)
+                                                            ? log.something_off_logs.behavior_energy.join(', ')
                                                             : log.something_off_logs.behavior_energy)
-                                                        : 'normal'}. 
+                                                        : 'normal'}.
 
                                                     {analysis.alerts.length > 0 ? `Issues: ${analysis.alerts.join(', ')}` : ' No issues reported.'}
                                                 </Text>
