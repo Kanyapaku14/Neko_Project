@@ -11,7 +11,8 @@ import {
   Image,
   Modal,
   FlatList,
-  ActivityIndicator
+  ActivityIndicator,
+  Platform
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -30,6 +31,10 @@ import PendingIdentityBanner from '../components/alert/PendingIdentityBanner';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
 
 const { width } = Dimensions.get('window');
+
+const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+// Change 5000 to 3000 if using a proxy, or your PC's IP if on a physical device
+const VIDEO_STREAM_URL = `http://${HOST}:5000/api/video_feed`;
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -490,8 +495,8 @@ export default function CameraScreen({ onNavigate, session }) {
               {/* Camera Section */}
               <View style={styles.cameraContainer}>
                 <View style={styles.cameraFrame}>
-                  {livePreviewUri ? (
-                    <Image source={{ uri: livePreviewUri }} style={styles.livePreviewImage} resizeMode="cover" />
+                  {cameraStatus === 'connected' ? (
+                    <Image source={{ uri: VIDEO_STREAM_URL }} style={styles.livePreviewImage} resizeMode="cover" />
                   ) : (
                     <View style={styles.videoPlaceholder}>
                       <Text style={styles.liveFeedLabel}>Live Feed</Text>
