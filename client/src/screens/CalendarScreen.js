@@ -21,12 +21,22 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December"
 ];
 
-export default function CalendarScreen({ onNavigate, session }) {
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState(new Date());
+export default function CalendarScreen({ onNavigate, session, initialDate }) {
+  // ถ้ามี initialDate ให้ใช้เป็นวันที่เริ่มต้น ไม่งั้นใช้วันนี้
+  const parseInitialDate = () => {
+    if (initialDate) {
+      const d = new Date(initialDate + 'T00:00:00'); // Force local time
+      return isNaN(d.getTime()) ? new Date() : d;
+    }
+    return new Date();
+  };
+
+  const [currentDate, setCurrentDate] = useState(parseInitialDate);
+  const [selectedDate, setSelectedDate] = useState(parseInitialDate);
   const [dailyLog, setDailyLog] = useState(null);
   const [loading, setLoading] = useState(false);
   const [catId, setCatId] = useState(null);
+
 
   // Fetch Cat ID first
   useEffect(() => {

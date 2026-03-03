@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, SafeAreaView, TouchableOpacity, Dimensions, ActivityIndicator } from 'react-native';
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from 'expo-linear-gradient';
 import BottomNav from "../components/BottomNav";
 import HealthTrendsChart from "../components/HealthTrendsChart";
 import HomeHeader from "../components/HomeHeader";
@@ -9,23 +10,106 @@ import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
 
+const { width } = Dimensions.get('window');
 
+// ==========================================
+// 🐾 Paw Progress Bar Component
+// ==========================================
+const PawProgressBar = ({ label, percent, color, icon }) => {
+  const clampedPercent = Math.max(0, Math.min(100, percent));
+  const pawCount = 5;
+  const filledPaws = Math.round((clampedPercent / 100) * pawCount);
+
+  const getBarColor = (pct) => {
+    if (pct >= 80) return '#4CAF50';
+    if (pct >= 60) return '#66BB6A';
+    if (pct >= 40) return '#FFA726';
+    if (pct >= 20) return '#EF5350';
+    return '#B0BEC5';
+  };
+
+  const barColor = color || getBarColor(clampedPercent);
+
+  return (
+    <View style={pawStyles.container}>
+      <View style={pawStyles.labelRow}>
+        <View style={pawStyles.labelLeft}>
+          <MaterialCommunityIcons name={icon || "paw"} size={18} color={barColor} />
+          <Text style={pawStyles.label}>{label}</Text>
+        </View>
+        <Text style={[pawStyles.percentText, { color: barColor }]}>{clampedPercent}%</Text>
+      </View>
+      <View style={pawStyles.trackBackground}>
+        <LinearGradient
+          colors={[barColor, barColor + '99']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[pawStyles.trackFill, { width: `${clampedPercent}%` }]}
+        />
+        {/* Paw prints on the bar */}
+        <View style={pawStyles.pawRow}>
+          {Array.from({ length: pawCount }).map((_, i) => (
+            <MaterialCommunityIcons
+              key={i}
+              name="paw"
+              size={16}
+              color={i < filledPaws ? '#FFFFFF' : 'rgba(0,0,0,0.08)'}
+              style={pawStyles.pawIcon}
+            />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const pawStyles = StyleSheet.create({
+  container: { marginBottom: 18 },
+  labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  labelLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  label: { fontSize: 14, fontWeight: '600', color: '#2D4A47' },
+  percentText: { fontSize: 14, fontWeight: '700' },
+  trackBackground: {
+    height: 28,
+    backgroundColor: '#E8F0EE',
+    borderRadius: 14,
+    overflow: 'hidden',
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  trackFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 14,
+  },
+  pawRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    height: '100%',
+  },
+  pawIcon: {
+    transform: [{ rotate: '-15deg' }],
+  },
+});
 
 
 export default function Dashboard({ onBack, onNavigate, session }) {
-  // สมมติคะแนนรวม (ในอนาคตอาจจะดึงมาจาก Database)
   const [currentScore, setCurrentScore] = useState(null);
   const status = getHealthStatus(currentScore || 100);
 
-  // Chart data state
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState("7 DAY");
   const [userProfile, setUserProfile] = useState(null);
   
-  // States for PDF Export
   const [catDetails, setCatDetails] = useState(null);
   const [rawLogs, setRawLogs] = useState([]);
+  const [latestAlerts, setLatestAlerts] = useState([]);
+  const [latestRedFlags, setLatestRedFlags] = useState(0);
 
   useEffect(() => {
     if (session?.user) {
@@ -39,7 +123,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     try {
       setLoading(true);
 
-      // 0. Fetch User Profile
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
@@ -47,7 +130,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         .single();
       setUserProfile(profile);
 
-      // 1. หาข้อมูลแมวทั้งหมดของ User ไว้ทำ PDF
       const { data: catData, error: catError } = await supabase
         .from("cats")
         .select("*")
@@ -58,28 +140,22 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       if (catError || !catData) {
         console.log("No cat found");
         setLoading(false);
-        setCurrentScore(100); // ถ้าไม่มีแมว ให้เต็ม 100 ไปก่อน
+        setCurrentScore(100);
         return;
       }
       setCatDetails(catData);
 
       let daysLimit = selectedPeriod === "1 MONTH" ? 30 : 7;
 
-      // 2. ดึง Log ย้อนหลังตามช่วงเวลา พร้อมข้อมูลรายละเอียด
       const { data: logsData, error: logsError } = await supabase
         .from("daily_logs")
-
-        .select("*, normal_logs(*), something_off_logs(*)") 
-
+        .select("*, normal_logs(*), something_off_logs(*)")
         .eq("cat_id", catData.id)
         .order("log_date", { ascending: false })
         .limit(daysLimit);
 
       if (logsError) throw logsError;
 
-      // ====================================================
-      // 🎯 ส่วนคำนวณคะแนนเฉลี่ย 7 วัน (หัวใจสำคัญ)
-      // ====================================================
       const unifiedLogs = (logsData || []).map(log => {
         const details = log.log_type === 'something_off'
           ? (log.something_off_logs?.[0] || log.something_off_logs)
@@ -95,19 +171,27 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
       if (unifiedLogs.length > 0) {
         let totalScore = 0;
+        let allAlerts = [];
+        let totalRedFlags = 0;
 
         unifiedLogs.forEach(log => {
           const analysis = analyzeHealthLog(log);
           totalScore += analysis.score;
+          allAlerts = [...allAlerts, ...analysis.alerts];
+          totalRedFlags += analysis.redFlags;
         });
 
         const averageScore = Math.round(totalScore / unifiedLogs.length);
         setCurrentScore(averageScore);
+        // เก็บ alerts ล่าสุดไม่เกิน 3 รายการ (ไม่ซ้ำ)
+        setLatestAlerts([...new Set(allAlerts)].slice(0, 4));
+        setLatestRedFlags(totalRedFlags);
       } else {
         setCurrentScore(100);
+        setLatestAlerts([]);
+        setLatestRedFlags(0);
       }
 
-      // 3. เตรียมข้อมูลกราฟ
       const chartLogs = [...unifiedLogs].reverse();
 
       const labels = chartLogs.map((log) => {
@@ -115,10 +199,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         return `${date.getDate()}/${date.getMonth() + 1}`;
       });
 
-
       const foodData = chartLogs.map((log) => log.normal_logs?.total_food_grams || 0);
       const waterData = chartLogs.map((log) => log.normal_logs?.water_ml_per_day || 0);
-
 
       setChartData({
         labels: labels,
@@ -153,7 +235,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     }
 
     try {
-      const logsForExport = rawLogs.slice(0, 7); // เอาแค่ 7 วันล่าสุดเวลา Generate
+      const logsForExport = rawLogs.slice(0, 7);
       
       const rowsHTML = logsForExport.map((log) => {
         const dateObj = new Date(log.log_date);
@@ -162,7 +244,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         let typeText = log.log_type === 'normal' ? 'Normal' : 'Something Off';
         let color = log.log_type === 'normal' ? 'green' : 'orange';
 
-        // หาแค่ค่าคร่าวๆ ถ้ามี log_type something_off แสดงอาการ
         let summary = "-";
         if (log.log_type === 'something_off') {
            const issues = [];
@@ -292,9 +373,12 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
   const periods = ["7 DAY", "1 MONTH"];
 
+  // ==========================================
+  // 🎨 RENDER
+  // ==========================================
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
 
         {/* Header */}
         <HomeHeader
@@ -304,96 +388,125 @@ export default function Dashboard({ onBack, onNavigate, session }) {
           userProfile={userProfile}
         />
 
-        {/* ===== ส่วนแสดงผลคะแนน (คล้าย AssessmentScreen) ===== */}
-        {/* ===== ส่วนแสดงผลคะแนน (คล้าย AssessmentScreen) ===== */}
-        <View style={[styles.scoreContainer, { marginTop: 40 }]}>
+        {/* ===== 🐾 Health Score Circle ===== */}
+        <View style={styles.scoreSection}>
           {loading || currentScore === null ? (
-            <ActivityIndicator size="large" color="#4FD1C5" style={{ marginBottom: 20 }} />
+            <ActivityIndicator size="large" color="#4FD1C5" style={{ marginVertical: 40 }} />
           ) : (
             <>
-              <View style={[styles.scoreCircleLarge, { borderColor: status.color }]}>
-                <Text style={[styles.statusLabelLarge, { color: status.color }]}>{status.label}</Text>
-                <Text style={{ fontSize: 40, fontWeight: 'bold', color: status.color }}>{currentScore}</Text>
+              {/* Decorative paws around circle */}
+              <MaterialCommunityIcons name="paw" size={38} color="rgba(77,182,172,0.2)" style={{ position: 'absolute', top: 5, right: 30, transform: [{ rotate: '25deg' }] }} />
+              <MaterialCommunityIcons name="paw" size={30} color="rgba(77,182,172,0.15)" style={{ position: 'absolute', top: 40, left: 20, transform: [{ rotate: '-20deg' }] }} />
+              <MaterialCommunityIcons name="paw" size={34} color="rgba(77,182,172,0.18)" style={{ position: 'absolute', bottom: 25, right: 45, transform: [{ rotate: '40deg' }] }} />
+              <MaterialCommunityIcons name="paw" size={26} color="rgba(77,182,172,0.12)" style={{ position: 'absolute', bottom: 15, left: 40, transform: [{ rotate: '-30deg' }] }} />
+
+              <Text style={styles.scoreSectionLabel}>HEALTH STATUS</Text>
+
+              {/* Main Circle */}
+              <View style={[styles.mainCircle, { borderColor: status.color }]}>
+                <View style={[styles.mainCircleInner, { backgroundColor: status.color + '18' }]}>
+                  <Text style={[styles.mainCircleStatus, { color: status.color }]}>{status.label}</Text>
+                  <Text style={[styles.mainCircleScore, { color: status.color }]}>{currentScore}</Text>
+                </View>
               </View>
-              <Text style={[styles.statusDescBelow, { color: status.color }]}>{status.text}</Text>
+
+              <Text style={[styles.scoreSubtitle, { color: status.color }]}>{status.text}</Text>
+
+              {latestRedFlags > 0 && (
+                <View style={styles.redFlagRow}>
+                  <Ionicons name="warning" size={14} color="#EB5757" />
+                  <Text style={styles.redFlagRowText}>{latestRedFlags} Red Flag{latestRedFlags > 1 ? 's' : ''} detected</Text>
+                </View>
+              )}
+
+              <View style={styles.lastUpdateRow}>
+                <Ionicons name="time-outline" size={14} color="#8A9E99" />
+                <Text style={styles.lastUpdateText}>Last update today {new Date().getHours()}:{String(new Date().getMinutes()).padStart(2, '0')}</Text>
+              </View>
             </>
           )}
-
         </View>
 
         {/* ===== Latest Health Assessment ===== */}
         <View style={styles.assessmentCard}>
-          <Text style={styles.assessmentTitle}>Latest Health Assessment</Text>
-          <View style={styles.assessmentContent}>
-            <View style={styles.assessmentInfo}>
-              <Text style={styles.assessmentDate}>Oct 22 • <Text style={styles.assessmentRisk}>Moderate Risk</Text></Text>
-            </View>
-            <View style={styles.assessmentButtons}>
-              <TouchableOpacity
-                style={styles.viewResultButton}
-                onPress={() => onNavigate?.('Result')}
-              >
-                <Text style={styles.viewResultButtonText}>View Result</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.viewHistoryButton}
-                onPress={() => console.log('View History pressed')}
-              >
-                <Text style={styles.viewHistoryButtonText}>View History</Text>
-              </TouchableOpacity>
+          <View style={styles.assessmentCardRow}>
+            <MaterialCommunityIcons name="paw" size={32} color="rgba(255,255,255,0.25)" style={{ marginRight: 8 }} />
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.assessmentTitle}>Latest Health Assessment</Text>
+                <MaterialCommunityIcons name="clipboard-text-outline" size={20} color="rgba(255,255,255,0.6)" />
+              </View>
+              <Text style={styles.assessmentDate}>
+                {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} • {status.label}
+              </Text>
             </View>
           </View>
-        </View>
-
-        {/* ===== System Risk Analysis ===== */}
-        <View style={styles.riskAnalysisContainer}>
-          <View style={styles.riskAnalysisHeader}>
-            <Text style={styles.riskAnalysisTitle}>SYSTEM RISK ANALYSIS</Text>
-            <TouchableOpacity onPress={() => console.log('View Detail pressed')}>
-              <Text style={styles.viewDetailText}>View Detail</Text>
+          <View style={styles.assessmentButtons}>
+            <TouchableOpacity
+              style={styles.viewResultBtn}
+              onPress={() => onNavigate?.('Result')}
+            >
+              <Text style={styles.viewResultBtnText}>View Result</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.viewHistoryBtn}
+              onPress={() => onNavigate?.('Timeline')}
+            >
+              <Text style={styles.viewHistoryBtnText}>View History</Text>
             </TouchableOpacity>
           </View>
+        </View>
 
-          <View style={styles.riskAnalysisCard}>
-            {/* Activity Level */}
-            <View style={styles.riskItem}>
-              <Text style={styles.riskItemLabel}>Activity Level</Text>
-              <View style={styles.progressBarBackground}>
-                <View style={[styles.progressBarFill, { width: '45%', backgroundColor: '#2D4A47' }]} />
-              </View>
-            </View>
+        {/* ===== 🐾 System Risk Analysis (Paw Progress) ===== */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleRow}>
+            <MaterialCommunityIcons name="shield-check-outline" size={22} color="#2D4A47" />
+            <Text style={styles.sectionTitle}>System Risk Analysis</Text>
+          </View>
+          <TouchableOpacity onPress={() => console.log('View Detail pressed')}>
+            <Text style={styles.viewDetailLink}>View Detail</Text>
+          </TouchableOpacity>
+        </View>
 
-            {/* Litter Box Usage */}
-            <View style={styles.riskItem}>
-              <Text style={styles.riskItemLabel}>Litter Box Usage</Text>
-              <View style={styles.progressBarBackground}>
-                <View style={[styles.progressBarFill, { width: '85%', backgroundColor: '#2D4A47' }]} />
-              </View>
-            </View>
-
-            {/* Abnormal Posture Detection */}
-            <View style={styles.riskItem}>
-              <Text style={styles.riskItemLabel}>Abnormal Posture Detection</Text>
-              <View style={styles.progressBarBackground}>
-                <View style={[styles.progressBarFill, { width: '5%', backgroundColor: '#2D4A47' }]} />
-              </View>
-            </View>
-
-            <Text style={styles.riskAnalysisFooter}>Based on the last 7 days of activity</Text>
+        <View style={styles.riskCard}>
+          <PawProgressBar
+            label="Activity Level"
+            percent={45}
+            icon="run"
+          />
+          <PawProgressBar
+            label="Litter Box Usage"
+            percent={85}
+            icon="emoticon-poop"
+          />
+          <PawProgressBar
+            label="Abnormal Posture"
+            percent={5}
+            icon="alert-outline"
+          />
+          <View style={styles.riskFooter}>
+            <MaterialCommunityIcons name="clock-outline" size={14} color="#8A9E99" />
+            <Text style={styles.riskFooterText}>Based on the last {selectedPeriod === '1 MONTH' ? '30' : '7'} days of activity</Text>
           </View>
         </View>
 
+        {/* ===== 📊 Health Trends Chart ===== */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleRow}>
+            <MaterialCommunityIcons name="chart-line" size={22} color="#2D4A47" />
+            <Text style={styles.sectionTitle}>Health Trends</Text>
+          </View>
+        </View>
 
-
-        {/* ===== Health Trends Chart ===== */}
-        <Text style={styles.sectionTitle}>Health Trends</Text>
         <View style={styles.chartCard}>
           <View style={styles.chartHeader}>
             <View style={styles.tagsContainer}>
               <View style={[styles.tag, styles.tagFood]}>
+                <MaterialCommunityIcons name="food-drumstick" size={14} color="#fff" style={{ marginRight: 4 }} />
                 <Text style={styles.tagText}>Food</Text>
               </View>
               <View style={[styles.tag, styles.tagWater]}>
+                <MaterialCommunityIcons name="water" size={14} color="#fff" style={{ marginRight: 4 }} />
                 <Text style={styles.tagText}>Water</Text>
               </View>
             </View>
@@ -429,60 +542,40 @@ export default function Dashboard({ onBack, onNavigate, session }) {
           </View>
         </View>
 
-        {/* ===== Timeline & Export Buttons ===== */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 16, marginBottom: 24 }}>
+        {/* ===== 🔘 Action Buttons ===== */}
+        <View style={styles.actionRow}>
           <TouchableOpacity
-            style={{
-              flex: 1,
-              backgroundColor: '#B8D8D4',
-              borderRadius: 24,
-              paddingVertical: 14,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.1,
-              shadowRadius: 4,
-              elevation: 3
-            }}
+            style={styles.actionButton}
             onPress={() => onNavigate && onNavigate('Timeline')}
+            activeOpacity={0.8}
           >
-            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#2D4A47', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
-              <MaterialCommunityIcons name="chart-timeline-variant" size={20} color="#fff" />
-            </View>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#2D4A47' }}>Timeline</Text>
+            <LinearGradient
+              colors={['#2D5A4E', '#3D7A6A']}
+              style={styles.actionGradient}
+            >
+              <MaterialCommunityIcons name="chart-timeline-variant" size={22} color="#fff" />
+              <Text style={styles.actionText}>Timeline</Text>
+            </LinearGradient>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={{
-              flex: 1,
-              backgroundColor: '#B8D8D4',
-              borderRadius: 24,
-              paddingVertical: 14,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.1,
-              shadowRadius: 4,
-              elevation: 3
-            }}
+            style={styles.actionButton}
             onPress={handleExportPDF}
+            activeOpacity={0.8}
           >
-            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#2D4A47', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
-              <MaterialCommunityIcons name="export-variant" size={20} color="#fff" />
-            </View>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#2D4A47' }}>Export</Text>
+            <LinearGradient
+              colors={['#2D5A4E', '#3D7A6A']}
+              style={styles.actionGradient}
+            >
+              <MaterialCommunityIcons name="file-export-outline" size={22} color="#fff" />
+              <Text style={styles.actionText}>Export PDF</Text>
+            </LinearGradient>
           </TouchableOpacity>
         </View>
 
-
-
       </ScrollView>
 
-      {/* ===== Bottom Nav ===== */}
+      {/* Bottom Nav */}
       <BottomNav
         current="Overview"
         onNavigate={onNavigate}
@@ -491,117 +584,217 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   );
 }
 
-// ===== Styles เฉพาะหน้า Dashboard =====
+// ===== Styles =====
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F5F7FA', // สีพื้นหลังเทาอ่อนๆ สบายตา
+    backgroundColor: '#F0F5F3',
   },
   scrollContainer: {
-
     padding: 20,
-    paddingBottom: 100, // Increased for BottomNav
+    paddingBottom: 100,
   },
-  // Style ส่วนคะแนนใหม่ (New Circular Design)
-  scoreContainer: {
+
+  // ===== Score Circle Section =====
+  scoreSection: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginTop: 30,
+    marginBottom: 28,
+    position: 'relative',
+    paddingVertical: 10,
   },
-  scoreCircleLarge: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    borderWidth: 14,
+  scoreSectionLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8A9E99',
+    letterSpacing: 2,
+    marginBottom: 16,
+  },
+  mainCircle: {
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    borderWidth: 6,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff', // พื้นหลังวงกลมเป็นสีขาว
-    marginBottom: 16,
-    shadowColor: "#000",
+    backgroundColor: '#F0F5F3',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  mainCircleInner: {
+    width: 156,
+    height: 156,
+    borderRadius: 78,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mainCircleStatus: {
+    fontSize: 26,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  mainCircleScore: {
+    fontSize: 36,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  scoreSubtitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 14,
+  },
+  redFlagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    backgroundColor: '#FFF0F0',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  redFlagRowText: {
+    fontSize: 13,
+    color: '#EB5757',
+    fontWeight: '600',
+  },
+  lastUpdateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 10,
+    backgroundColor: '#F0F5F3',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  lastUpdateText: {
+    fontSize: 12,
+    color: '#8A9E99',
+  },
+
+  // ===== Assessment Card =====
+  assessmentCard: {
+    backgroundColor: '#1A3B34',
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 24,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
     elevation: 5,
   },
-  statusLabelLarge: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    textAlign: 'center',
+  assessmentCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
   },
-  statusDescBelow: {
-    fontSize: 24,
-    fontWeight: '600',
-    marginBottom: 4,
-    textAlign: 'center',
+  assessmentTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  assessmentDate: {
+    fontSize: 14,
+    color: '#B8D8D4',
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  assessmentButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  viewResultBtn: {
+    flex: 1,
+    backgroundColor: '#B8D8D4',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  viewResultBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#2D4A47',
+  },
+  viewHistoryBtn: {
+    flex: 1,
+    backgroundColor: '#2D4A47',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  viewHistoryBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 
-  // Style หัวข้อ section
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
-    marginLeft: 4,
-  },
-  // Style กล่องเปล่าๆ (Placeholder Styles)
-  emptyBoxLarge: {
-    height: 200,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-    borderStyle: 'dashed', // เส้นประ
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  emptyBoxMedium: {
-    height: 120,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-    borderStyle: 'dashed',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  emptyBoxContainer: {
+  // ===== Section Headers =====
+  sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  emptyBoxSmall: {
-    width: '48%', // แบ่งครึ่ง
-    height: 100,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-    borderStyle: 'dashed',
-    justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 12,
+    marginTop: 4,
   },
-  placeholderText: {
-    fontSize: 16,
-    color: '#BDBDBD',
-    fontWeight: 'bold',
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  placeholderSubText: {
-    fontSize: 12,
-    color: '#BDBDBD',
-    marginTop: 8,
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2D4A47',
   },
-  // Chart card styles
-  chartCard: {
-    backgroundColor: '#334e4bff',
-    borderRadius: 16,
-    padding: 16,
+  viewDetailLink: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+
+  // ===== Risk Card =====
+  riskCard: {
+    backgroundColor: '#B8D8D4',
+    borderRadius: 20,
+    padding: 20,
     marginBottom: 24,
-    shadowColor: "#000",
+    shadowColor: "#2D4A47",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  riskFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E8F0EE',
+  },
+  riskFooterText: {
+    fontSize: 12,
+    color: '#8A9E99',
+    fontStyle: 'italic',
+  },
+
+  // ===== Chart =====
+  chartCard: {
+    backgroundColor: '#1A3B34',
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 24,
+    shadowColor: "#1A3B34",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 6,
   },
   chartHeader: {
     flexDirection: 'row',
@@ -614,8 +807,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderRadius: 12,
   },
   tagFood: {
@@ -626,152 +821,63 @@ const styles = StyleSheet.create({
   },
   tagText: {
     color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '600',
   },
   periodContainer: {
     flexDirection: 'row',
     justifyContent: 'flex-start',
-    marginTop: 12,
-    gap: 4,
+    marginTop: 14,
+    gap: 6,
   },
   periodButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 7,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
-    minWidth: 80,
+    minWidth: 85,
   },
   periodButtonActive: {
     backgroundColor: '#FFFFFF',
   },
   periodText: {
-    fontSize: 10,
-    color: '#FFFFFF',
-    fontWeight: '500',
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '600',
   },
   periodTextActive: {
-    color: '#2D4A47',
-    fontWeight: '700',
+    color: '#1A3B34',
+    fontWeight: '800',
   },
-  // Latest Health Assessment styles
-  assessmentCard: {
-    backgroundColor: '#5F7671',
-    borderRadius: 16,
-    padding: 20,
+
+  // ===== Action Buttons =====
+  actionRow: {
+    flexDirection: 'row',
+    gap: 14,
     marginBottom: 24,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
+  },
+  actionButton: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: "#2D4A47",
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
-    elevation: 5,
+    elevation: 4,
   },
-  assessmentTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 12,
-  },
-  assessmentContent: {
-    flexDirection: 'column',
-    gap: 12,
-  },
-  assessmentInfo: {
-    marginBottom: 8,
-  },
-  assessmentDate: {
-    fontSize: 16,
-    color: '#B8D8D4',
-    fontWeight: '600',
-  },
-  assessmentRisk: {
-    color: '#E0E0E0',
-    fontWeight: '400',
-  },
-  assessmentButtons: {
+  actionGradient: {
     flexDirection: 'row',
-    gap: 12,
-  },
-  viewResultButton: {
-    flex: 1,
-    backgroundColor: '#B8D8D4',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
     alignItems: 'center',
-  },
-  viewResultButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#2D4A47',
-  },
-  viewHistoryButton: {
-    flex: 1,
-    backgroundColor: '#2D4A47',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  viewHistoryButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#ffffffff',
-  },
-  // System Risk Analysis styles
-  riskAnalysisContainer: {
-    marginBottom: 24,
-  },
-  riskAnalysisHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  riskAnalysisTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#2D4A47',
-  },
-  viewDetailText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2D4A47',
-  },
-  riskAnalysisCard: {
-    backgroundColor: '#B8D8D4',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
     borderRadius: 16,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  riskItem: {
-    marginBottom: 16,
-  },
-  riskItemLabel: {
+  actionText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#2D4A47',
-    marginBottom: 8,
-  },
-  progressBarBackground: {
-    height: 24,
-    backgroundColor: '#D8E8E5',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 12,
-  },
-  riskAnalysisFooter: {
-    fontSize: 14,
-    color: '#5F7671',
-    marginTop: 8,
-    fontStyle: 'italic',
+    fontWeight: '700',
+    color: '#fff',
   },
 });
