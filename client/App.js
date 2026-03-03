@@ -243,6 +243,7 @@ export default function App() {
         return <LogDailyNormal
           session={session}
           onBack={() => setAuthScreen('Home')}
+          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
           initialDate={screenParams?.date || null}
         />;
       }
@@ -250,6 +251,7 @@ export default function App() {
         return <CalendarScreen
           session={session}
           onNavigate={(screen) => setAuthScreen(screen)}
+          initialDate={screenParams?.date || null}
         />;
       }
       if (currentScreenName === 'Result') {
@@ -365,6 +367,7 @@ export default function App() {
       }
       // Default Home
       return <HomeScreen
+        session={session}
         onLogout={handleSignOut}
         onLogDaily={() => setAuthScreen('LogDaily')}
         onAssess={() => setAuthScreen('Result')}
