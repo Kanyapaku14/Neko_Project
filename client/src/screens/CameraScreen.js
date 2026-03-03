@@ -48,6 +48,7 @@ const DecorativeCatEars = () => (
 
 export default function CameraScreen({ onNavigate, session }) {
   const [showSetupIntro, setShowSetupIntro] = useState(null); // null | true | false
+  const [requireSetcamera, setRequireSetcamera] = useState(false);
   const [cameraStatus, setCameraStatus] = useState('disconnected');
   const [currentCamera, setCurrentCamera] = useState(1);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
@@ -130,8 +131,37 @@ export default function CameraScreen({ onNavigate, session }) {
   useEffect(() => {
     const fetchStatusAndSetup = async () => {
       try {
-        // Check for setup completion to prevent setup loop
         const hasSetup = await AsyncStorage.getItem('camera_setup_complete');
+        let hasValidSource = false;
+        const storedCameraId = await AsyncStorage.getItem('camera_id');
+        let cameraId = storedCameraId;
+
+        if (!cameraId && session?.user?.id) {
+          const { data: latestCamera } = await supabase
+            .from('cameras')
+            .select('id, stream_source')
+            .eq('owner_id', session.user.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (latestCamera?.id) {
+            cameraId = latestCamera.id;
+            await AsyncStorage.setItem('camera_id', cameraId);
+            hasValidSource = Boolean((latestCamera.stream_source || '').trim());
+          }
+        }
+
+        if (cameraId && !hasValidSource && session?.user?.id) {
+          const { data: camRow } = await supabase
+            .from('cameras')
+            .select('stream_source')
+            .eq('id', cameraId)
+            .eq('owner_id', session.user.id)
+            .maybeSingle();
+          hasValidSource = Boolean((camRow?.stream_source || '').trim());
+        }
+
+        setRequireSetcamera(!hasValidSource);
         setShowSetupIntro(prev => {
           const shouldShow = hasSetup !== 'true';
           // Prevent unnecessary re-renders if the value is the same
@@ -140,8 +170,10 @@ export default function CameraScreen({ onNavigate, session }) {
 
         // Check for camera connection status
         const storedStatus = await AsyncStorage.getItem('camera_status');
-        if (storedStatus) {
+        if (storedStatus && hasValidSource) {
           setCameraStatus((prev) => (prev !== storedStatus ? storedStatus : prev));
+        } else if (!hasValidSource) {
+          setCameraStatus('disconnected');
         }
       } catch (e) {
         console.error("Failed to fetch status from storage:", e);
@@ -259,11 +291,11 @@ export default function CameraScreen({ onNavigate, session }) {
 
   const toggleCamera = () => {
     // Return to the Phone intro/setup page
-    onNavigate('Phone', { initialStep: 'intro' });
+    onNavigate('Setcamera');
   };
 
   // Button Press Animation Helper
-  const ButtonScale = ({ children, onPress, style }) => {
+  const ButtonScale = ({ children, onPress, style, disabled = false }) => {
     const scaleValue = useRef(new Animated.Value(1)).current;
 
     const onPressIn = () => {
@@ -275,11 +307,11 @@ export default function CameraScreen({ onNavigate, session }) {
 
     return (
       <AnimatedTouchableOpacity
-        activeOpacity={0.9}
-        onPress={onPress}
+        activeOpacity={disabled ? 1 : 0.9}
+        onPress={disabled ? undefined : onPress}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
-        style={[style, { transform: [{ scale: scaleValue }] }]}
+        style={[style, disabled && { opacity: 0.45 }, { transform: [{ scale: scaleValue }] }]}
       >
         {children}
       </AnimatedTouchableOpacity>
@@ -400,8 +432,8 @@ export default function CameraScreen({ onNavigate, session }) {
     </View>
   );
 
-  if (showSetupIntro) {
-    return <CameraSetupIntro onSetup={() => onNavigate('Phone')} onMaybeLater={() => onNavigate('Home')} />;
+  if (showSetupIntro && !requireSetcamera) {
+    return <CameraSetupIntro onSetup={() => onNavigate('Setcamera')} onMaybeLater={() => onNavigate('Home')} />;
   }
 
   const modeDisplay = data.settings?.monitoringMode
@@ -1753,13 +1785,20 @@ const styles = StyleSheet.create({
   },
   setupCardButton: {
     backgroundColor: '#0F766E',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
+    borderColor: '#0F766E',
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    shadowColor: '#0F766E',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    elevation: 2,
   },
   setupCardButtonText: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
   },
   // New styles from user
@@ -1798,5 +1837,56 @@ const styles = StyleSheet.create({
     color: '#90A4AE',
     marginLeft: 5,
     fontFamily: 'Inter-Medium',
+  },
+  requireSetcameraOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 150,
+    bottom: 240,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    zIndex: 40,
+  },
+  requireSetcameraCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+    alignItems: 'center',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  requireSetcameraTitle: {
+    marginTop: 10,
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  requireSetcameraText: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#475569',
+    textAlign: 'center',
+  },
+  requireSetcameraButton: {
+    marginTop: 14,
+    backgroundColor: '#0F766E',
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  requireSetcameraButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

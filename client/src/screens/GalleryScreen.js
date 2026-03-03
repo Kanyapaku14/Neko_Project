@@ -35,6 +35,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     const insets = useSafeAreaInsets();
     const columnCount = getResponsiveColumns(screenWidth);
     const imageSize = (screenWidth - (GRID_PADDING * 2) - (GRID_GAP * (columnCount - 1))) / columnCount;
+    const scopedSavedKey = `${SAVED_STORAGE_KEY}:${session?.user?.id || 'anonymous'}`;
 
     const [images, setImages] = useState([]);
     const [selectedImage, setSelectedImage] = useState(null);
@@ -52,21 +53,31 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     const [showStatsModal, setShowStatsModal] = useState(false);
 
     useEffect(() => {
+        setSavedSnapshots([]);
         loadSavedSnapshots();
-    }, []);
+    }, [scopedSavedKey]);
 
     useEffect(() => {
-        loadImages();
-        fetchDailyStats();
-        fetchUserProfile();
+        let cancelled = false;
+        const bootstrap = async () => {
+            await AlertEngine.setScope(session?.user?.id || 'anonymous');
+            if (cancelled) return;
+            loadImages();
+            fetchDailyStats();
+            fetchUserProfile();
+        };
+        bootstrap();
 
         const handler = () => {
             loadImages();
             fetchDailyStats();
         };
         AlertEngine.on(AlertEvents.UPDATED, handler);
-        return () => AlertEngine.off(AlertEvents.UPDATED, handler);
-    }, [session]);
+        return () => {
+            cancelled = true;
+            AlertEngine.off(AlertEvents.UPDATED, handler);
+        };
+    }, [session?.user?.id]);
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -102,7 +113,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
 
     const persistSavedSnapshots = async (items) => {
         try {
-            await AsyncStorage.setItem(SAVED_STORAGE_KEY, JSON.stringify(items));
+            await AsyncStorage.setItem(scopedSavedKey, JSON.stringify(items));
         } catch (e) {
             console.error('Failed to save gallery snapshots', e);
         }
@@ -110,7 +121,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
 
     const loadSavedSnapshots = async () => {
         try {
-            const raw = await AsyncStorage.getItem(SAVED_STORAGE_KEY);
+            const raw = await AsyncStorage.getItem(scopedSavedKey);
             if (!raw) return;
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
