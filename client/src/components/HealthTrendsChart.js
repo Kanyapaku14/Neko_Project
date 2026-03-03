@@ -72,7 +72,7 @@ export default function HealthTrendsChart({ data }) {
               y1={y}
               x2={CHART_WIDTH - PADDING}
               y2={y}
-              stroke="rgba(255, 255, 255, 0.1)"
+              stroke="#d8d8d8ff"
               strokeWidth="1"
             />
           );
@@ -81,7 +81,7 @@ export default function HealthTrendsChart({ data }) {
         {/* Food line (Purple) */}
         <Path
           d={foodPath}
-          stroke="rgba(134, 65, 244, 1)"
+          stroke="rgba(244, 119, 24, 1)"
           strokeWidth="2"
           fill="none"
         />
@@ -89,7 +89,7 @@ export default function HealthTrendsChart({ data }) {
         {/* Water line (Cyan) */}
         <Path
           d={waterPath}
-          stroke="rgba(31, 179, 168, 1)"
+          stroke="rgba(75, 78, 251, 1)"
           strokeWidth="2"
           fill="none"
         />
@@ -104,8 +104,8 @@ export default function HealthTrendsChart({ data }) {
               cx={x}
               cy={y}
               r="4"
-              fill="rgba(134, 65, 244, 1)"
-              stroke="#2D4A47"
+              fill="rgba(235, 113, 52, 1)"
+              stroke="#b32100ff"
               strokeWidth="2"
             />
           );
@@ -121,8 +121,8 @@ export default function HealthTrendsChart({ data }) {
               cx={x}
               cy={y}
               r="4"
-              fill="rgba(31, 179, 168, 1)"
-              stroke="#2D4A47"
+              fill="rgba(21, 17, 123, 1)"
+              stroke="#304c9dff"
               strokeWidth="2"
             />
           );
@@ -137,7 +137,7 @@ export default function HealthTrendsChart({ data }) {
               x={x}
               y={CHART_HEIGHT - 5}
               fontSize="10"
-              fill="rgba(255, 255, 255, 0.7)"
+              fill="#000000"
               textAnchor="middle"
             >
               {label}

@@ -14,7 +14,34 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
     const [isGenderDropdownOpen, setIsGenderDropdownOpen] = useState(false);
     const [isNeutered, setIsNeutered] = useState('Yes'); // Yes, No
     const [breed, setBreed] = useState('');
+    const [isBreedDropdownOpen, setIsBreedDropdownOpen] = useState(false);
+    const [breedSearchQuery, setBreedSearchQuery] = useState('');
     const [currentWeight, setCurrentWeight] = useState('');
+
+    const catBreeds = [
+        "British Shorthair: (บริติช ช็อตแฮร์)",
+        "Persian: (เปอร์เซีย)",
+        "Scottish Fold: (สกอตติช โฟลด์)",
+        "Ragdoll: (แร็กดอลล์)",
+        "American Shorthair: (อเมริกัน ช็อตแฮร์)",
+        "Maine Coon: (เมนคูน)",
+        "Sphynx: (สฟิงซ์)",
+        "Exotic Shorthair: (เอ็กโซติก)",
+        "Wichien Maat: (วิเชียรมาศ)",
+        "Korat / Si Sawat: (โคราช หรือ สีสวาด)",
+        "Khao Manee: (ขาวมณี)",
+        "Suphalak: (ศุภลักษณ์)",
+        "Konja: (โกนจา)",
+        "Bengal: (เบงกอล)",
+        "Munchkin: (มั้นช์กิน)",
+        "Abyssinian: (อะบิสซิเนียน)",
+        "Russian Blue: (รัสเซียนบลู)",
+        "Mixed Breed: (พันธุ์ผสม)",
+        "Domestic Shorthair (DSH): (แมวบ้านขนสั้น)",
+        "Domestic Longhair (DLH): (แมวบ้านขนยาว)"
+    ];
+
+    const filteredBreeds = catBreeds.filter(b => b.toLowerCase().includes(breedSearchQuery.toLowerCase()));
     const [baselineWeight, setBaselineWeight] = useState('');
     const [activityLevel, setActivityLevel] = useState('Normal'); // Low, Normal, High
     const [loading, setLoading] = useState(false);
@@ -344,14 +371,63 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
                     </View>
 
                     {/* Breed */}
-                    <View style={styles.inputGroup}>
+                    <View style={[styles.inputGroup, { zIndex: 2000 }]}>
                         <Text style={styles.labelprofile}>Breed</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={breed}
-                            onChangeText={setBreed}
-                            placeholder="Breed"
-                        />
+                        <View style={{ width: '100%', position: 'relative' }}>
+                            <TouchableOpacity
+                                activeOpacity={0.8}
+                                onPress={() => setIsBreedDropdownOpen(!isBreedDropdownOpen)}
+                                style={[styles.input, { 
+                                    flexDirection: 'row',
+                                     justifyContent: 'space-between',
+                                      alignItems: 'center',
+                                       width: '80%',
+                                    paddingHorizontal: 15, 
+                                    height: 50 }]}
+                            >
+                                <Text
+                                    style={{ fontSize: 16, color: breed ? '#333' : '#999', flexShrink: 1, paddingRight: 8 }}
+                                    numberOfLines={1}
+                                    ellipsizeMode="tail"
+                                >
+                                    {breed || "Select Breed"}
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#666' }}>{isBreedDropdownOpen ? "▲" : "▼"}</Text>
+                            </TouchableOpacity>
+
+                            {isBreedDropdownOpen && (
+                                <View style={{ backgroundColor: '#fff', borderRadius: 10, marginTop: 5, borderWidth: 1, borderColor: '#eee', position: 'absolute', top: 50, left: 0, right: 0, zIndex: 3000, elevation: 5, maxHeight: 250 }}>
+                                    <View style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: '#eee' }}>
+                                        <TextInput
+                                            style={{ backgroundColor: '#f9f9f9', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, fontSize: 14 }}
+                                            placeholder="ค้นหาพันธุ์"
+                                            value={breedSearchQuery}
+                                            onChangeText={setBreedSearchQuery}
+                                        />
+                                    </View>
+                                    <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200 }}>
+                                        {filteredBreeds.map((item, index) => (
+                                            <TouchableOpacity
+                                                key={index}
+                                                style={{ padding: 12, borderBottomWidth: index === filteredBreeds.length - 1 ? 0 : 1, borderBottomColor: '#f0f0f0' }}
+                                                onPress={() => {
+                                                    setBreed(item);
+                                                    setIsBreedDropdownOpen(false);
+                                                    setBreedSearchQuery('');
+                                                }}
+                                            >
+                                                <Text style={{ fontSize: 14, color: breed === item ? '#2F6A62' : '#333' }}>
+                                                    {item}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                        {filteredBreeds.length === 0 && (
+                                            <Text style={{ padding: 12, color: '#999', textAlign: 'center' }}>ไม่พบสายพันธุ์</Text>
+                                        )}
+                                    </ScrollView>
+                                </View>
+                            )}
+                        </View>
                     </View>
                 </View>
 
