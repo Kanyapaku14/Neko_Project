@@ -40,7 +40,7 @@ try:
     if not SUPABASE_KEY:
         raise ValueError("หา SUPABASE_SERVICE_KEY ไม่พบ โปรดเช็คการตั้งค่าในไฟล์ .env")
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("✅ Supabase เชื่อมต่อสำเร็จ (โหมด Service Role)")
+    print("✅ Supabase เชื่อมต่อสำเร็จ")
 except Exception as e:
     print(f"❌ Error initializing services:")
     traceback.print_exc()

@@ -21,7 +21,7 @@ def generate_camera_frames():
         print("❌ [Camera Server] ERROR: ไม่สามารถเปิดกล้อง RTSP ได้ โปรดเช็ครหัสผ่าน หรือ IP กล้อง")
         return
 
-    print("✅ [Camera Server] เชื่อมต่อกล้องสำเร็จ! เริ่มสตรีม...")
+    print("✅ [Camera Server] เชื่อมต่อกล้องสำเร็จ!")
     while True:
         success, frame = cap.read()
         if not success:
