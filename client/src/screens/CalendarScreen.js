@@ -162,6 +162,21 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
     return new Date(year, month, 1).getDay();
   };
 
+  const getEventTheme = (type) => {
+    switch (type) {
+      case 'vet_visit':
+        return { color: '#007AFF', bg: 'rgba(0, 122, 255, 0.1)', icon: 'hospital-marker' };
+      case 'vaccination':
+        return { color: '#AF52DE', bg: 'rgba(175, 82, 222, 0.1)', icon: 'needle' };
+      case 'medication':
+        return { color: '#34C759', bg: 'rgba(52, 199, 89, 0.1)', icon: 'pill' };
+      case 'surgery':
+        return { color: '#FF9500', bg: 'rgba(255, 149, 0, 0.1)', icon: 'alert-decagram' };
+      default:
+        return { color: '#5856D6', bg: 'rgba(88, 86, 214, 0.1)', icon: 'medical-bag' };
+    }
+  };
+
   const renderCalendar = () => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
@@ -346,30 +361,41 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
             {/* Medical Events Section (Moved above button) */}
             {medicalEvents.length > 0 && (
               <View style={{ marginTop: 10 }}>
-                {medicalEvents.map((event) => (
-                  <View key={event.id} style={[styles.textLogContainer, { borderLeftWidth: 4, borderLeftColor: '#D32F2F', backgroundColor: 'rgba(211, 47, 47, 0.05)', marginBottom: 15 }]}>
-                    <View style={[styles.textLogRow, { justifyContent: 'space-between' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <MaterialCommunityIcons
-                          name={event.event_type === 'vaccine' ? 'needle' : event.event_type === 'medicine' ? 'pill' : 'hospital-marker'}
-                          size={20}
-                          color="#D32F2F"
-                        />
-                        <Text style={[styles.textLogLabel, { color: '#D32F2F', fontSize: 16 }]}>
-                          {event.event_type?.replace(/_/g, ' ')}
-                        </Text>
+                {medicalEvents.map((event) => {
+                  const theme = getEventTheme(event.event_type);
+                  return (
+                    <View key={event.id} style={[
+                      styles.textLogContainer,
+                      {
+                        borderLeftWidth: 5,
+                        borderLeftColor: theme.color,
+                      }
+                    ]}>
+                      <View style={[styles.textLogRow, { justifyContent: 'space-between', marginBottom: 4 }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <View style={[styles.eventIconCircle, { backgroundColor: theme.color }]}>
+                            <MaterialCommunityIcons
+                              name={theme.icon}
+                              size={18}
+                              color="#FFF"
+                            />
+                          </View>
+                          <Text style={[styles.textLogLabel, { color: theme.color, fontSize: 16, fontWeight: '700' }]}>
+                            {event.event_type?.replace(/_/g, ' ')}
+                          </Text>
+                        </View>
+                        {event.attachment_url && (
+                          <Ionicons name="image" size={20} color={theme.color} />
+                        )}
                       </View>
-                      {event.attachment_url && (
-                        <Ionicons name="image" size={18} color="#D32F2F" />
-                      )}
+                      {event.notes ? (
+                        <Text style={[styles.textLogValue, { fontSize: 15, marginTop: 4, color: '#2D3436', paddingLeft: 34 }]}>
+                          {event.notes}
+                        </Text>
+                      ) : null}
                     </View>
-                    {event.notes ? (
-                      <Text style={[styles.textLogValue, { fontSize: 14, marginTop: 5, color: '#444' }]}>
-                        {event.notes}
-                      </Text>
-                    ) : null}
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
 
@@ -436,30 +462,41 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
             {/* Medical Events Section (Moved above button) */}
             {medicalEvents.length > 0 && (
               <View style={{ marginTop: 10 }}>
-                {medicalEvents.map((event) => (
-                  <View key={event.id} style={[styles.textLogContainer, { borderLeftWidth: 4, borderLeftColor: '#D32F2F', backgroundColor: 'rgba(211, 47, 47, 0.05)', marginBottom: 15 }]}>
-                    <View style={[styles.textLogRow, { justifyContent: 'space-between' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <MaterialCommunityIcons
-                          name={event.event_type === 'vaccine' ? 'needle' : event.event_type === 'medicine' ? 'pill' : 'hospital-marker'}
-                          size={20}
-                          color="#D32F2F"
-                        />
-                        <Text style={[styles.textLogLabel, { color: '#D32F2F', fontSize: 16 }]}>
-                          {event.event_type?.replace(/_/g, ' ')}
-                        </Text>
+                {medicalEvents.map((event) => {
+                  const theme = getEventTheme(event.event_type);
+                  return (
+                    <View key={event.id} style={[
+                      styles.textLogContainer,
+                      {
+                        borderLeftWidth: 5,
+                        borderLeftColor: theme.color,
+                      }
+                    ]}>
+                      <View style={[styles.textLogRow, { justifyContent: 'space-between', marginBottom: 4 }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <View style={[styles.eventIconCircle, { backgroundColor: theme.color }]}>
+                            <MaterialCommunityIcons
+                              name={theme.icon}
+                              size={18}
+                              color="#FFF"
+                            />
+                          </View>
+                          <Text style={[styles.textLogLabel, { color: theme.color, fontSize: 16, fontWeight: '700' }]}>
+                            {event.event_type?.replace(/_/g, ' ')}
+                          </Text>
+                        </View>
+                        {event.attachment_url && (
+                          <Ionicons name="image" size={20} color={theme.color} />
+                        )}
                       </View>
-                      {event.attachment_url && (
-                        <Ionicons name="image" size={18} color="#D32F2F" />
-                      )}
+                      {event.notes ? (
+                        <Text style={[styles.textLogValue, { fontSize: 15, marginTop: 4, color: '#2D3436', paddingLeft: 34 }]}>
+                          {event.notes}
+                        </Text>
+                      ) : null}
                     </View>
-                    {event.notes ? (
-                      <Text style={[styles.textLogValue, { fontSize: 14, marginTop: 5, color: '#444' }]}>
-                        {event.notes}
-                      </Text>
-                    ) : null}
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
 
@@ -623,6 +660,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#147C78',
     marginLeft: 8,
+  },
+  eventIconCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   textLogValue: {
     fontSize: 14,

@@ -22,7 +22,7 @@ import supabase from './config/supabaseClient';
 const { width } = Dimensions.get('window');
 
 const AddMedical = ({ navigation, onBack, initialDate }) => {
-    const [eventType, setEventType] = useState('Vet Visit');
+    const [eventType, setEventType] = useState('vet_visit');
     const [notes, setNotes] = useState('');
     const [eventDate, setEventDate] = useState(initialDate ? new Date(initialDate) : new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
@@ -62,9 +62,9 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
     };
 
     const eventTypes = [
-        { id: 'Vet Visit', label: 'Vet Visit', icon: 'chatbubbles-outline', plus: true },
-        { id: 'Vaccine', label: 'Vaccine', icon: 'needle', type: 'material' },
-        { id: 'Medicine', label: 'Medicine', icon: 'pill', type: 'material' },
+        { id: 'vet_visit', label: 'Vet Visit', icon: 'chatbubbles-outline', plus: true },
+        { id: 'vaccination', label: 'Vaccine', icon: 'needle', type: 'material' },
+        { id: 'medication', label: 'Medicine', icon: 'pill', type: 'material' },
     ];
 
     const pickImage = async () => {
@@ -126,13 +126,11 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
             }
 
             // 2. Insert into medical_events table
-            const formattedEventType = eventType.toLowerCase().replace(/\s+/g, '_');
-
             const { error: insertError } = await supabase
                 .from('medical_events')
                 .insert({
                     cat_id: catId,
-                    event_type: formattedEventType,
+                    event_type: eventType,
                     event_date: eventDate.toISOString().split('T')[0],
                     notes: notes,
                     attachment_url: imageUrl,
@@ -152,7 +150,7 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
     };
 
     const renderIcon = (event) => {
-        if (event.id === 'Vet Visit') {
+        if (event.id === 'vet_visit') {
             return (
                 <View style={styles.iconWrapper}>
                     <Ionicons name="chatbubbles-outline" size={32} color={eventType === event.id ? '#FFF' : '#2D6A64'} />
