@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../screens/config/supabaseClient';
 import { analyzeHealthLog } from '../utils/healthLogic';
+import AlertEngine from '../services/AlertEngine';
 
 const CAMERA_ID_KEY = 'camera_id';
 
@@ -95,11 +96,12 @@ export default function useCameraData(session, cameraStatus) {
                 .eq('summary_date', today),
               supabase
                 .from('ai_cat_events')
-                .select('*')
+                .select('id, cat_id, camera_id, behavior_label, confidence, abnormal, occurred_at')
                 .eq('camera_id', storedCameraId)
                 .in('cat_id', selectedIds)
                 .gte('occurred_at', dayStartIso)
-                .order('occurred_at', { ascending: false }),
+                .order('occurred_at', { ascending: false })
+                .limit(200),
             ]);
 
             if (!summaryErr && !eventErr && (Array.isArray(summaries) || Array.isArray(events))) {
@@ -114,13 +116,91 @@ export default function useCameraData(session, cameraStatus) {
                 let litterCount = 0;
                 let abnormalCount = 0;
 
+                // การนับ รูบแบบ unique cat_id ที่พบใน events
+                const detectedCatIds = new Set();
+                const litterEventsByCat = {};
+
                 aiEvents.forEach((e) => {
                   const behavior = normalizeBehavior(e.behavior_label);
                   bins[hourBinIndex(e.occurred_at)] += 1;
                   if (behavior === 'eat') eatCount += 1;
-                  if (behavior === 'litter') litterCount += 1;
+                  if (behavior === 'litter') {
+                    litterCount += 1;
+                    const cid = e.cat_id || 'unknown';
+                    litterEventsByCat[cid] = (litterEventsByCat[cid] || 0) + 1;
+                  }
                   if (behavior === 'abnormal' || e.abnormal === true) abnormalCount += 1;
+                  if (e.cat_id) detectedCatIds.add(e.cat_id);
                 });
+
+                // กรณี DB มี cat_id ที่ events บอกว่าไม่ใช่แมวของ user
+                const unknownCatEvents = aiEvents.filter((e) => e.cat_id && !selectedIds.includes(e.cat_id));
+                if (selectedIds.length > 0 && unknownCatEvents.length > 0) {
+                  const unknownIds = [...new Set(unknownCatEvents.map((e) => e.cat_id))];
+                  // ดึง snapshot จาก ai_cat_identity_review
+                  const { data: reviewSnaps } = await supabase
+                    .from('ai_cat_identity_review')
+                    .select('snapshot_url, pred_cat_id, occurred_at')
+                    .eq('camera_id', storedCameraId)
+                    .eq('reviewed', false)
+                    .order('occurred_at', { ascending: false })
+                    .limit(20);
+
+                  if (selectedIds.length === 1 && unknownIds.length >= 2) {
+                    // กรณี DB มี 1 แมวแต่กล้องตรวจได้ 2+ cat_id
+                    // ขึ้น popup เดียวแสดง 2 รูปพร้อมกัน ให้เลือกว่าตัวไหนคือแมวเรา
+                    const multiSnapshots = unknownIds.slice(0, 2).map((uid) => {
+                      const evt = unknownCatEvents.find((e) => e.cat_id === uid);
+                      const snap = reviewSnaps?.find((r) => !r.pred_cat_id || r.pred_cat_id === uid);
+                      return {
+                        unknownCatId: uid,
+                        behaviorLabel: evt?.behavior_label || 'activity',
+                        confidence: evt?.confidence ?? 0.5,
+                        snapshot_url: snap?.snapshot_url || null,
+                      };
+                    });
+                    AlertEngine.logPendingIdentity({
+                      behaviorLabel: 'unknown',
+                      confidence: 0.5,
+                      cropSnapshot: multiSnapshots[0]?.snapshot_url || null,
+                      multiSnapshots,   // ← field ใหม่: array ของ 2 รูป
+                      sessionId: `dual_cat_${unknownIds.slice(0, 2).map(u => u.slice(0, 6)).join('_')}`,
+                      source: 'useCameraData_dual',
+                      isAbnormal: false,
+                    });
+                  } else {
+                    // กรณี DB มี 2+ แมว: ขึ้น popup แยกตาม cat_id
+                    unknownIds.slice(0, 3).forEach((unknownId) => {
+                      const sample = unknownCatEvents.find((e) => e.cat_id === unknownId);
+                      const snap = reviewSnaps?.find((r) =>
+                        !r.pred_cat_id || !selectedIds.includes(r.pred_cat_id)
+                      );
+                      AlertEngine.logPendingIdentity({
+                        behaviorLabel: sample?.behavior_label || 'activity',
+                        confidence: sample?.confidence ?? 0.5,
+                        cropSnapshot: snap?.snapshot_url || null,
+                        sessionId: `unknown_cat_${unknownId.slice(0, 8)}`,
+                        source: 'useCameraData_unknown',
+                        isAbnormal: false,
+                      });
+                    });
+                  }
+                }
+
+                // กรณี litter เยอะมาก (ตั้งแต่ 5 ครั้ง/วัน) → ถามว่าแมวตัวไหนใช้มากสุด
+                const LITTER_ALERT_THRESHOLD = 5;
+                if (litterCount >= LITTER_ALERT_THRESHOLD) {
+                  const topCatId = Object.entries(litterEventsByCat).sort((a, b) => b[1] - a[1])[0]?.[0];
+                  // ai_cat_events ไม่มี snapshot_url — ใช้ null หรือดึงจาก identity_review
+                  AlertEngine.logPendingIdentity({
+                    behaviorLabel: 'litter',
+                    confidence: 0.85,
+                    cropSnapshot: null,
+                    sessionId: `litter_alert_${toLocalDate()}`,
+                    source: 'litter_anomaly',
+                    isAbnormal: false,
+                  });
+                }
 
                 const maxBin = Math.max(1, ...bins);
                 newData.activity = [...bins.map((v) => Math.round((v / maxBin) * 100)), bins[3]];
@@ -155,19 +235,26 @@ export default function useCameraData(session, cameraStatus) {
                   totals: { feeding: totalFeed, litter: totalLitter },
                 };
 
-                newData.recentActivities = aiEvents.slice(0, 5).map((e, idx) => ({
-                  id: e.id || `evt_${idx}`,
-                  type: normalizeBehavior(e.behavior_label),
-                  time: new Date(e.occurred_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                  icon: normalizeBehavior(e.behavior_label) === 'eat'
-                    ? 'food'
-                    : normalizeBehavior(e.behavior_label) === 'litter'
-                      ? 'emoticon-poop'
-                      : normalizeBehavior(e.behavior_label) === 'sleep'
-                        ? 'sleep'
-                        : 'run',
-                  color: normalizeBehavior(e.behavior_label) === 'abnormal' ? '#EF4444' : '#00C8FF',
-                }));
+                // สร้าง recentActivities ด้วย icon/color ที่ถูกต้อง ครบทุก behavior
+                const behaviorDisplay = (b) => {
+                  switch (normalizeBehavior(b)) {
+                    case 'eat': return { label: 'Eating', icon: 'food-apple', color: '#81C784' };
+                    case 'litter': return { label: 'Litter Box', icon: 'emoticon-poop', color: '#BA68C8' };
+                    case 'sleep': return { label: 'Sleeping', icon: 'sleep', color: '#90A4AE' };
+                    case 'abnormal': return { label: 'Alert', icon: 'alert-circle', color: '#EF4444' };
+                    default: return { label: 'Activity', icon: 'run', color: '#FFB74D' };
+                  }
+                };
+                newData.recentActivities = aiEvents.slice(0, 8).map((e, idx) => {
+                  const disp = behaviorDisplay(e.behavior_label);
+                  return {
+                    id: e.id || `evt_${idx}`,
+                    type: disp.label,
+                    time: new Date(e.occurred_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    icon: disp.icon,
+                    color: disp.color,
+                  };
+                });
               }
             }
           }

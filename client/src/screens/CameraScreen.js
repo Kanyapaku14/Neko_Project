@@ -34,7 +34,7 @@ const { width } = Dimensions.get('window');
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 // 🚨 เปลี่ยน 192.168.1.159 เป็น IP จริงของคอมพิวเตอร์คุณเสมอ
-const VIDEO_STREAM_URL = 'http://192.168.1.159:5000/api/video_feed';
+const VIDEO_STREAM_URL = 'http://172.20.10.6:5000/api/video_feed';
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -62,11 +62,14 @@ export default function CameraScreen({ onNavigate, session }) {
   const [environment, setEnvironment] = useState({ temperature: 25.4, humidity: 58 });
   const [proStats, setProStats] = useState({ ping: 42, bitrate: 1.2, fps: 30 });
   const [livePreviewUri, setLivePreviewUri] = useState(null);
+  const [quickSummary, setQuickSummary] = useState({ eventsToday: 0, lastDetected: '--' });
+  // ดึง stream_source จาก DB (admin/backend ใส่ผ่าน backend) — ไม่แตะ camera connection logic
+  const [dbStreamUrl, setDbStreamUrl] = useState(null);
 
   // 🚨 ล็อค URL ไม่ให้ Re-render บ่อยเกินไป
   const [stableStreamUrl] = useState(`${VIDEO_STREAM_URL}?t=${new Date().getTime()}`);
 
-  const { data } = useCameraData(session, cameraStatus);
+  const { data, refetch } = useCameraData(session, cameraStatus);
 
   // Animations
   const bannerAnim = useRef(new Animated.Value(0)).current;
@@ -133,6 +136,13 @@ export default function CameraScreen({ onNavigate, session }) {
     return () => AlertEngine.off(AlertEvents.UPDATED, handler);
   }, []);
 
+  // \u0e1c\u0e39\u0e49\u0e43\u0e0a\u0e49\u0e43\u0e2b\u0e21\u0e48 (camera_setup_complete \u0e22\u0e31\u0e07\u0e44\u0e21\u0e48\u0e16\u0e39\u0e01 set) \u2192 \u0e2b\u0e19\u0e49\u0e32 Phone.js \u0e17\u0e31\u0e19\u0e17\u0e35
+  useEffect(() => {
+    if (showSetupIntro === true) {
+      onNavigate('Phone', { initialStep: 'intro' });
+    }
+  }, [showSetupIntro]);
+
   useEffect(() => {
     const fetchStatusAndSetup = async () => {
       try {
@@ -153,6 +163,8 @@ export default function CameraScreen({ onNavigate, session }) {
             cameraId = latestCamera.id;
             await AsyncStorage.setItem('camera_id', cameraId);
             hasValidSource = Boolean((latestCamera.stream_source || '').trim());
+            // เก็บ URL เพื่อใส่ใน WebView — ไม่เปลี่ยน connection logic
+            if (hasValidSource) setDbStreamUrl(latestCamera.stream_source.trim());
           }
         }
 
@@ -164,6 +176,8 @@ export default function CameraScreen({ onNavigate, session }) {
             .eq('owner_id', session.user.id)
             .maybeSingle();
           hasValidSource = Boolean((camRow?.stream_source || '').trim());
+          // เก็บ URL เพื่อใส่ใน WebView — ไม่เปลี่ยน connection logic
+          if (hasValidSource) setDbStreamUrl(camRow.stream_source.trim());
         }
 
         setRequireSetcamera(!hasValidSource);
@@ -279,10 +293,59 @@ export default function CameraScreen({ onNavigate, session }) {
     fetchCats();
   }, [session]);
 
+  // ดึง Quick Summary จาก DB (Events Today + Last Detected)
+  useEffect(() => {
+    const fetchQuickSummary = async () => {
+      if (cameraStatus !== 'connected' || !session?.user?.id) return;
+      try {
+        const cameraId = await AsyncStorage.getItem('camera_id');
+        if (!cameraId) return;
+
+        const dayStart = new Date();
+        dayStart.setHours(0, 0, 0, 0);
+
+        // Events today — นับจาก ai_cat_events ตาม camera_id
+        const { count } = await supabase
+          .from('ai_cat_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('camera_id', cameraId)
+          .gte('occurred_at', dayStart.toISOString());
+
+        // Last detected — ดึงจาก ai_cat_identity_review ที่ reviewed=true
+        const { data: lastReview } = await supabase
+          .from('ai_cat_identity_review')
+          .select('resolved_cat_id, occurred_at')
+          .eq('camera_id', cameraId)
+          .eq('reviewed', true)
+          .not('resolved_cat_id', 'is', null)
+          .order('occurred_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        let lastDetectedName = '--';
+        if (lastReview?.resolved_cat_id) {
+          const { data: catRow } = await supabase
+            .from('cats').select('name').eq('id', lastReview.resolved_cat_id).maybeSingle();
+          lastDetectedName = catRow?.name || '--';
+        }
+
+        setQuickSummary({ eventsToday: count ?? 0, lastDetected: lastDetectedName });
+      } catch (e) {
+        console.warn('quickSummary fetch error:', e?.message || e);
+      }
+    };
+    fetchQuickSummary();
+    const t = setInterval(fetchQuickSummary, 60000); // refresh ทุก 1 นาที
+    return () => clearInterval(t);
+  }, [cameraStatus, session]);
+
   const handleSelectCat = async (cat) => {
     setSelectedCat(cat);
     setShowCatSwitcher(false);
     await AsyncStorage.setItem('last_selected_cat_id', cat.id);
+    // เชื่อม filter ของ useCameraData — ห้ามแตะ camera selection logic
+    await AsyncStorage.setItem('camera_selectedCats', JSON.stringify([cat.id]));
+    refetch();
   };
 
   const toggleCamera = () => {
@@ -400,7 +463,8 @@ export default function CameraScreen({ onNavigate, session }) {
 
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-            {cameraStatus === 'disconnected' && <SetupPromptCard />}
+            {/* แสดง SetupPromptCard ถ้ายังไม่ได้ตั้งค่า stream_source (ไม่แตะ camera status) */}
+            {requireSetcamera && <SetupPromptCard />}
 
             <Animated.View style={{ opacity, transform: [{ translateY }] }}>
 
@@ -410,7 +474,7 @@ export default function CameraScreen({ onNavigate, session }) {
                   {cameraStatus === 'connected' ? (
                     <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#E5E7EB' }}>
                       <WebView
-                        source={{ uri: stableStreamUrl }}
+                        source={{ uri: dbStreamUrl || VIDEO_STREAM_URL }}
                         style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
                         scrollEnabled={false}
                         bounces={false}
@@ -423,7 +487,7 @@ export default function CameraScreen({ onNavigate, session }) {
                     </View>
                   ) : (
                     <View style={styles.videoPlaceholder}>
-                      <Text style={styles.liveFeedLabel}>Live Feed</Text>
+                      <Text style={styles.liveFeedLabel}>Connecting...</Text>
                     </View>
                   )}
 
@@ -478,7 +542,65 @@ export default function CameraScreen({ onNavigate, session }) {
                 </LinearGradient>
               </View>
 
-              {/* ... โค้ดส่วนอื่นๆ ปล่อยไว้เหมือนเดิม ไม่มีการเปลี่ยนแปลง */}
+              {/* Stream Stats Bar — ping/bitrate/fps จาก proStats + Quick Summary */}
+              {cameraStatus === 'connected' && (
+                <View style={styles.streamStatsBar}>
+                  <View style={styles.streamStatItem}>
+                    <MaterialCommunityIcons name="access-point" size={13} color="#00695C" />
+                    <Text style={styles.streamStatLabel}>Ping</Text>
+                    <Text style={styles.streamStatValue}>{Math.round(proStats.ping)}ms</Text>
+                  </View>
+                  <View style={styles.streamStatDivider} />
+                  <View style={styles.streamStatItem}>
+                    <MaterialCommunityIcons name="video" size={13} color="#00695C" />
+                    <Text style={styles.streamStatLabel}>Bitrate</Text>
+                    <Text style={styles.streamStatValue}>{proStats.bitrate.toFixed(1)} Mbps</Text>
+                  </View>
+                  <View style={styles.streamStatDivider} />
+                  <View style={styles.streamStatItem}>
+                    <MaterialCommunityIcons name="speedometer" size={13} color="#00695C" />
+                    <Text style={styles.streamStatLabel}>FPS</Text>
+                    <Text style={styles.streamStatValue}>{proStats.fps}</Text>
+                  </View>
+                  <View style={styles.streamStatDivider} />
+                  <View style={styles.streamStatItem}>
+                    <MaterialCommunityIcons name="calendar-today" size={13} color="#00695C" />
+                    <Text style={styles.streamStatLabel}>Events</Text>
+                    <Text style={styles.streamStatValue}>{quickSummary.eventsToday}</Text>
+                  </View>
+                  <View style={styles.streamStatDivider} />
+                  <View style={styles.streamStatItem}>
+                    <MaterialCommunityIcons name="paw" size={13} color="#00695C" />
+                    <Text style={styles.streamStatLabel}>Last seen</Text>
+                    <Text style={[styles.streamStatValue, { maxWidth: 60 }]} numberOfLines={1}>{quickSummary.lastDetected}</Text>
+                  </View>
+                </View>
+              )}
+
+              <SectionOverlay>
+                <Text style={styles.sectionTitle}>Recent Activity</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.recentScrollContent}
+                  style={styles.recentScroll}
+                >
+                  {data?.recentActivities?.length > 0
+                    ? data.recentActivities.map((item, index) => (
+                      <View key={item.id || index} style={styles.recentItem}>
+                        <View style={[styles.recentIcon, { backgroundColor: (item.color || '#FFB74D') + '25' }]}>
+                          <MaterialCommunityIcons name={item.icon || 'run'} size={20} color={item.color || '#FFB74D'} />
+                        </View>
+                        <View>
+                          <Text style={styles.recentType}>{item.type}</Text>
+                          <Text style={styles.recentTime}>{item.time}</Text>
+                        </View>
+                      </View>
+                    ))
+                    : <Text style={{ color: '#B0BEC5', fontSize: 12, paddingVertical: 12, paddingLeft: 4 }}>No activity recorded today</Text>
+                  }
+                </ScrollView>
+              </SectionOverlay>
 
               <Text style={styles.sectionTitle}>Today's Insights</Text>
 
@@ -489,7 +611,17 @@ export default function CameraScreen({ onNavigate, session }) {
                     <View>
                       <Text style={styles.cardTitle}>Activity Level</Text>
                       <Text style={styles.cardSubtitle}>
-                        Status: <Text style={{ color: '#FF6D00', fontWeight: 'bold' }}>Moderate</Text>
+                        Status: <Text style={{
+                          color:
+                            (data.behaviorAnalytics?.energy?.active ?? 0) >= 60 ? '#FF6D00'
+                              : (data.behaviorAnalytics?.energy?.active ?? 0) >= 30 ? '#F9A825'
+                                : '#90A4AE',
+                          fontWeight: 'bold'
+                        }}>
+                          {(data.behaviorAnalytics?.energy?.active ?? 0) >= 60 ? 'High'
+                            : (data.behaviorAnalytics?.energy?.active ?? 0) >= 30 ? 'Moderate'
+                              : 'Low'}
+                        </Text>
                       </Text>
                     </View>
                     <View style={styles.iconCircleSmall}>
@@ -503,6 +635,174 @@ export default function CameraScreen({ onNavigate, session }) {
                       activity: data.activity
                     }}
                   />
+                </View>
+              </SectionOverlay>
+
+              {/* Stats Grid — Food & Litter จาก DB */}
+              <SectionOverlay>
+                <View style={styles.statsRow}>
+                  <View style={styles.statCardGlowFood}>
+                    <View style={[styles.statCard, styles.statCardFood]}>
+                      <MaterialCommunityIcons name="paw" size={80} color="rgba(255, 109, 0, 0.05)" style={styles.statWatermark} />
+                      <View style={[styles.iconCircle, styles.iconCircleFood]}>
+                        <MaterialCommunityIcons name="food-apple" size={26} color="#FF6D00" />
+                      </View>
+                      <View style={styles.statContent}>
+                        <Text style={styles.statValue}>{data.food}g</Text>
+                        <Text style={styles.statLabel}>Food Consumed</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.statCardGlowLitter}>
+                    <View style={[styles.statCard, styles.statCardLitter]}>
+                      <MaterialCommunityIcons name="paw" size={80} color="rgba(2, 136, 209, 0.05)" style={styles.statWatermark} />
+                      <View style={[styles.iconCircle, styles.iconCircleLitter]}>
+                        <MaterialCommunityIcons name="delete-outline" size={26} color="#0288D1" />
+                      </View>
+                      <View style={styles.statContent}>
+                        <Text style={styles.statValue}>{data.litter}</Text>
+                        <Text style={styles.statLabel}>Litter Visits</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              </SectionOverlay>
+
+              {/* Posture & Behavior Card — จาก DB */}
+              <SectionOverlay>
+                <View style={styles.cardContainer}>
+                  <DecorativeCatEars />
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.cardTitle}>Posture & Behavior</Text>
+                    <MaterialCommunityIcons name="dots-horizontal" size={20} color="#B0BEC5" />
+                  </View>
+
+                  <View style={styles.postureGrid}>
+                    <View style={[styles.postureCard, styles.postureCardNormal]}>
+                      <View style={styles.postureIconBgNormal}>
+                        <MaterialCommunityIcons name="cat" size={28} color="#00695C" />
+                      </View>
+                      <View style={styles.postureContent}>
+                        <Text style={styles.postureValueNormal}>{data.posture?.normal?.percent ?? 0}%</Text>
+                        <Text style={styles.postureLabel}>Normal</Text>
+                      </View>
+                    </View>
+
+                    <View style={[styles.postureCard, styles.postureCardAbnormal]}>
+                      <View style={styles.postureIconBgAbnormal}>
+                        <MaterialCommunityIcons name="medical-bag" size={28} color="#D32F2F" />
+                      </View>
+                      <View style={styles.postureContent}>
+                        <Text style={styles.postureValueAbnormal}>{data.posture?.abnormal?.percent ?? 0}%</Text>
+                        <Text style={styles.postureLabel}>Attention</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.postureContext}>
+                    <Text style={styles.postureContextText}>
+                      Most detected: <Text style={{ fontWeight: 'bold', color: '#00695C' }}>{data.posture?.normal?.name ?? '--'}</Text>
+                    </Text>
+                    {(data.posture?.abnormal?.percent ?? 0) > 0 && (
+                      <Text style={[styles.postureContextText, { color: '#D32F2F', marginTop: 4 }]}>
+                        Alert: {data.posture?.abnormal?.name ?? '--'}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              </SectionOverlay>
+
+              {/* Behavior Analytics Card — คำนวณจาก behaviorCalculation.py */}
+              <SectionOverlay>
+                <View style={styles.cardContainer}>
+                  <View style={styles.cardHeader}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <MaterialCommunityIcons name="chart-arc" size={20} color="#00695C" style={{ marginRight: 6 }} />
+                      <Text style={styles.cardTitle}>Behavior Analytics</Text>
+                    </View>
+                    <View style={{ backgroundColor: '#E8F5E9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, flexDirection: 'row', alignItems: 'center' }}>
+                      <Animated.View style={[styles.cameraStatusDot, { backgroundColor: '#4CAF50', width: 6, height: 6, marginRight: 4, opacity: pulseAnim }]} />
+                      <Text style={{ color: '#2E7D32', fontSize: 10, fontWeight: 'bold' }}>LIVE</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.cardSubtitle, { marginTop: -4, marginBottom: 8 }]}>
+                    Insights improve with more recorded behavior over time.
+                  </Text>
+
+                  <View style={styles.insightsGrid}>
+                    {/* Energy Distribution */}
+                    <View style={styles.insightRow}>
+                      <View style={styles.insightHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                          <MaterialCommunityIcons name="lightning-bolt-circle" size={16} color="#FF9800" style={{ marginRight: 6 }} />
+                          <Text style={styles.insightLabel} numberOfLines={1}>Energy Distribution</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                          <MaterialCommunityIcons name="paw" size={12} color="#FF9800" style={{ marginRight: 4 }} />
+                          <Text style={styles.insightValue} numberOfLines={1}>{data.behaviorAnalytics?.energy?.active || 0}% Active</Text>
+                        </View>
+                      </View>
+                      <View style={styles.progressBarBg}>
+                        <View style={styles.progressBarGray} />
+                        <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.energy?.active || 0}%` }]}>
+                          <View style={[styles.progressBarColor, { backgroundColor: '#FFAB40' }]} />
+                          <MaterialCommunityIcons name="paw" size={24} color="#FF6D00" style={styles.progressPaw} />
+                        </View>
+                      </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
+                        <Text style={styles.insightSubtextLeft}>High (Playing)</Text>
+                        <Text style={styles.insightSubtext}>Low (Resting)</Text>
+                      </View>
+                    </View>
+
+                    {/* Routine Consistency */}
+                    <View style={[styles.insightRow, { marginTop: 12 }]}>
+                      <View style={styles.insightHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                          <MaterialCommunityIcons name="calendar-check" size={16} color="#2196F3" style={{ marginRight: 6 }} />
+                          <Text style={styles.insightLabel} numberOfLines={1}>Routine Consistency</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                          <MaterialCommunityIcons name="paw" size={12} color="#2196F3" style={{ marginRight: 4 }} />
+                          <Text style={[styles.insightValue, { color: '#2196F3' }]} numberOfLines={1}>{data.behaviorAnalytics?.routine?.status || 'No Data'}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.progressBarBg}>
+                        <View style={styles.progressBarGray} />
+                        <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.routine?.score || 0}%` }]}>
+                          <View style={[styles.progressBarColor, { backgroundColor: '#64B5F6' }]} />
+                          <MaterialCommunityIcons name="paw" size={24} color="#0D47A1" style={styles.progressPaw} />
+                        </View>
+                      </View>
+                      <Text style={[styles.insightSubtextLeft, { marginTop: 0 }]}>Consistent feeding and litter habits</Text>
+                    </View>
+
+                    {/* Wellness Index */}
+                    <View style={[styles.insightRow, { marginTop: 12 }]}>
+                      <View style={styles.insightHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                          <MaterialCommunityIcons name="heart-pulse" size={16} color="#4CAF50" style={{ marginRight: 6 }} />
+                          <Text style={styles.insightLabel} numberOfLines={1}>Wellness Index</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                          <MaterialCommunityIcons name="paw" size={12} color="#4CAF50" style={{ marginRight: 4 }} />
+                          <Text style={[styles.insightValue, { color: '#4CAF50' }]} numberOfLines={1}>{data.behaviorAnalytics?.wellness?.status || 'No Data'}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.progressBarBg}>
+                        <View style={styles.progressBarGray} />
+                        <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.wellness?.score || 0}%` }]}>
+                          <View style={[styles.progressBarColor, { backgroundColor: '#81C784' }]} />
+                          <MaterialCommunityIcons name="paw" size={24} color="#1B5E20" style={styles.progressPaw} />
+                        </View>
+                      </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
+                        <Text style={styles.insightSubtextLeft}>Relaxed</Text>
+                        <Text style={styles.insightSubtext}>Stressed</Text>
+                      </View>
+                    </View>
+                  </View>
                 </View>
               </SectionOverlay>
 
@@ -623,4 +923,57 @@ const styles = StyleSheet.create({
   setupCardSubtitle: { color: '#64748B', fontSize: 11 },
   setupCardButton: { backgroundColor: '#0F766E', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
   setupCardButtonText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  // Stream Stats Bar
+  streamStatsBar: { flexDirection: 'row', backgroundColor: '#F0FDF8', borderRadius: 14, paddingVertical: 8, paddingHorizontal: 10, marginBottom: 12, alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#CCEDE4' },
+  streamStatItem: { flex: 1, alignItems: 'center', gap: 2 },
+  streamStatLabel: { fontSize: 9, color: '#78909C', fontWeight: '600', textTransform: 'uppercase', marginTop: 2 },
+  streamStatValue: { fontSize: 11, color: '#004D40', fontWeight: '800' },
+  streamStatDivider: { width: 1, height: 28, backgroundColor: '#D0EDE6' },
+  // Stats Grid
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  statCard: { flex: 1, backgroundColor: '#FFFFFF', padding: 11, borderRadius: 14, alignItems: 'center', flexDirection: 'row', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.015, shadowRadius: 2, elevation: 0 },
+  statCardFood: { borderLeftWidth: 4, borderLeftColor: '#FF6D00' },
+  statCardLitter: { borderLeftWidth: 4, borderLeftColor: '#0288D1' },
+  statCardGlowFood: { flex: 1, marginRight: 6, borderRadius: 18, shadowColor: '#FF6D00', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 1 },
+  statCardGlowLitter: { flex: 1, marginLeft: 6, borderRadius: 18, shadowColor: '#0288D1', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 1 },
+  statContent: { marginLeft: 12, flex: 1 },
+  iconCircle: { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  iconCircleFood: { backgroundColor: '#FFF3E0' },
+  iconCircleLitter: { backgroundColor: '#E1F5FE' },
+  statValue: { fontSize: 14, fontWeight: '800', color: '#37474F' },
+  statLabel: { fontSize: 8, color: '#78909C', fontWeight: '600', textTransform: 'uppercase' },
+  statWatermark: { position: 'absolute', right: -10, bottom: -10, opacity: 0.5 },
+  // Posture Card
+  postureGrid: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, gap: 10 },
+  postureCard: { flex: 1, borderRadius: 16, padding: 12, flexDirection: 'row', alignItems: 'center' },
+  postureCardNormal: { backgroundColor: '#E0F2F1' },
+  postureCardAbnormal: { backgroundColor: '#FFEBEE' },
+  postureIconBgNormal: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  postureIconBgAbnormal: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  postureContent: { flex: 1 },
+  postureValueNormal: { fontSize: 17, fontWeight: '800', color: '#00695C' },
+  postureValueAbnormal: { fontSize: 17, fontWeight: '800', color: '#D32F2F' },
+  postureLabel: { fontSize: 11, fontWeight: '600', color: '#546E7A' },
+  postureContext: { marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#ECEFF1' },
+  postureContextText: { fontSize: 11, color: '#78909C' },
+  // Recent Activity
+  recentScroll: { marginBottom: 8 },
+  recentScrollContent: { paddingRight: 16 },
+  recentItem: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 8, paddingRight: 12, marginRight: 12, flexDirection: 'row', alignItems: 'center', shadowColor: '#90A4AE', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  recentIcon: { width: 34, height: 34, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  recentType: { fontSize: 12, fontWeight: '700', color: '#37474F' },
+  recentTime: { fontSize: 11, color: '#90A4AE', marginTop: 2 },
+  // Behavior Analytics
+  insightsGrid: { marginTop: 12, gap: 16 },
+  insightRow: { marginBottom: 4 },
+  insightHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  insightLabel: { fontSize: 13, color: '#455A64', fontWeight: '600' },
+  insightValue: { fontSize: 13, color: '#37474F', fontWeight: 'bold' },
+  progressBarBg: { height: 24, justifyContent: 'center', overflow: 'visible', marginVertical: 4 },
+  progressBarGray: { height: 8, backgroundColor: '#ECEFF1', borderRadius: 5, width: '100%', position: 'absolute' },
+  progressBarFill: { height: 24, minWidth: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', overflow: 'visible' },
+  progressBarColor: { height: 8, borderRadius: 5, width: '100%', position: 'absolute' },
+  progressPaw: { marginRight: -8, textShadowColor: 'rgba(0,0,0,0.15)', textShadowOffset: { width: 0, height: 1.5 }, textShadowRadius: 3, zIndex: 10 },
+  insightSubtext: { fontSize: 11, color: '#90A4AE', marginTop: 4, textAlign: 'right' },
+  insightSubtextLeft: { fontSize: 11, color: '#90A4AE' },
 });
