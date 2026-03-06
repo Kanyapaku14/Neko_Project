@@ -65,6 +65,8 @@ export default function CameraScreen({ onNavigate, session }) {
   const [quickSummary, setQuickSummary] = useState({ eventsToday: 0, lastDetected: '--' });
   // ดึง stream_source จาก DB (admin/backend ใส่ผ่าน backend) — ไม่แตะ camera connection logic
   const [dbStreamUrl, setDbStreamUrl] = useState(null);
+  // AI live results จาก /api/ai_results
+  const [aiResults, setAiResults] = useState([]);
 
   // 🚨 ล็อค URL ไม่ให้ Re-render บ่อยเกินไป
   const [stableStreamUrl] = useState(`${VIDEO_STREAM_URL}?t=${new Date().getTime()}`);
@@ -339,6 +341,29 @@ export default function CameraScreen({ onNavigate, session }) {
     return () => clearInterval(t);
   }, [cameraStatus, session]);
 
+  // ── Poll AI results จาก serverCam ทุก 2 วิ ──────────────────────────────
+  useEffect(() => {
+    if (cameraStatus !== 'connected') {
+      setAiResults([]);
+      return;
+    }
+    const AI_BASE = VIDEO_STREAM_URL.replace('/api/video_feed', '');
+    let cancelled = false;
+    const fetchAi = async () => {
+      try {
+        const res = await fetch(`${AI_BASE}/api/ai_results`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!cancelled) setAiResults(json?.results ?? []);
+      } catch (_) {
+        // server ไม่ตอบ — ไม่แสดง error
+      }
+    };
+    fetchAi();
+    const t = setInterval(fetchAi, 2000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [cameraStatus]);
+
   const handleSelectCat = async (cat) => {
     setSelectedCat(cat);
     setShowCatSwitcher(false);
@@ -502,6 +527,27 @@ export default function CameraScreen({ onNavigate, session }) {
                         cameraStatus === 'connecting' ? 'Connecting...' : 'Camera Disconnected'}
                     </Text>
                   </View>
+
+                  {/* AI Behavior Badge */}
+                  {aiResults.length > 0 && (() => {
+                    const top = aiResults[0];
+                    const isAbnormal = top.abnormal;
+                    return (
+                      <View style={[styles.aiBadge, isAbnormal && styles.aiBadgeAbnormal]}>
+                        <Text style={[styles.aiBadgeText, isAbnormal && styles.aiBadgeTextAbnormal]}>
+                          {isAbnormal ? '⚠ ' : '🐱 '}
+                          {top.behavior}  {Math.round(top.confidence * 100)}%
+                        </Text>
+                        {top.cat_id && (
+                          <Text style={styles.aiBadgeCatId} numberOfLines={1}>
+                            {String(top.cat_id).includes('-')
+                              ? String(top.cat_id).slice(0, 8) + '…'
+                              : top.cat_id}
+                          </Text>
+                        )}
+                      </View>
+                    );
+                  })()}
                 </View>
 
                 <View style={styles.householdPill}>
@@ -929,6 +975,12 @@ const styles = StyleSheet.create({
   streamStatLabel: { fontSize: 9, color: '#78909C', fontWeight: '600', textTransform: 'uppercase', marginTop: 2 },
   streamStatValue: { fontSize: 11, color: '#004D40', fontWeight: '800' },
   streamStatDivider: { width: 1, height: 28, backgroundColor: '#D0EDE6' },
+  // AI Badge
+  aiBadge: { position: 'absolute', bottom: 12, right: 12, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, backdropFilter: 'blur(4px)' },
+  aiBadgeAbnormal: { backgroundColor: 'rgba(183,28,28,0.80)' },
+  aiBadgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', letterSpacing: 0.2 },
+  aiBadgeTextAbnormal: { color: '#FFCDD2' },
+  aiBadgeCatId: { color: 'rgba(255,255,255,0.6)', fontSize: 9, marginTop: 1 },
   // Stats Grid
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   statCard: { flex: 1, backgroundColor: '#FFFFFF', padding: 11, borderRadius: 14, alignItems: 'center', flexDirection: 'row', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.015, shadowRadius: 2, elevation: 0 },
