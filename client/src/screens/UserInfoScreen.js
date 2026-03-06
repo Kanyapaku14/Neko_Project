@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, SafeAreaView, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, SafeAreaView, TouchableOpacity, ScrollView, Image } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import supabase from './config/supabaseClient';
 import { Ionicons } from "@expo/vector-icons";
