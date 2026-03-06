@@ -8,10 +8,13 @@ import {
   Dimensions,
   ActivityIndicator,
   Image,
+  DeviceEventEmitter,
 } from "react-native";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import BottomNav from "../components/BottomNav";
 import supabase from "./config/supabaseClient";
+import DropdownProfile from "../components/DropdownProfile";
 
 const { width } = Dimensions.get("window");
 
@@ -36,26 +39,57 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
   const [dailyLog, setDailyLog] = useState(null);
   const [medicalEvents, setMedicalEvents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [cats, setCats] = useState([]);
+  const [activeCat, setActiveCat] = useState(null);
   const [catId, setCatId] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
   const [loggedDates, setLoggedDates] = useState([]); // To store dates that have entries
   const [photos, setPhotos] = useState([]); // To store photos for the selected date
 
 
-  // Fetch Cat ID first
+  // Fetch All Cats first
   useEffect(() => {
-    const fetchCat = async () => {
+    const fetchCats = async () => {
       if (!session?.user?.id) return;
       const { data, error } = await supabase
         .from('cats')
-        .select('id')
-        .eq('owner_id', session.user.id)
-        .limit(1)
-        .single();
+        .select('*')
+        .eq('owner_id', session.user.id);
 
-      if (data) setCatId(data.id);
+      if (data && data.length > 0) {
+        setCats(data);
+
+        // Load selected cat from storage or default to first
+        const storedCatId = await AsyncStorage.getItem('selectedCatId');
+        if (storedCatId) {
+          const found = data.find(c => c.id.toString() === storedCatId);
+          const currentCat = found || data[0];
+          setActiveCat(currentCat);
+          setCatId(currentCat.id);
+        } else {
+          setActiveCat(data[0]);
+          setCatId(data[0].id);
+        }
+      }
     };
-    fetchCat();
+    fetchCats();
+
+    // Sync with other screens
+    const subscription = DeviceEventEmitter.addListener('catChanged', (cat) => {
+      setActiveCat(cat);
+      setCatId(cat.id);
+    });
+
+    return () => subscription.remove();
   }, [session]);
+
+  const selectCat = async (cat) => {
+    setActiveCat(cat);
+    setCatId(cat.id);
+    setModalVisible(false);
+    await AsyncStorage.setItem('selectedCatId', cat.id.toString());
+    DeviceEventEmitter.emit('catChanged', cat);
+  };
 
   // Fetch Logs and Medical Events for selected date
   useEffect(() => {
@@ -162,6 +196,21 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
     return new Date(year, month, 1).getDay();
   };
 
+  const getEventTheme = (type) => {
+    switch (type) {
+      case 'vet_visit':
+        return { color: '#007AFF', bg: 'rgba(0, 122, 255, 0.1)', icon: 'hospital-marker' };
+      case 'vaccination':
+        return { color: '#AF52DE', bg: 'rgba(175, 82, 222, 0.1)', icon: 'needle' };
+      case 'medication':
+        return { color: '#34C759', bg: 'rgba(52, 199, 89, 0.1)', icon: 'pill' };
+      case 'surgery':
+        return { color: '#FF9500', bg: 'rgba(255, 149, 0, 0.1)', icon: 'alert-decagram' };
+      default:
+        return { color: '#5856D6', bg: 'rgba(88, 86, 214, 0.1)', icon: 'medical-bag' };
+    }
+  };
+
   const renderCalendar = () => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
@@ -201,6 +250,42 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
 
   return (
     <View style={styles.container}>
+      {/* Background Decorations */}
+      <MaterialCommunityIcons name="paw" size={70} color="rgba(20, 124, 120, 0.12)" style={{ position: 'absolute', top: 80, left: 10, transform: [{ rotate: '15deg' }] }} />
+      <MaterialCommunityIcons name="paw" size={90} color="rgba(20, 124, 120, 0.08)" style={{ position: 'absolute', top: 150, right: 10, transform: [{ rotate: '-20deg' }] }} />
+      <MaterialCommunityIcons name="paw" size={60} color="rgba(20, 124, 120, 0.1)" style={{ position: 'absolute', top: 550, left: 30, transform: [{ rotate: '45deg' }] }} />
+      <MaterialCommunityIcons name="paw" size={110} color="rgba(20, 124, 120, 0.07)" style={{ position: 'absolute', bottom: 150, right: 40, transform: [{ rotate: '-10deg' }] }} />
+      <MaterialCommunityIcons name="paw" size={50} color="rgba(20, 124, 120, 0.09)" style={{ position: 'absolute', bottom: 400, right: 20, transform: [{ rotate: '30deg' }] }} />
+
+      {/* Cat Switcher Header */}
+      <View style={styles.topHeader}>
+        <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.catDropdownTrigger}>
+          <View style={styles.avatarContainer}>
+            {activeCat?.image_url ? (
+              <Image source={{ uri: activeCat.image_url }} style={styles.avatarImage} />
+            ) : (
+              <Ionicons name="paw" size={20} color="#718096" />
+            )}
+          </View>
+          <Ionicons name="chevron-down" size={16} color="#147C78" style={{ marginLeft: 4 }} />
+        </TouchableOpacity>
+
+        <View style={styles.brandContainer}>
+          <Text style={styles.brandText}>NEK</Text>
+          <Ionicons name="paw" size={14} color="#4FD1C5" />
+          <Text style={styles.brandText}>CARE</Text>
+        </View>
+
+        <View style={styles.iconGroup}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => console.log("Notify")}>
+            <Ionicons name="notifications-outline" size={22} color="#4A5568" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => onNavigate('Setting')}>
+            <Ionicons name="settings-outline" size={22} color="#4A5568" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Calendar Card */}
       <View style={styles.calendarCard}>
         {/* Header */}
@@ -346,36 +431,30 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
             {/* Medical Events Section (Moved above button) */}
             {medicalEvents.length > 0 && (
               <View style={{ marginTop: 10 }}>
-                {medicalEvents.map((event) => (
-                  <View key={event.id} style={[styles.textLogContainer, { borderLeftWidth: 4, borderLeftColor: '#D32F2F', backgroundColor: 'rgba(211, 47, 47, 0.05)', marginBottom: 15 }]}>
-                    <View style={[styles.textLogRow, { justifyContent: 'space-between' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <MaterialCommunityIcons
-                          name={
-                            (event.event_type === 'vaccine' || event.event_type === 'vaccination')
-                              ? 'needle'
-                              : (event.event_type === 'medicine' || event.event_type === 'medication')
-                                ? 'pill'
-                                : 'hospital-marker'
-                          }
-                          size={20}
-                          color="#D32F2F"
-                        />
-                        <Text style={[styles.textLogLabel, { color: '#D32F2F', fontSize: 16 }]}>
-                          {event.event_type?.replace(/_/g, ' ')}
-                        </Text>
+                {medicalEvents.map((event) => {
+                  const theme = getEventTheme(event.event_type);
+                  return (
+                    <View key={event.id} style={[styles.textLogContainer, { borderLeftColor: theme.color, backgroundColor: theme.bg, marginBottom: 15 }]}>
+                      <View style={[styles.textLogRow, { justifyContent: 'space-between', marginBottom: 0 }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <MaterialCommunityIcons
+                            name={theme.icon}
+                            size={20}
+                            color={theme.color}
+                          />
+                          <Text style={[styles.textLogLabel, { color: theme.color, fontSize: 16 }]}>
+                            {event.event_type?.replace(/_/g, ' ')}
+                          </Text>
+                        </View>
                       </View>
-                      {event.attachment_url && (
-                        <Ionicons name="image" size={18} color="#D32F2F" />
-                      )}
+                      {event.notes ? (
+                        <Text style={[styles.textLogValue, { fontSize: 15, marginTop: 4, color: '#2D3436', paddingLeft: 28 }]}>
+                          {event.notes}
+                        </Text>
+                      ) : null}
                     </View>
-                    {event.notes ? (
-                      <Text style={[styles.textLogValue, { fontSize: 14, marginTop: 5, color: '#444' }]}>
-                        {event.notes}
-                      </Text>
-                    ) : null}
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
 
@@ -420,6 +499,36 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
         ) : (
           <View>
             <Text style={styles.noRecordText}>There is no record for this day.</Text>
+            {/* Medical Events Section */}
+            {medicalEvents.length > 0 && (
+              <View style={{ marginTop: 10 }}>
+                {medicalEvents.map((event) => {
+                  const theme = getEventTheme(event.event_type);
+                  return (
+                    <View key={event.id} style={[styles.textLogContainer, { borderLeftColor: theme.color, backgroundColor: theme.bg, marginBottom: 15 }]}>
+                      <View style={[styles.textLogRow, { justifyContent: 'space-between', marginBottom: 0 }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <MaterialCommunityIcons
+                            name={theme.icon}
+                            size={20}
+                            color={theme.color}
+                          />
+                          <Text style={[styles.textLogLabel, { color: theme.color, fontSize: 16 }]}>
+                            {event.event_type?.replace(/_/g, ' ')}
+                          </Text>
+                        </View>
+                      </View>
+                      {event.notes ? (
+                        <Text style={[styles.textLogValue, { fontSize: 15, marginTop: 4, color: '#2D3436', paddingLeft: 28 }]}>
+                          {event.notes}
+                        </Text>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
             <Text style={styles.photosLabel}>Photos</Text>
             {photos.length > 0 ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
@@ -437,42 +546,6 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
               <TouchableOpacity style={styles.photoPlaceholder}>
                 <Ionicons name="camera" size={32} color="#147C78" />
               </TouchableOpacity>
-            )}
-
-            {/* Medical Events Section (Moved above button) */}
-            {medicalEvents.length > 0 && (
-              <View style={{ marginTop: 10 }}>
-                {medicalEvents.map((event) => (
-                  <View key={event.id} style={[styles.textLogContainer, { borderLeftWidth: 4, borderLeftColor: '#D32F2F', backgroundColor: 'rgba(211, 47, 47, 0.05)', marginBottom: 15 }]}>
-                    <View style={[styles.textLogRow, { justifyContent: 'space-between' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <MaterialCommunityIcons
-                          name={
-                            (event.event_type === 'vaccine' || event.event_type === 'vaccination')
-                              ? 'needle'
-                              : (event.event_type === 'medicine' || event.event_type === 'medication')
-                                ? 'pill'
-                                : 'hospital-marker'
-                          }
-                          size={20}
-                          color="#D32F2F"
-                        />
-                        <Text style={[styles.textLogLabel, { color: '#D32F2F', fontSize: 16 }]}>
-                          {event.event_type?.replace(/_/g, ' ')}
-                        </Text>
-                      </View>
-                      {event.attachment_url && (
-                        <Ionicons name="image" size={18} color="#D32F2F" />
-                      )}
-                    </View>
-                    {event.notes ? (
-                      <Text style={[styles.textLogValue, { fontSize: 14, marginTop: 5, color: '#444' }]}>
-                        {event.notes}
-                      </Text>
-                    ) : null}
-                  </View>
-                ))}
-              </View>
             )}
 
             {/* Add Log Button */}
@@ -498,6 +571,14 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
       </ScrollView>
 
       <BottomNav current="Calendar" onNavigate={onNavigate} />
+
+      <DropdownProfile
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        cats={cats}
+        activeCat={activeCat}
+        onSelectCat={selectCat}
+      />
     </View>
   );
 }
@@ -505,11 +586,58 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#B2E1DB",
+    backgroundColor: "#F7FEFD",
     alignItems: "center",
   },
+  topHeader: {
+    width: width,
+    height: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginTop: 40,
+  },
+  catDropdownTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  avatarContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E2E8F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#FFF',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  brandContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  brandText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#4A5568",
+    letterSpacing: 1,
+  },
+  iconGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  iconBtn: {
+    padding: 4,
+  },
   calendarCard: {
-    marginTop: 60,
+    marginTop: 10,
     width: width * 0.9,
     backgroundColor: "#FFFFFF",
     borderRadius: 20,
@@ -521,7 +649,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
     borderWidth: 2,
-    borderColor: "#8A2BE2",
+    borderColor: "#147C78",
     zIndex: 10,
   },
   header: {
@@ -573,19 +701,28 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   indicator: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#1FB3A8",
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#0FC8BE",
     marginTop: 2,
+    shadowColor: "#0FC8BE",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 3,
   },
   selectedIndicator: {
-    backgroundColor: "#147C78",
+    backgroundColor: "#00802bff",
+    shadowColor: "#00802bff",
+    shadowOpacity: 0.9,
+    shadowRadius: 5,
+    elevation: 4,
   },
   detailsContainer: {
     flex: 1,
     width: "100%",
-    backgroundColor: "#B2E1DB",
+    backgroundColor: "transparent",
     marginTop: -20,
     paddingTop: 40,
     paddingHorizontal: 24,
@@ -620,10 +757,17 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   textLogContainer: {
-    backgroundColor: "rgba(255,255,255,0.4)",
+    backgroundColor: "#FFFFFF",
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#147C78',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   textLogRow: {
     flexDirection: 'row',
@@ -650,13 +794,13 @@ const styles = StyleSheet.create({
   },
   photoPlaceholder: {
     width: "100%",
-    height: 140,
-    backgroundColor: "#9ACBC7",
+    height: 120,
+    backgroundColor: "rgba(255, 255, 255, 0.5)",
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#88BDB9",
+    borderWidth: 1,
+    borderColor: "rgba(20, 124, 120, 0.5)",
     borderStyle: "dashed",
     marginBottom: 20,
   },
@@ -679,13 +823,18 @@ const styles = StyleSheet.create({
   summaryCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     paddingVertical: 15,
     paddingHorizontal: 10,
     marginBottom: 20,
     borderLeftWidth: 4,
     borderLeftColor: '#147C78',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   summaryItem: {
     flex: 1,
@@ -703,7 +852,7 @@ const styles = StyleSheet.create({
   summaryValue: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#2D3748',
     textShadowColor: 'rgba(0, 0, 0, 0.1)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,

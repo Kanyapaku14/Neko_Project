@@ -152,7 +152,7 @@ export default function SettingScreen({ session, onNavigate, onLogout }) {
                         </View>
                         <View style={styles.menuTextContainer}>
                             <Text style={styles.menuTitle}>Notification Preferences</Text>
-                            <Text style={styles.menuSubtitle}>Health alert and daily digets</Text>
+                            <Text style={styles.menuSubtitle}>Health alert and daily digests</Text>
                         </View>
                         <Switch
                             value={notificationEnabled}
@@ -181,7 +181,7 @@ export default function SettingScreen({ session, onNavigate, onLogout }) {
                         </View>
                         <View style={styles.menuTextContainer}>
                             <Text style={styles.menuTitle}>Data Export & Privacy</Text>
-                            <Text style={styles.menuSubtitle}>Health logs and privacy contols</Text>
+                            <Text style={styles.menuSubtitle}>Health logs and privacy controls</Text>
                         </View>
                         <Switch
                             value={privacyEnabled}

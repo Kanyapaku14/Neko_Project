@@ -18,7 +18,7 @@ export default function AnalysisResult({ onNavigate, session }) {
     const fetchCatAndLog = async () => {
         try {
             setLoading(true);
-            
+
             // 1. Fetch Cat ID first (standard pattern in this app)
             const { data: catData, error: catError } = await supabase
                 .from('cats')
@@ -68,10 +68,10 @@ export default function AnalysisResult({ onNavigate, session }) {
     return (
         <SafeAreaView style={{ flex: 1, backgroundColor: '#FFF' }}>
             {/* Custom Header */}
-            <View style={{ 
-                flexDirection: 'row', 
-                alignItems: 'center', 
-                paddingHorizontal: 20, 
+            <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingHorizontal: 20,
                 paddingVertical: 15,
                 backgroundColor: '#FFF'
             }}>
@@ -83,30 +83,30 @@ export default function AnalysisResult({ onNavigate, session }) {
                 </View>
             </View>
 
-            <ScrollView 
-                style={{ flex: 1 }} 
+            <ScrollView
+                style={{ flex: 1 }}
                 contentContainerStyle={{ flexGrow: 1 }}
                 showsVerticalScrollIndicator={false}
             >
                 {/* Image Section */}
                 <View style={{ padding: 20, backgroundColor: '#FFF' }}>
                     <View style={{ position: 'relative' }}>
-                        <Image 
-                            source={require('../../assets/makky.jpg')} 
+                        <Image
+                            source={require('../../assets/makky.jpg')}
                             style={{ width: '100%', height: 280, borderRadius: 20 }}
                         />
                         {/* Mock Scan Box */}
-                        <View style={{ 
-                            position: 'absolute', 
-                            top: 20, left: 20, right: 20, bottom: 60, 
-                            borderWidth: 2, 
-                            borderColor: '#81C784', 
-                            borderRadius: 10 
+                        <View style={{
+                            position: 'absolute',
+                            top: 20, left: 20, right: 20, bottom: 60,
+                            borderWidth: 2,
+                            borderColor: '#81C784',
+                            borderRadius: 10
                         }} />
                         {/* Scan Badge */}
-                        <View style={{ 
-                            position: 'absolute', 
-                            bottom: 70, 
+                        <View style={{
+                            position: 'absolute',
+                            bottom: 70,
                             alignSelf: 'center',
                             backgroundColor: 'rgba(45, 55, 72, 0.8)',
                             paddingHorizontal: 15,
@@ -121,12 +121,12 @@ export default function AnalysisResult({ onNavigate, session }) {
                     </View>
 
                     {/* Status Badge */}
-                    <View style={{ 
-                        backgroundColor: '#C8E6C9', 
-                        alignSelf: 'center', 
-                        paddingHorizontal: 20, 
-                        paddingVertical: 8, 
-                        borderRadius: 20, 
+                    <View style={{
+                        backgroundColor: '#C8E6C9',
+                        alignSelf: 'center',
+                        paddingHorizontal: 20,
+                        paddingVertical: 8,
+                        borderRadius: 20,
                         marginTop: -20,
                         flexDirection: 'row',
                         alignItems: 'center',
@@ -145,11 +145,11 @@ export default function AnalysisResult({ onNavigate, session }) {
                 </View>
 
                 {/* Daily Log Section */}
-                <View style={{ 
-                    backgroundColor: '#B2E1DB', 
-                    padding: 20, 
-                    borderTopLeftRadius: 30, 
-                    borderTopRightRadius: 30, 
+                <View style={{
+                    backgroundColor: '#B2E1DB',
+                    padding: 20,
+                    borderTopLeftRadius: 30,
+                    borderTopRightRadius: 30,
                     marginTop: 10,
                     flex: 1,
                     paddingBottom: 100 // Padding for BottomNav
@@ -165,16 +165,16 @@ export default function AnalysisResult({ onNavigate, session }) {
                             <View style={{ flexDirection: 'row', backgroundColor: 'rgba(255, 255, 255, 0.5)', borderRadius: 20, padding: 20, marginTop: 20 }}>
                                 <View style={{ flex: 1, borderRightWidth: 1, borderColor: '#A0AEC0' }}>
                                     <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#2D6A64' }}>FOOD</Text>
-                                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#FFF' }}>{dailyLog.normal_logs?.total_food_grams || 0} g</Text>
+                                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#2D3748' }}>{dailyLog.normal_logs?.total_food_grams || 0} g</Text>
                                 </View>
                                 <View style={{ flex: 1, paddingLeft: 20 }}>
                                     <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#2D6A64' }}>WATER</Text>
-                                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#FFF' }}>{dailyLog.normal_logs?.water_ml_per_day || 0} ml</Text>
+                                    <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#2D3748' }}>{dailyLog.normal_logs?.water_ml_per_day || 0} ml</Text>
                                 </View>
                             </View>
 
                             {/* Urine and Stool Row */}
-                             <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.5)', borderRadius: 20, padding: 20, marginTop: 15 }}>
+                            <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.5)', borderRadius: 20, padding: 20, marginTop: 15 }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
                                     <View style={{ width: 30 }}><Ionicons name="water" size={20} color="#00ACC1" /></View>
                                     <Text style={{ color: '#2D3748' }}>Urine: <Text style={{ fontWeight: 'bold' }}>{dailyLog.normal_logs?.urine_level?.replace(/_/g, ' ') || '-'}</Text></Text>
@@ -193,7 +193,7 @@ export default function AnalysisResult({ onNavigate, session }) {
                     )}
 
                     {/* Analyzation Button */}
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={{
                             backgroundColor: '#00D18F',
                             borderRadius: 30,

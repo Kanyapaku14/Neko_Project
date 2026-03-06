@@ -15,14 +15,14 @@ import { shareAsync } from 'expo-sharing';
 // ==========================================
 const PawProgressBar = ({ label, percent, icon }) => {
   const clampedPercent = Math.max(0, Math.min(100, percent));
-  
+
   // Custom colors for specific labels to match CameraScreen
   const getBarColor = (label) => {
     if (label.includes('Activity')) return '#FFAB40'; // Energy orange
     if (label.includes('Litter')) return '#64B5F6'; // Routine blue
     return '#81C784'; // Wellness green
   };
-  
+
   const getIconColor = (label) => {
     if (label.includes('Activity')) return '#FF6D00';
     if (label.includes('Litter')) return '#0D47A1';
@@ -63,7 +63,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState("7 DAY");
   const [userProfile, setUserProfile] = useState(null);
-  
+
   const [catDetails, setCatDetails] = useState(null);
   const [rawLogs, setRawLogs] = useState([]);
   const [latestAlerts, setLatestAlerts] = useState([]);
@@ -214,7 +214,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      
+
       const rowsHTML = logsForExport.map((log) => {
         const dateObj = new Date(log.log_date);
         const dateStr = `${dateObj.getDate().toString().padStart(2, '0')}/${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getFullYear()}`;
@@ -224,13 +224,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
         const normalSummary = normal
           ? [
-              `Food type: ${normal.food_type ?? '-'}`,
-              `Meals/day: ${normal.meals_per_day ?? '-'}`,
-              `Food total: ${normal.total_food_grams ?? 0} g`,
-              `Water/day: ${normal.water_ml_per_day ?? 0} ml`,
-              `Urine level: ${normal.urine_level ?? '-'}`,
-              `Stool level: ${normal.stool_level ?? '-'}`,
-            ].join(', ')
+            `Food type: ${normal.food_type ?? '-'}`,
+            `Meals/day: ${normal.meals_per_day ?? '-'}`,
+            `Food total: ${normal.total_food_grams ?? 0} g`,
+            `Water/day: ${normal.water_ml_per_day ?? 0} ml`,
+            `Urine level: ${normal.urine_level ?? '-'}`,
+            `Stool level: ${normal.stool_level ?? '-'}`,
+          ].join(', ')
           : '-';
 
         const offIssues = [];
@@ -355,7 +355,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
       const { uri } = await Print.printToFileAsync({ html });
       await shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-      
+
     } catch (error) {
       console.error("Error creating PDF:", error);
       alert("Failed to create PDF");
@@ -370,206 +370,206 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <LinearGradient colors={['#f5fffd', '#edf7f4']} style={styles.gradientBg}>
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
 
-        {/* Header */}
-        <HomeHeader
-          onProfile={() => onNavigate && onNavigate('Profile')}
-          onNotify={() => console.log("Notify")}
-          onSetting={() => onNavigate && onNavigate('UserInfo')}
-          userProfile={userProfile}
-        />
+          {/* Header */}
+          <HomeHeader
+            onProfile={() => onNavigate && onNavigate('Profile')}
+            onNotify={() => console.log("Notify")}
+            onSetting={() => onNavigate && onNavigate('Setting')}
+            userProfile={userProfile}
+          />
 
-        {/* ===== 🐾 Health Score Circle ===== */}
-        <View style={styles.scoreSection}>
-          {loading || currentScore === null ? (
-            <ActivityIndicator size="large" color="#00695C" style={{ marginVertical: 40 }} />
-          ) : (
-            <>
-              {/* Decorative paws around circle */}
-              <MaterialCommunityIcons name="paw" size={38} color="rgba(0,105,92,0.15)" style={{ position: 'absolute', top: 5, right: 30, transform: [{ rotate: '25deg' }] }} />
-              <MaterialCommunityIcons name="paw" size={30} color="rgba(0,105,92,0.12)" style={{ position: 'absolute', top: 40, left: 20, transform: [{ rotate: '-20deg' }] }} />
-              <MaterialCommunityIcons name="paw" size={34} color="rgba(0,105,92,0.1)" style={{ position: 'absolute', bottom: 25, right: 45, transform: [{ rotate: '40deg' }] }} />
-              <MaterialCommunityIcons name="paw" size={26} color="rgba(0,105,92,0.08)" style={{ position: 'absolute', bottom: 15, left: 40, transform: [{ rotate: '-30deg' }] }} />
+          {/* ===== 🐾 Health Score Circle ===== */}
+          <View style={styles.scoreSection}>
+            {loading || currentScore === null ? (
+              <ActivityIndicator size="large" color="#00695C" style={{ marginVertical: 40 }} />
+            ) : (
+              <>
+                {/* Decorative paws around circle */}
+                <MaterialCommunityIcons name="paw" size={38} color="rgba(0,105,92,0.15)" style={{ position: 'absolute', top: 5, right: 30, transform: [{ rotate: '25deg' }] }} />
+                <MaterialCommunityIcons name="paw" size={30} color="rgba(0,105,92,0.12)" style={{ position: 'absolute', top: 40, left: 20, transform: [{ rotate: '-20deg' }] }} />
+                <MaterialCommunityIcons name="paw" size={34} color="rgba(0,105,92,0.1)" style={{ position: 'absolute', bottom: 25, right: 45, transform: [{ rotate: '40deg' }] }} />
+                <MaterialCommunityIcons name="paw" size={26} color="rgba(0,105,92,0.08)" style={{ position: 'absolute', bottom: 15, left: 40, transform: [{ rotate: '-30deg' }] }} />
 
-              <Text style={styles.scoreSectionLabel}>HEALTH STATUS</Text>
+                <Text style={styles.scoreSectionLabel}>HEALTH STATUS</Text>
 
-              {/* Main Circle */}
-              <View style={[styles.mainCircle, { borderColor: status.color }]}>
-                <View style={[styles.mainCircleInner, { backgroundColor: status.color + '12' }]}>
-                  <Text style={[styles.mainCircleStatus, { color: status.color }]}>{status.label}</Text>
-                  <Text style={[styles.mainCircleScore, { color: status.color }]}>{currentScore}</Text>
+                {/* Main Circle */}
+                <View style={[styles.mainCircle, { borderColor: status.color }]}>
+                  <View style={[styles.mainCircleInner, { backgroundColor: status.color + '12' }]}>
+                    <Text style={[styles.mainCircleStatus, { color: status.color }]}>{status.label}</Text>
+                    <Text style={[styles.mainCircleScore, { color: status.color }]}>{currentScore}</Text>
+                  </View>
                 </View>
-              </View>
 
-              <Text style={[styles.scoreSubtitle, { color: status.color }]}>{status.text}</Text>
+                <Text style={[styles.scoreSubtitle, { color: status.color }]}>{status.text}</Text>
 
-              {latestRedFlags > 0 && (
-                <View style={styles.redFlagRow}>
-                  <Ionicons name="warning" size={14} color="#EB5757" />
-                  <Text style={styles.redFlagRowText}>{latestRedFlags} Red Flag{latestRedFlags > 1 ? 's' : ''} detected</Text>
+                {latestRedFlags > 0 && (
+                  <View style={styles.redFlagRow}>
+                    <Ionicons name="warning" size={14} color="#EB5757" />
+                    <Text style={styles.redFlagRowText}>{latestRedFlags} Red Flag{latestRedFlags > 1 ? 's' : ''} detected</Text>
+                  </View>
+                )}
+
+                <View style={styles.lastUpdateRow}>
+                  <Ionicons name="time-outline" size={14} color="#90A4AE" />
+                  <Text style={styles.lastUpdateText}>Last update today {new Date().getHours()}:{String(new Date().getMinutes()).padStart(2, '0')}</Text>
                 </View>
-              )}
-
-              <View style={styles.lastUpdateRow}>
-                <Ionicons name="time-outline" size={14} color="#90A4AE" />
-                <Text style={styles.lastUpdateText}>Last update today {new Date().getHours()}:{String(new Date().getMinutes()).padStart(2, '0')}</Text>
-              </View>
-            </>
-          )}
-        </View>
-
-        {/* ===== Latest Health Assessment ===== */}
-        <View style={styles.assessmentCard}>
-          <View style={styles.assessmentCardRow}>
-            <MaterialCommunityIcons name="paw" size={32} color="rgba(12,90,88,0.16)" style={{ marginRight: 8 }} />
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={styles.assessmentTitle}>Latest Health Assessment</Text>
-                <MaterialCommunityIcons name="clipboard-text-outline" size={20} color="#5F7671" />
-              </View>
-              <Text style={styles.assessmentDate}>
-                {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} • {status.label}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.assessmentButtons}>
-            <TouchableOpacity
-              style={styles.viewResultBtn}
-              onPress={() => onNavigate?.('Result')}
-            >
-              <Text style={styles.viewResultBtnText}>View Result</Text>
-              <Ionicons name="chevron-forward" size={16} color="#0C5A58" style={{marginLeft: 4}} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.viewHistoryBtn}
-              onPress={() => onNavigate?.('Timeline')}
-            >
-              <Text style={styles.viewHistoryBtnText}>View History</Text>
-              <Ionicons name="time-outline" size={16} color="#0C5A58" style={{marginLeft: 6}} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* ===== 🐾 System Risk Analysis (Paw Progress) ===== */}
-        <View style={styles.sectionHeader}>
-          <View style={styles.sectionTitleRow}>
-            <MaterialCommunityIcons name="shield-check-outline" size={22} color="#00695C" />
-            <Text style={styles.sectionTitle}>System Risk Analysis</Text>
-          </View>
-          <TouchableOpacity onPress={() => console.log('View Detail pressed')}>
-            <Text style={styles.viewDetailLink}>View Detail</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.riskCard}>
-          <PawProgressBar
-            label="Activity Level"
-            percent={45}
-            icon="run"
-          />
-          <PawProgressBar
-            label="Litter Box Usage"
-            percent={85}
-            icon="emoticon-poop"
-          />
-          <PawProgressBar
-            label="Wellness Balance"
-            percent={92}
-            icon="heart-pulse"
-          />
-          <View style={styles.riskFooter}>
-            <MaterialCommunityIcons name="clock-outline" size={14} color="#90A4AE" />
-            <Text style={styles.riskFooterText}>Based on the last {selectedPeriod === '1 MONTH' ? '30' : '7'} days of activity</Text>
-          </View>
-        </View>
-
-        {/* ===== 📊 Health Trends Chart ===== */}
-        <View style={styles.sectionHeader}>
-          <View style={styles.sectionTitleRow}>
-            <MaterialCommunityIcons name="chart-line" size={22} color="#00695C" />
-            <Text style={styles.sectionTitle}>Health Trends</Text>
-          </View>
-        </View>
-
-        <View style={styles.chartCard}>
-          <View style={styles.chartHeader}>
-            <View style={styles.tagsContainer}>
-              <View style={[styles.tag, styles.tagFood]}>
-                <MaterialCommunityIcons name="food-drumstick" size={14} color="#FF8F00" style={{ marginRight: 4 }} />
-                <Text style={styles.tagText}>Food</Text>
-              </View>
-              <View style={[styles.tag, styles.tagWater]}>
-                <MaterialCommunityIcons name="water" size={14} color="#0288D1" style={{ marginRight: 4 }} />
-                <Text style={styles.tagText}>Water</Text>
-              </View>
-            </View>
+              </>
+            )}
           </View>
 
-          {loading ? (
-            <ActivityIndicator size="large" color="#00695C" style={{ marginVertical: 40 }} />
-          ) : (
-            <HealthTrendsChart data={chartData} />
-          )}
-
-          {/* Period Selector */}
-          <View style={styles.periodContainer}>
-            {periods.map((period) => (
-              <TouchableOpacity
-                key={period}
-                style={[
-                  styles.periodButton,
-                  selectedPeriod === period && styles.periodButtonActive,
-                ]}
-                onPress={() => setSelectedPeriod(period)}
-              >
-                <Text
-                  style={[
-                    styles.periodText,
-                    selectedPeriod === period && styles.periodTextActive,
-                  ]}
-                >
-                  {period}
+          {/* ===== Latest Health Assessment ===== */}
+          <View style={styles.assessmentCard}>
+            <View style={styles.assessmentCardRow}>
+              <MaterialCommunityIcons name="paw" size={32} color="rgba(12,90,88,0.16)" style={{ marginRight: 8 }} />
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={styles.assessmentTitle}>Latest Health Assessment</Text>
+                  <MaterialCommunityIcons name="clipboard-text-outline" size={20} color="#5F7671" />
+                </View>
+                <Text style={styles.assessmentDate}>
+                  {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} • {status.label}
                 </Text>
+              </View>
+            </View>
+            <View style={styles.assessmentButtons}>
+              <TouchableOpacity
+                style={styles.viewResultBtn}
+                onPress={() => onNavigate?.('Result')}
+              >
+                <Text style={styles.viewResultBtnText}>View Result</Text>
+                <Ionicons name="chevron-forward" size={16} color="#0C5A58" style={{ marginLeft: 4 }} />
               </TouchableOpacity>
-            ))}
+              <TouchableOpacity
+                style={styles.viewHistoryBtn}
+                onPress={() => onNavigate?.('Timeline')}
+              >
+                <Text style={styles.viewHistoryBtnText}>View History</Text>
+                <Ionicons name="time-outline" size={16} color="#0C5A58" style={{ marginLeft: 6 }} />
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
 
-        {/* ===== 🔘 Action Buttons ===== */}
-        <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={styles.actionButtonNew}
-            onPress={() => onNavigate && onNavigate('Timeline')}
-            activeOpacity={0.8}
-          >
-            <View style={styles.actionInner}>
-              <MaterialCommunityIcons name="chart-timeline-variant" size={22} color="#00695C" />
-              <Text style={styles.actionTextNew}>Timeline</Text>
-              <Ionicons name="chevron-forward" size={18} color="#90A4AE" style={{marginLeft: 'auto'}} />
+          {/* ===== 🐾 System Risk Analysis (Paw Progress) ===== */}
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleRow}>
+              <MaterialCommunityIcons name="shield-check-outline" size={22} color="#00695C" />
+              <Text style={styles.sectionTitle}>System Risk Analysis</Text>
             </View>
-          </TouchableOpacity>
+            <TouchableOpacity onPress={() => console.log('View Detail pressed')}>
+              <Text style={styles.viewDetailLink}>View Detail</Text>
+            </TouchableOpacity>
+          </View>
 
-          <TouchableOpacity
-            style={styles.actionButtonNew}
-            onPress={handleExportPDF}
-            activeOpacity={0.8}
-          >
-             <View style={styles.actionInner}>
-              <MaterialCommunityIcons name="file-export-outline" size={22} color="#00695C" />
-              <Text style={styles.actionTextNew}>Export PDF</Text>
-              <Ionicons name="chevron-forward" size={18} color="#90A4AE" style={{marginLeft: 'auto'}} />
+          <View style={styles.riskCard}>
+            <PawProgressBar
+              label="Activity Level"
+              percent={45}
+              icon="run"
+            />
+            <PawProgressBar
+              label="Litter Box Usage"
+              percent={85}
+              icon="emoticon-poop"
+            />
+            <PawProgressBar
+              label="Wellness Balance"
+              percent={92}
+              icon="heart-pulse"
+            />
+            <View style={styles.riskFooter}>
+              <MaterialCommunityIcons name="clock-outline" size={14} color="#90A4AE" />
+              <Text style={styles.riskFooterText}>Based on the last {selectedPeriod === '1 MONTH' ? '30' : '7'} days of activity</Text>
             </View>
-          </TouchableOpacity>
-        </View>
+          </View>
 
-      </ScrollView>
+          {/* ===== 📊 Health Trends Chart ===== */}
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleRow}>
+              <MaterialCommunityIcons name="chart-line" size={22} color="#00695C" />
+              <Text style={styles.sectionTitle}>Health Trends</Text>
+            </View>
+          </View>
 
-      {/* Bottom Nav */}
-      <BottomNav
-        current="Overview"
-        onNavigate={onNavigate}
-      />
+          <View style={styles.chartCard}>
+            <View style={styles.chartHeader}>
+              <View style={styles.tagsContainer}>
+                <View style={[styles.tag, styles.tagFood]}>
+                  <MaterialCommunityIcons name="food-drumstick" size={14} color="#FF8F00" style={{ marginRight: 4 }} />
+                  <Text style={styles.tagText}>Food</Text>
+                </View>
+                <View style={[styles.tag, styles.tagWater]}>
+                  <MaterialCommunityIcons name="water" size={14} color="#0288D1" style={{ marginRight: 4 }} />
+                  <Text style={styles.tagText}>Water</Text>
+                </View>
+              </View>
+            </View>
+
+            {loading ? (
+              <ActivityIndicator size="large" color="#00695C" style={{ marginVertical: 40 }} />
+            ) : (
+              <HealthTrendsChart data={chartData} />
+            )}
+
+            {/* Period Selector */}
+            <View style={styles.periodContainer}>
+              {periods.map((period) => (
+                <TouchableOpacity
+                  key={period}
+                  style={[
+                    styles.periodButton,
+                    selectedPeriod === period && styles.periodButtonActive,
+                  ]}
+                  onPress={() => setSelectedPeriod(period)}
+                >
+                  <Text
+                    style={[
+                      styles.periodText,
+                      selectedPeriod === period && styles.periodTextActive,
+                    ]}
+                  >
+                    {period}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* ===== 🔘 Action Buttons ===== */}
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={styles.actionButtonNew}
+              onPress={() => onNavigate && onNavigate('Timeline')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.actionInner}>
+                <MaterialCommunityIcons name="chart-timeline-variant" size={22} color="#00695C" />
+                <Text style={styles.actionTextNew}>Timeline</Text>
+                <Ionicons name="chevron-forward" size={18} color="#90A4AE" style={{ marginLeft: 'auto' }} />
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionButtonNew}
+              onPress={handleExportPDF}
+              activeOpacity={0.8}
+            >
+              <View style={styles.actionInner}>
+                <MaterialCommunityIcons name="file-export-outline" size={22} color="#00695C" />
+                <Text style={styles.actionTextNew}>Export PDF</Text>
+                <Ionicons name="chevron-forward" size={18} color="#90A4AE" style={{ marginLeft: 'auto' }} />
+              </View>
+            </TouchableOpacity>
+          </View>
+
+        </ScrollView>
+
+        {/* Bottom Nav */}
+        <BottomNav
+          current="Overview"
+          onNavigate={onNavigate}
+        />
       </LinearGradient>
     </SafeAreaView>
   );

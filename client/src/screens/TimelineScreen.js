@@ -278,7 +278,7 @@ export default function TimelineScreen({ session, onBack }) {
     if (item.source === 'camera') {
       return { icon: 'camera', marker: '#FB8C00', bg: '#FFF3E0' };
     }
-    return { icon: 'calendar-month', marker: '#2D4A47', bg: '#E0F2F1' };
+    return { icon: 'calendar', marker: '#2D4A47', bg: '#E0F2F1' };
   };
 
   return (

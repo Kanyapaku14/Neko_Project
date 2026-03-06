@@ -221,13 +221,13 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Urine</Text>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                            {[{ level: 5, label: "Very High" }, { level: 4, label: "High" }, { level: 3, label: "Normal" }, { level: 2, label: "Low" }, { level: 1, label: "VeryLow" }
+                            {[{ level: 5, label: "Very High" }, { level: 4, label: "High" }, { level: 3, label: "Normal" }, { level: 2, label: "Low" }, { level: 1, label: "Very Low" }
                             ].map((item) => {
                                 const isActive = urineLevel === item.level;
                                 return (
                                     <TouchableOpacity
                                         key={`urine-${item.level}`}
-                                        style={{ alignItems: 'center', width: 70 }}
+                                        style={{ alignItems: 'center', flex: 1 }}
                                         onPress={() => setUrineLevel(urineLevel === item.level ? null : item.level)}
                                     >
                                         <View style={[
@@ -246,13 +246,13 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
 
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Stool</Text>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                            {[{ level: 5, label: "Very High" }, { level: 4, label: "High" }, { level: 3, label: "Normal" }, { level: 2, label: "Low" }, { level: 1, label: "VeryLow" }
+                            {[{ level: 5, label: "Very High" }, { level: 4, label: "High" }, { level: 3, label: "Normal" }, { level: 2, label: "Low" }, { level: 1, label: "Very Low" }
                             ].map((item) => {
                                 const isActive = stoolLevel === item.level;
                                 return (
                                     <TouchableOpacity
                                         key={`stool-${item.level}`}
-                                        style={{ alignItems: 'center', width: 60 }}
+                                        style={{ alignItems: 'center', flex: 1 }}
                                         onPress={() => setStoolLevel(stoolLevel === item.level ? null : item.level)}
                                     >
                                         <View style={[
@@ -379,7 +379,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                                 return (
                                     <TouchableOpacity
                                         key={item.value}
-                                        style={{ alignItems: 'center', width: 60 }}
+                                        style={{ alignItems: 'center', flex: 1 }}
                                         onPress={() => isVomitChecked && setVomitColor(vomitColor === item.value ? null : item.value)}
                                         disabled={!isVomitChecked}
                                     >
@@ -413,7 +413,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                                 return (
                                     <TouchableOpacity
                                         key={item.value}
-                                        style={{ alignItems: 'center', width: 60 }}
+                                        style={{ alignItems: 'center', flex: 1 }}
                                         onPress={() => isDiarrheaChecked && setDiarrheaColor(diarrheaColor === item.value ? null : item.value)}
                                         disabled={!isDiarrheaChecked}
                                     >
@@ -497,8 +497,9 @@ export default function LogDaily(props) {
     const { session, onBack, onNavigate, initialDate } = props;
 
     const [status, setStatus] = useState('Normal');
-    const [catId, setCatId] = useState(null);
-    const [catName, setCatName] = useState('');
+    // Initialize from props first — avoids "No cat profile found" race condition
+    const [catId, setCatId] = useState(props.catId || null);
+    const [catName, setCatName] = useState(props.catName || '');
     const [loading, setLoading] = useState(false);
 
     // --- Normal State ---
@@ -520,10 +521,16 @@ export default function LogDaily(props) {
     const [hasSavedNormalData, setHasSavedNormalData] = useState(false); // Track if normal data exists in DB
 
     useEffect(() => {
-        if (session?.user) {
+        if (props.catId) {
+            // Props already have catId — just load existing log data
+            setCatId(props.catId);
+            setCatName(props.catName || '');
+            fetchExistingLog(props.catId);
+        } else if (session?.user) {
+            // Fallback: fetch from DB if not in props
             fetchCatIdAndLog();
         }
-    }, [session, initialDate]);
+    }, [session, initialDate, props.catId]);
 
     const fetchCatIdAndLog = async () => {
         const { data: catData } = await supabase.from('cats').select('id, name').eq('owner_id', session.user.id).single();
@@ -630,22 +637,22 @@ export default function LogDaily(props) {
 
             if (checkError) throw checkError;
             // เช็คว่า normal_logs มีข้อมูลอยู่ข้างในไหม (ใน DB)
-            const hasNormalInDB = existingData?.normal_logs && 
-                                  (Array.isArray(existingData.normal_logs) ? existingData.normal_logs.length > 0 : Object.keys(existingData.normal_logs).length > 0);
+            const hasNormalInDB = existingData?.normal_logs &&
+                (Array.isArray(existingData.normal_logs) ? existingData.normal_logs.length > 0 : Object.keys(existingData.normal_logs).length > 0);
 
             // เช็คว่าข้อมูลใน State (หน้าจอ) กรอกครบหรือยัง?
-            const isNormalCompleteInState = foodType !== null && 
-                                           consumeMeals !== null && consumeMeals.toString().trim() !== '' && 
-                                           foodIntake !== null && foodIntake.toString().trim() !== '' && 
-                                           waterIntake !== null && waterIntake.toString().trim() !== '' && 
-                                           urineLevel !== null && 
-                                           stoolLevel !== null;
+            const isNormalCompleteInState = foodType !== null &&
+                consumeMeals !== null && consumeMeals.toString().trim() !== '' &&
+                foodIntake !== null && foodIntake.toString().trim() !== '' &&
+                waterIntake !== null && waterIntake.toString().trim() !== '' &&
+                urineLevel !== null &&
+                stoolLevel !== null;
 
             // เงื่อนไขใหม่: ถ้าใน DB ไม่มี Normal "และ" ในเครื่องก็ยังกรอกไม่ครบ -> บล็อค!
             if (!hasNormalInDB && !isNormalCompleteInState) {
                 setLoading(false);
                 return Alert.alert(
-                    "ไม่สามารถบันทึกได้", 
+                    "ไม่สามารถบันทึกได้",
                     "ต้องกรอกข้อมูลหน้า 'Normal' (อาหาร/น้ำ/ขับถ่าย) ของวันนี้ให้ครบถ้วนก่อน ถึงจะสามารถบันทึก Something off ได้"
                 );
             }
@@ -681,12 +688,12 @@ export default function LogDaily(props) {
             if (dailyError) throw dailyError;
 
             // Step 2: Save Normal Logs if complete
-            const isNormalComplete = foodType !== null && 
-                                     consumeMeals !== null && consumeMeals.toString().trim() !== '' && 
-                                     foodIntake !== null && foodIntake.toString().trim() !== '' && 
-                                     waterIntake !== null && waterIntake.toString().trim() !== '' && 
-                                     urineLevel !== null && 
-                                     stoolLevel !== null;
+            const isNormalComplete = foodType !== null &&
+                consumeMeals !== null && consumeMeals.toString().trim() !== '' &&
+                foodIntake !== null && foodIntake.toString().trim() !== '' &&
+                waterIntake !== null && waterIntake.toString().trim() !== '' &&
+                urineLevel !== null &&
+                stoolLevel !== null;
 
             if (isNormalComplete) {
                 const { error: normalError } = await supabase
@@ -705,10 +712,10 @@ export default function LogDaily(props) {
             }
 
             // Step 3: Save Something Off Logs if we are in 'Something off' mode or have data
-            const isSomethingOffActive = (status === 'Something off') || 
-                                          isVomitChecked || isDiarrheaChecked || 
-                                          behaviorTags.length > 0 || respiratoryTags.length > 0 || 
-                                          (notes && notes.trim() !== '');
+            const isSomethingOffActive = (status === 'Something off') ||
+                isVomitChecked || isDiarrheaChecked ||
+                behaviorTags.length > 0 || respiratoryTags.length > 0 ||
+                (notes && notes.trim() !== '');
 
             if (isSomethingOffActive) {
                 const { error: offError } = await supabase
@@ -726,17 +733,17 @@ export default function LogDaily(props) {
 
                 if (offError) throw offError;
             }
-            
+
             Alert.alert('Success', 'Saved Event!', [{
-              text: 'OK',
-              onPress: () => {
-                // ไปหน้า Calendar ที่วันที่บันทึก
-                if (onNavigate) {
-                  onNavigate('Calendar', { date: logDateStr });
-                } else if (onBack) {
-                  onBack();
+                text: 'OK',
+                onPress: () => {
+                    // ไปหน้า Calendar ที่วันที่บันทึก
+                    if (onNavigate) {
+                        onNavigate('Calendar', { date: logDateStr });
+                    } else if (onBack) {
+                        onBack();
+                    }
                 }
-              }
             }]);
         } catch (err) {
             console.error('Save error:', err);

@@ -12,7 +12,9 @@ import {
     ActivityIndicator,
     Platform,
     Image,
+    DeviceEventEmitter,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -22,7 +24,7 @@ import supabase from './config/supabaseClient';
 const { width } = Dimensions.get('window');
 
 const AddMedical = ({ navigation, onBack, initialDate }) => {
-    const [eventType, setEventType] = useState('Vet Visit');
+    const [eventType, setEventType] = useState('vet_visit');
     const [notes, setNotes] = useState('');
     const [eventDate, setEventDate] = useState(initialDate ? new Date(initialDate) : new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
@@ -30,27 +32,38 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
     const [uploading, setUploading] = useState(false);
     const [catId, setCatId] = useState(null);
 
+    // Fetch Cat ID first
     useEffect(() => {
-        fetchCatId();
+        const fetchInitialCat = async () => {
+            const storedCatId = await AsyncStorage.getItem('selectedCatId');
+            if (storedCatId) {
+                setCatId(storedCatId);
+            } else {
+                // If not in storage, fetch the first one from DB
+                try {
+                    const { data: { user } } = await supabase.auth.getUser();
+                    if (!user) return;
+                    const { data } = await supabase
+                        .from('cats')
+                        .select('id')
+                        .eq('owner_id', user.id)
+                        .limit(1)
+                        .single();
+                    if (data) setCatId(data.id);
+                } catch (err) {
+                    console.error('Error fetching default cat:', err);
+                }
+            }
+        };
+        fetchInitialCat();
+
+        // Listen for cat changes from other screens
+        const subscription = DeviceEventEmitter.addListener('catChanged', (cat) => {
+            setCatId(cat.id);
+        });
+
+        return () => subscription.remove();
     }, []);
-
-    const fetchCatId = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            const { data, error } = await supabase
-                .from('cats')
-                .select('id')
-                .eq('owner_id', user.id)
-                .limit(1)
-                .single();
-
-            if (data) setCatId(data.id);
-        } catch (error) {
-            console.error('Error fetching catId:', error);
-        }
-    };
 
     const formatDate = (date) => {
         return date.toLocaleDateString('en-US', {
@@ -62,9 +75,11 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
     };
 
     const eventTypes = [
-        { id: 'Vet Visit', label: 'Vet Visit', icon: 'chatbubbles-outline', plus: true },
-        { id: 'Vaccine', label: 'Vaccine', icon: 'needle', type: 'material' },
-        { id: 'Medicine', label: 'Medicine', icon: 'pill', type: 'material' },
+        { id: 'vet_visit', label: 'Vet Visit', icon: 'chatbubbles-outline', plus: true },
+        { id: 'vaccination', label: 'Vaccine', icon: 'needle', type: 'material' },
+        { id: 'medication', label: 'Medicine', icon: 'pill', type: 'material' },
+        { id: 'surgery', label: 'Surgery', icon: 'heart-pulse', type: 'material' },
+        { id: 'other', label: 'Other', icon: 'dots-horizontal', type: 'material' },
     ];
 
     const normalizeEventType = (value) => {
@@ -136,7 +151,6 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
 
             // 2. Insert into medical_events table
             const formattedEventType = normalizeEventType(eventType);
-
             const { error: insertError } = await supabase
                 .from('medical_events')
                 .insert({
@@ -161,7 +175,7 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
     };
 
     const renderIcon = (event) => {
-        if (event.id === 'Vet Visit') {
+        if (event.id === 'vet_visit') {
             return (
                 <View style={styles.iconWrapper}>
                     <Ionicons name="chatbubbles-outline" size={32} color={eventType === event.id ? '#FFF' : '#2D6A64'} />
@@ -171,9 +185,9 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
                 </View>
             );
         } else if (event.type === 'material') {
-            return <MaterialCommunityIcons name={event.icon} size={40} color={eventType === event.id ? '#FFF' : '#111'} />;
+            return <MaterialCommunityIcons name={event.icon} size={40} color={eventType === event.id ? '#FFF' : '#2D6A64'} />;
         } else {
-            return <FontAwesome5 name={event.icon} size={32} color={eventType === event.id ? '#FFF' : '#111'} />;
+            return <FontAwesome5 name={event.icon} size={32} color={eventType === event.id ? '#FFF' : '#2D6A64'} />;
         }
     };
 
@@ -188,7 +202,7 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
     return (
         <SafeAreaView style={styles.safeArea}>
             <LinearGradient
-                colors={['#F5FAF9', '#C8E6E2']}
+                colors={['#E0F2F1', '#B2DFDB']}
                 style={styles.container}
             >
                 {/* Header */}
@@ -325,11 +339,13 @@ const styles = StyleSheet.create({
     },
     eventToggleContainer: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        justifyContent: 'flex-start',
+        gap: 10,
         marginBottom: 30,
     },
     eventCard: {
-        width: (width - 60) / 3,
+        width: (width - 60) / 3.3,
         height: 90,
         borderRadius: 15,
         justifyContent: 'center',
@@ -339,12 +355,13 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.2,
         shadowRadius: 4,
+        marginBottom: 5,
     },
     eventCardActive: {
-        backgroundColor: '#39A39A',
+        backgroundColor: '#147C78',
     },
     eventCardInactive: {
-        backgroundColor: '#4E7F78', // Medium teal/grayish teal
+        backgroundColor: '#FFFFFF',
     },
     iconWrapper: {
         position: 'relative',
@@ -364,7 +381,7 @@ const styles = StyleSheet.create({
         color: '#FFF',
     },
     textDark: {
-        color: '#FFF',
+        color: '#2D6A64',
     },
     labelTitle: {
         fontSize: 16,
@@ -373,7 +390,9 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     datePicker: {
-        backgroundColor: '#B2D0CD',
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#B2DFDB',
         height: 55,
         borderRadius: 12,
         flexDirection: 'row',
@@ -393,7 +412,9 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
     notesContainer: {
-        backgroundColor: '#B2D0CD',
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#B2DFDB',
         height: 150,
         borderRadius: 15,
         padding: 15,
@@ -422,7 +443,7 @@ const styles = StyleSheet.create({
         color: '#2D6A64',
     },
     uploadBox: {
-        backgroundColor: '#B2D0CD',
+        backgroundColor: 'rgba(255, 255, 255, 0.6)',
         height: 120,
         borderRadius: 15,
         borderStyle: 'dashed',
@@ -444,7 +465,7 @@ const styles = StyleSheet.create({
     },
     uploadText: {
         fontSize: 16,
-        color: '#FFF',
+        color: '#2D6A64',
         fontWeight: 'bold',
     },
     previewImage: {
@@ -452,7 +473,7 @@ const styles = StyleSheet.create({
         height: '100%',
     },
     saveButton: {
-        backgroundColor: '#39A39A',
+        backgroundColor: '#147C78',
         height: 55,
         borderRadius: 15,
         flexDirection: 'row',
