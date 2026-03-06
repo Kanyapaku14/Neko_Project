@@ -51,6 +51,8 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     const pageAnim = useRef(new Animated.Value(0)).current;
     const headerAnim = useRef(new Animated.Value(0)).current;
     const [showStatsModal, setShowStatsModal] = useState(false);
+    const [selectedCatId, setSelectedCatId] = useState(null);
+    const [selectedCatName, setSelectedCatName] = useState(null);
 
     useEffect(() => {
         setSavedSnapshots([]);
@@ -67,6 +69,23 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
             fetchUserProfile();
         };
         bootstrap();
+
+        // อ่าน selectedCat จาก AsyncStorage (sync มาจาก Camera screen)
+        const loadSelectedCat = async () => {
+            try {
+                const raw = await AsyncStorage.getItem('camera_selectedCats');
+                const lastId = await AsyncStorage.getItem('last_selected_cat_id');
+                const ids = raw ? JSON.parse(raw) : [];
+                const catId = ids[0] || lastId || null;
+                setSelectedCatId(catId);
+                if (catId && session?.user?.id) {
+                    const { data: catRow } = await supabase
+                        .from('cats').select('name').eq('id', catId).maybeSingle();
+                    setSelectedCatName(catRow?.name || null);
+                }
+            } catch (e) { /* ignore */ }
+        };
+        loadSelectedCat();
 
         const handler = () => {
             loadImages();
@@ -86,6 +105,14 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
         }, 15000);
         return () => clearInterval(timer);
     }, [session]);
+
+    // Re-filter gallery whenever selected cat changes
+    useEffect(() => {
+        if (selectedCatId !== null) {
+            loadImages();
+            fetchDailyStats();
+        }
+    }, [selectedCatId]);
 
     useEffect(() => {
         Animated.parallel([
@@ -217,7 +244,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                     const cameraIds = cameras.map((c) => c.id);
                     const { data: reviews, error: reviewErr } = await supabase
                         .from('ai_cat_identity_review')
-                        .select('id, camera_id, behavior_label, confidence, occurred_at, snapshot_url, created_at, metadata, reviewed')
+                        .select('id, camera_id, behavior_label, confidence, occurred_at, snapshot_url, created_at, metadata, reviewed, resolved_cat_id')
                         .in('camera_id', cameraIds)
                         .eq('reviewed', true)
                         .not('snapshot_url', 'is', null)
@@ -228,6 +255,8 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                         reviews.forEach((r) => {
                             // Mobile app can render network URLs directly.
                             if (!r.snapshot_url) return;
+                            // กรองตาม selectedCatId: ถ้าเลือกแมวอยู่ ให้เห็นเฉพาะของแมวนั้น
+                            if (selectedCatId && r.resolved_cat_id && r.resolved_cat_id !== selectedCatId) return;
                             dbSnapshots.push({
                                 id: `db_${r.id}`,
                                 dbRowId: r.id,
@@ -237,6 +266,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                                 type: 'ai_snapshot',
                                 metadata: r.metadata || {},
                                 savedInDb: Boolean(r.metadata?.saved),
+                                catId: r.resolved_cat_id || null,
                             });
                         });
                     }
@@ -490,6 +520,12 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                         }
                         rightComponent={
                             <View style={styles.headerRight}>
+                                {selectedCatName && (
+                                    <View style={[styles.headerPill, { backgroundColor: '#D0F0EC', marginRight: 6 }]}>
+                                        <MaterialCommunityIcons name="cat" size={12} color="#0C5A58" />
+                                        <Text style={styles.headerPillText} numberOfLines={1}>{selectedCatName}</Text>
+                                    </View>
+                                )}
                                 <TouchableOpacity
                                     style={styles.headerPill}
                                     onPress={() => setShowStatsModal(true)}
