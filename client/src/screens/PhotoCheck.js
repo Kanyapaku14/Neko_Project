@@ -290,23 +290,4 @@ export default function PhotoCheck({ onNavigate, session }) {
     );
 }
 
-const localStyles = StyleSheet.create({
-    offBanner: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#FEE2E2',
-        borderRadius: 12,
-        paddingHorizontal: 14,
-        paddingVertical: 10,
-        marginBottom: 16,
-        width: '100%',
-        borderWidth: 1,
-        borderColor: '#FECACA',
-    },
-    offBannerText: {
-        fontSize: 12,
-        color: '#B91C1C',
-        fontWeight: '600',
-        flex: 1,
-    },
-});
+
