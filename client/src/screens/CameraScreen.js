@@ -34,7 +34,7 @@ const { width } = Dimensions.get('window');
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 // 🚨 เปลี่ยน 192.168.1.159 เป็น IP จริงของคอมพิวเตอร์คุณเสมอ
-const VIDEO_STREAM_URL = 'http://172.20.10.6:5000/api/video_feed';
+const VIDEO_STREAM_URL = 'http://192.168.1.131:5000/api/video_feed';
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
