@@ -29,7 +29,7 @@ const { width } = Dimensions.get("window");
 const VIDEO_STREAM_URL = 'http://172.20.10.6:5000/api/video_feed';
 
 // 🚨 ประกาศตัวแปรลิงก์กล้อง RTSP ที่นี่ (เพื่อเอาไปบันทึกลง Database)
-const CAMERA_RTSP_URL = 'rtsp://testt1:1234test@192.168.1.145:553/stream2';
+const RTSP_URL = "rtsp://testt1:1234test@172.20.10.8:554/stream2"
 
 const BRANDS = [
     { id: "tapo", name: "TP-Link Tapo", icon: "link-variant" },
