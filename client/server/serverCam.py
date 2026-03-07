@@ -53,7 +53,6 @@ CORS(app)
 # ══════════════════════════════════════════════════════════════════════════════
 RTSP_URL    = "rtsp://testt1:1234test@192.168.1.140:554/stream2"
 PROCESS_WIDTH = 640          # ย่อ frame ก่อนส่งโมเดล (เพื่อความเร็ว)
-PROCESS_WIDTH  = 640          # ย่อ frame ก่อนส่งโมเดล (เพื่อความเร็ว)
 PROCESS_EVERY_N = 10          # ประมวลผลทุก N frame (1 = ทุก frame)
 DETECTION_CONF  = 0.65        # confidence ขั้นต่ำสำหรับแมว
 MIN_BBOX_AREA   = 5000        # พื้นที่ขั้นต่ำ (px²)
