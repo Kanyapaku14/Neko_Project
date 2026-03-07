@@ -34,7 +34,7 @@ const { width } = Dimensions.get('window');
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 // 🚨 เปลี่ยน 192.168.1.159 เป็น IP จริงของคอมพิวเตอร์คุณเสมอ
-const VIDEO_STREAM_URL = 'http://172.20.10.6:5000/api/video_feed';
+const VIDEO_STREAM_URL = 'http://192.168.1.131:5000/api/video_feed';
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -474,15 +474,32 @@ export default function CameraScreen({ onNavigate, session }) {
                   {cameraStatus === 'connected' ? (
                     <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#E5E7EB' }}>
                       <WebView
-                        source={{ uri: dbStreamUrl || VIDEO_STREAM_URL }}
-                        style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                        originWhitelist={['*']}
+                        source={{
+                          html: `<!DOCTYPE html>
+                            <html>
+                            <head>
+                              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                              <style>
+                                body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #E5E7EB; overflow: hidden; }
+                                img { width: 100%; height: 100%; object-fit: cover; }
+                              </style>
+                            </head>
+                            <body>
+                              <img src="${stableStreamUrl}" onerror="console.log('Stream Failed')" />
+                            </body>
+                            </html>`,
+                          baseUrl: VIDEO_STREAM_URL,
+                        }}
+                        style={{ flex: 1, width: '100%', height: '100%', backgroundColor: 'transparent' }}
                         scrollEnabled={false}
                         bounces={false}
                         showsVerticalScrollIndicator={false}
                         showsHorizontalScrollIndicator={false}
-                        originWhitelist={['*']}
                         mixedContentMode="always"
                         allowsInlineMediaPlayback={true}
+                        javaScriptEnabled={true}
+                        domStorageEnabled={true}
                       />
                     </View>
                   ) : (
@@ -490,6 +507,7 @@ export default function CameraScreen({ onNavigate, session }) {
                       <Text style={styles.liveFeedLabel}>Connecting...</Text>
                     </View>
                   )}
+
 
                   <View style={[styles.cameraStatusBadge, { backgroundColor: cameraStatus === 'connected' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(30, 30, 30, 0.75)' }]}>
                     <Animated.View style={[styles.cameraStatusDot, {
