@@ -201,7 +201,7 @@ export default function PhotoCheck({ onNavigate, session }) {
                             style={{
                                 width: '45%',
                                 aspectRatio: 1,
-                                backgroundColor: '#FFF',
+                                backgroundColor: phoneCameraEnabled ? '#FFF' : '#F1F5F9',
                                 borderRadius: 15,
                                 borderStyle: images[index] ? 'solid' : 'dashed',
                                 borderWidth: 2,
@@ -269,7 +269,7 @@ export default function PhotoCheck({ onNavigate, session }) {
                         shadowOffset: { width: 0, height: 4 },
                         shadowOpacity: 0.2,
                         shadowRadius: 5,
-                        elevation: 5,
+                        elevation: phoneCameraEnabled ? 5 : 0,
                     }}
                     onPress={handleStartAiCheck}
                     disabled={loading}
@@ -289,3 +289,24 @@ export default function PhotoCheck({ onNavigate, session }) {
         </SafeAreaView>
     );
 }
+
+const localStyles = StyleSheet.create({
+    offBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FEE2E2',
+        borderRadius: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        marginBottom: 16,
+        width: '100%',
+        borderWidth: 1,
+        borderColor: '#FECACA',
+    },
+    offBannerText: {
+        fontSize: 12,
+        color: '#B91C1C',
+        fontWeight: '600',
+        flex: 1,
+    },
+});
