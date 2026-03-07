@@ -96,7 +96,7 @@ export default function HomeHeader({
       </View>
 
       {/* ขวา: Icons หรือ Custom Component */}
-      <View style={{ width: leftComponent ? 44 : 80, alignItems: 'flex-end' }}>
+      <View style={rightComponent ? { minWidth: 44, alignItems: 'flex-end' } : { width: leftComponent ? 44 : 80, alignItems: 'flex-end' }}>
         {rightComponent ? rightComponent : (
           <View style={styles.iconGroup}>
             <TouchableOpacity style={styles.iconBtn} onPress={onNotify}>

@@ -315,7 +315,7 @@ export default function App() {
         return <GalleryScreen session={session} onBack={() => setAuthScreen('Camera')} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
       }
       if (currentScreenName === 'Setcamera') {
-        return <SetcameraScreen session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+        return <SetcameraScreen session={session} params={screenParams} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
       }
       if (currentScreenName === 'PhotoCheck') {
         return <PhotoCheck onNavigate={(screen) => setAuthScreen(screen)} />;
@@ -368,10 +368,16 @@ export default function App() {
             session={session}
             initialStep={screenParams?.initialStep}
             brand={screenParams?.brand}
+            returnTo={screenParams?.returnTo}
+            confirmBackToPrevious={screenParams?.confirmBackToPrevious}
             mode={screenParams?.mode}
             isHideBackButton={screenParams?.isHideBackButton}
             isHideSkipButton={screenParams?.isHideSkipButton}
-            onBack={() => setAuthScreen(screenParams?.returnTo || 'Setting')}
+            onBack={() => {
+              const target = screenParams?.returnTo || 'Setting';
+              const params = screenParams?.returnParams;
+              setAuthScreen(params ? { screen: target, params } : target);
+            }}
             onConfirm={() => setAuthScreen(screenParams?.returnTo || 'Camera')}
           />
         );

@@ -4,11 +4,24 @@ import cv2
 import time
 import threading
 import numpy as np
-from flask import Flask, Response, jsonify
+import re
+import json
+from datetime import datetime, timezone
+from urllib.parse import urlparse
+from urllib.request import urlopen
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
+from dotenv import load_dotenv
+
+try:
+    from supabase import create_client
+except Exception:
+    create_client = None
 
 # ── กำหนดให้ใช้ TCP สำหรับ RTSP ──────────────────────────────────────────────
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+    "rtsp_transport;tcp|stimeout;5000000|max_delay;500000|fflags;nobuffer|flags;low_delay"
+)
 
 # ── เพิ่ม path ของ smart_cat_health เพื่อ import โมเดล ───────────────────────
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,13 +39,16 @@ CORS(app)
 # ══════════════════════════════════════════════════════════════════════════════
 # 🚨 แก้ไข 2 ค่านี้ให้ตรงกับกล้องของคุณ
 # ══════════════════════════════════════════════════════════════════════════════
-RTSP_URL    = "rtsp://testt1:1234test@172.20.10.8:554/stream2"
-PROCESS_WIDTH = 640          # ย่อ frame ก่อนส่งโมเดล (เพื่อความเร็ว)
-PROCESS_EVERY_N = 10          # ประมวลผลทุก N frame (1 = ทุก frame)
+RTSP_URL    = "rtsp://testt1:1234test@192.168.1.102:554/stream2"
+PROCESS_WIDTH = 480          # ย่อ frame ก่อนส่งโมเดล (เพื่อความเร็ว)
+PROCESS_EVERY_N = 3          # ประมวลผลทุก N frame (1 = ทุก frame)
 DETECTION_CONF   = 0.65        # confidence ขั้นต่ำสำหรับแมว
 MIN_BBOX_AREA    = 5000        # พื้นที่ขั้นต่ำ (px²) — กรอง object เล็กเกินไปออก
 MAX_BBOX_RATIO   = 0.40        # bbox สูงสุดไม่เกิน 40% สัดส่วน frame (คนยืนใกล้กล้องมักใหญ่กว่านี้)
 MIN_ASPECT_RATIO = 0.40        # width/height ขั้นต่ำ — คนยืน ~0.2-0.35, แมว ~0.5-1.5
+JPEG_QUALITY = 68              # ลดขนาดภาพ MJPEG เพื่อลดหน่วงในแอพ/WebView
+STREAM_OUTPUT_FPS = 15         # จำกัด FPS ฝั่ง output เพื่อลดอาการค้าง/กระตุก
+STREAM_MAX_WIDTH = 960         # ย่อเฟรมก่อน encode เพื่อให้ stream ลื่นขึ้น
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── โหลดโมเดล ────────────────────────────────────────────────────────────────
@@ -77,39 +93,903 @@ _ABNORMAL_BEHAVIORS = {"head_pressing", "vomiting"}
 
 # ── state สำหรับ inference แบบ async ─────────────────────────────────────────
 _latest_frame_lock  = threading.Lock()
-_latest_frame       = None          # frame ดิบล่าสุด (numpy)
-_latest_annotated   = None          # frame ที่ผ่าน AI แล้ว (numpy)
+_latest_frame       = None          # frame raw latest (numpy)
+_latest_frame_ts    = 0.0
+_latest_annotated   = None          # latest annotated frame (numpy)
+_latest_annotated_ts = 0.0
 _ai_results         = []            # ผลลัพธ์ล่าสุด (list of dict)
 _ai_results_lock    = threading.Lock()
 _frame_idx          = 0
+_capture_fps        = 0.0
+
+# ── Camera State & Source Variables ──────────────────────────────────────────
+_camera_status      = "connecting"
+_current_source     = RTSP_URL
+_source_type        = "live" # "live" or "demo"
+_source_lock        = threading.Lock()
+_current_camera_id  = None
+_current_owner_id   = None
+_source_updated_at  = None
+_last_good_source   = RTSP_URL
+_last_good_type     = "live"
+_bad_source_until   = {}
+_assigned_cat_ids   = []
+_track_cat_map      = {}
+_last_db_write_at   = None
+_last_context_refresh_at = 0.0
+_activity_sessions  = {}
+SESSION_MIN_DURATION_SEC = 8.0
+SESSION_MIN_FRAMES = 6
+SESSION_IDLE_TIMEOUT_SEC = 6.0
+BEHAVIOR_MIN_DURATION_SEC = {
+    "eat": 10.0,
+    "litter": 10.0,
+    "sleep": 20.0,
+    "activity": 8.0,
+    "abnormal": 6.0,
+}
+BEHAVIOR_EVENT_COOLDOWN_SEC = {
+    "eat": 120.0,
+    "litter": 120.0,
+    "sleep": 300.0,
+    "activity": 60.0,
+    "abnormal": 20.0,
+}
+_last_committed_by_cat_behavior = {}
+_snapshots_last_ts  = {}
+SNAPSHOT_COOLDOWN_SEC = 25.0
+DB_SOURCE_SYNC_SEC = 20
+ENV_CACHE_SEC = 10 * 60
+ZONE_MOVE_DISTANCE_THRESHOLD = 14
+ZONE_MOVE_STABLE_SEC = 15
+ZONE_MOVE_ALERT_COOLDOWN_SEC = 15 * 60
+_environment_cache = {
+    "key": None,
+    "ts": 0.0,
+    "payload": None,
+}
+_zone_lock = threading.Lock()
+_zones_by_type = {"food": [], "litter": []}
+_zone_baseline_signature = None
+_camera_moved = False
+_camera_moved_since = 0.0
+_last_zone_distance = None
+_last_camera_move_alert_at = 0.0
+
+
+def _init_supabase():
+    if not create_client:
+        return None
+    try:
+        load_dotenv(os.path.join(THIS_DIR, "..", ".env"))
+        load_dotenv(os.path.join(THIS_DIR, "..", "..", ".env"))
+        url = os.getenv("EXPO_PUBLIC_SUPABASE_URL")
+        key = os.getenv("SUPABASE_SERVICE_KEY")
+        if not (url and key):
+            return None
+        return create_client(url, key)
+    except Exception as e:
+        print(f"[DB] init supabase failed: {e}")
+        return None
+
+
+_supabase = _init_supabase()
+
+
+def _is_uuid_like(v):
+    s = str(v or "")
+    return len(s) >= 32 and "-" in s
+
+
+def _normalize_source_url(raw):
+    s = str(raw or "").strip()
+    # fix accidental spaces in URLs from app input such as "rtsp:// /user:pass@..."
+    if s.startswith(("rtsp://", "http://", "https://")):
+        s = "".join(s.split())
+    return s
+
+
+def _is_valid_source_url(source_url):
+    s = _normalize_source_url(source_url)
+    if not s:
+        return False
+    if not s.startswith(("rtsp://", "http://", "https://")):
+        return False
+    try:
+        parsed = urlparse(s)
+        host = (parsed.hostname or "").strip()
+        if not host:
+            return False
+        # reject malformed host like "192.168.1..145"
+        if ".." in host or " " in host:
+            return False
+        # Validate IPv4 if host looks numeric.
+        if re.match(r"^[0-9.]+$", host):
+            parts = host.split(".")
+            if len(parts) != 4:
+                return False
+            for p in parts:
+                if not p.isdigit():
+                    return False
+                v = int(p)
+                if v < 0 or v > 255:
+                    return False
+    except Exception:
+        return False
+    return True
+
+
+def _mark_bad_source(source_url, cooldown_sec=120):
+    s = _normalize_source_url(source_url)
+    if not s:
+        return
+    _bad_source_until[s] = time.time() + max(10, int(cooldown_sec))
+
+
+def _is_temporarily_bad_source(source_url):
+    s = _normalize_source_url(source_url)
+    if not s:
+        return False
+    until = float(_bad_source_until.get(s) or 0.0)
+    if until <= 0:
+        return False
+    if time.time() >= until:
+        _bad_source_until.pop(s, None)
+        return False
+    return True
+
+
+def _probe_source_readable(source_url, source_type="live"):
+    s = _normalize_source_url(source_url)
+    if not s:
+        return False
+    try:
+        cap = cv2.VideoCapture(s, cv2.CAP_FFMPEG if "rtsp" in s.lower() else cv2.CAP_ANY)
+        try:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 2500)
+            if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 2500)
+        except Exception:
+            pass
+        if not cap.isOpened():
+            return False
+        ok, _ = cap.read()
+        if ok:
+            return True
+        # Demo files may need first seek/read cycle on some backends.
+        if source_type == "demo":
+            try:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ok2, _ = cap.read()
+                return bool(ok2)
+            except Exception:
+                return False
+        return False
+    except Exception:
+        return False
+    finally:
+        try:
+            cap.release()
+        except Exception:
+            pass
+
+
+def _to_float(v):
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
+def _frame_signature(frame):
+    if frame is None:
+        return None
+    try:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        small = cv2.resize(gray, (9, 8))
+        diff = small[:, 1:] > small[:, :-1]
+        bits = "".join("1" if b else "0" for b in diff.flatten())
+        return f"{int(bits, 2):016x}"
+    except Exception:
+        return None
+
+
+def _hamming_hex(a, b):
+    if not a or not b:
+        return None
+    try:
+        return bin(int(str(a), 16) ^ int(str(b), 16)).count("1")
+    except Exception:
+        return None
+
+
+def _extract_rect_from_polygon(poly):
+    if not isinstance(poly, dict):
+        return None
+    rect = poly.get("rect") if isinstance(poly.get("rect"), dict) else None
+    if rect:
+        x = _to_float(rect.get("x"))
+        y = _to_float(rect.get("y"))
+        w = _to_float(rect.get("w"))
+        h = _to_float(rect.get("h"))
+        if None not in (x, y, w, h):
+            return {
+                "x": max(0.0, min(1.0, x)),
+                "y": max(0.0, min(1.0, y)),
+                "w": max(0.0, min(1.0, w)),
+                "h": max(0.0, min(1.0, h)),
+            }
+    pts = poly.get("points") if isinstance(poly.get("points"), list) else None
+    if pts and len(pts) >= 3:
+        xs = [_to_float(p.get("x")) for p in pts if isinstance(p, dict)]
+        ys = [_to_float(p.get("y")) for p in pts if isinstance(p, dict)]
+        xs = [v for v in xs if v is not None]
+        ys = [v for v in ys if v is not None]
+        if xs and ys:
+            x1, x2 = max(0.0, min(xs)), min(1.0, max(xs))
+            y1, y2 = max(0.0, min(ys)), min(1.0, max(ys))
+            return {"x": x1, "y": y1, "w": max(0.0, x2 - x1), "h": max(0.0, y2 - y1)}
+    return None
+
+
+def _point_in_rect_norm(px, py, rect):
+    if not isinstance(rect, dict):
+        return False
+    x = _to_float(rect.get("x"))
+    y = _to_float(rect.get("y"))
+    w = _to_float(rect.get("w"))
+    h = _to_float(rect.get("h"))
+    if None in (x, y, w, h):
+        return False
+    return (x <= px <= (x + w)) and (y <= py <= (y + h))
+
+
+def _get_coords_for_camera(camera_id):
+    # 1) CAMERA_COORDS_JSON='{"<camera_id>":{"lat":13.7,"lon":100.5},"default":{"lat":13.7,"lon":100.5}}'
+    raw = os.getenv("CAMERA_COORDS_JSON")
+    if raw:
+        try:
+            obj = json.loads(raw)
+            entry = None
+            if camera_id and isinstance(obj, dict):
+                entry = obj.get(str(camera_id))
+            if not entry and isinstance(obj, dict):
+                entry = obj.get("default")
+            if isinstance(entry, dict):
+                lat = _to_float(entry.get("lat"))
+                lon = _to_float(entry.get("lon"))
+                if lat is not None and lon is not None:
+                    return lat, lon, "env_camera_coords_json"
+        except Exception:
+            pass
+
+    # 2) CAMERA_LAT / CAMERA_LON
+    lat = _to_float(os.getenv("CAMERA_LAT"))
+    lon = _to_float(os.getenv("CAMERA_LON"))
+    if lat is not None and lon is not None:
+        return lat, lon, "env_camera_latlon"
+
+    return None, None, None
+
+
+def _fetch_open_meteo_current(lat, lon):
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lon}"
+        "&current=temperature_2m,relative_humidity_2m"
+        "&timezone=auto"
+    )
+    with urlopen(url, timeout=5) as resp:
+        raw = resp.read().decode("utf-8")
+    data = json.loads(raw)
+    cur = (data or {}).get("current") or {}
+    temp = _to_float(cur.get("temperature_2m"))
+    hum = _to_float(cur.get("relative_humidity_2m"))
+    if temp is None or hum is None:
+        return None
+    return {
+        "temperature": round(temp, 1),
+        "humidity": int(round(hum)),
+        "provider": "open-meteo",
+    }
+
+
+def _map_behavior_to_db(behavior):
+    m = {
+        "eating": "eat",
+        "toileting": "litter",
+        "resting": "sleep",
+        "active": "activity",
+        "grooming": "activity",
+        "head_pressing": "abnormal",
+        "vomiting": "abnormal",
+        "unknown": "activity",
+    }
+    return m.get(str(behavior or "").lower(), "activity")
+
+
+def _behavior_from_zone(bbox, frame_shape):
+    if not bbox or frame_shape is None:
+        return None
+    try:
+        h, w = frame_shape[:2]
+        if w <= 0 or h <= 0:
+            return None
+        x1, y1, x2, y2 = [int(v) for v in bbox]
+        cx = max(0, min(w - 1, int((x1 + x2) / 2))) / float(w)
+        cy = max(0, min(h - 1, int((y1 + y2) / 2))) / float(h)
+        with _zone_lock:
+            litter_zones = list(_zones_by_type.get("litter") or [])
+            food_zones = list(_zones_by_type.get("food") or [])
+        for z in litter_zones:
+            if _point_in_rect_norm(cx, cy, z.get("rect")):
+                return "litter"
+        for z in food_zones:
+            if _point_in_rect_norm(cx, cy, z.get("rect")):
+                return "eat"
+        return None
+    except Exception:
+        return None
+
+
+def _emit_camera_moved_alert(distance_bits):
+    global _last_camera_move_alert_at
+    if not (_supabase and _is_uuid_like(_current_owner_id)):
+        return
+    now_ts = time.time()
+    if (now_ts - _last_camera_move_alert_at) < ZONE_MOVE_ALERT_COOLDOWN_SEC:
+        return
+    _last_camera_move_alert_at = now_ts
+    try:
+        _supabase.table("alerts").insert({
+            "owner_id": _current_owner_id,
+            "camera_id": _current_camera_id if _is_uuid_like(_current_camera_id) else None,
+            "type": "camera_moved",
+            "severity": "warning",
+            "title": "Camera angle changed",
+            "description": "Zone accuracy may be affected. Please re-calibrate zones in Camera Settings.",
+            "details": f"frame signature distance={distance_bits}",
+            "source": "serverCam_zone_guard",
+            "metadata": {
+                "distance_bits": int(distance_bits),
+                "zone_guard": True,
+            },
+        }).execute()
+    except Exception as e:
+        print(f"[DB] camera_moved alert insert failed: {e}")
+
+
+def _update_camera_move_state(frame):
+    global _camera_moved, _camera_moved_since, _last_zone_distance
+    with _zone_lock:
+        baseline = _zone_baseline_signature
+    if not baseline:
+        _camera_moved = False
+        _camera_moved_since = 0.0
+        _last_zone_distance = None
+        return
+    sig = _frame_signature(frame)
+    dist = _hamming_hex(sig, baseline)
+    _last_zone_distance = dist
+    if dist is None:
+        return
+    now_ts = time.time()
+    if dist >= ZONE_MOVE_DISTANCE_THRESHOLD:
+        if _camera_moved_since <= 0:
+            _camera_moved_since = now_ts
+        if (now_ts - _camera_moved_since) >= ZONE_MOVE_STABLE_SEC:
+            if not _camera_moved:
+                _emit_camera_moved_alert(dist)
+            _camera_moved = True
+    else:
+        _camera_moved = False
+        _camera_moved_since = 0.0
+
+
+def _refresh_camera_context(camera_id, owner_id=None):
+    global _assigned_cat_ids, _track_cat_map, _current_owner_id, _zones_by_type, _zone_baseline_signature
+    _assigned_cat_ids = []
+    _track_cat_map = {}
+    with _zone_lock:
+        _zones_by_type = {"food": [], "litter": []}
+        _zone_baseline_signature = None
+    if not (_supabase and _is_uuid_like(camera_id)):
+        return
+    try:
+        if not owner_id:
+            cam = _supabase.table("cameras").select("owner_id").eq("id", camera_id).maybe_single().execute().data
+            if cam and cam.get("owner_id"):
+                _current_owner_id = cam["owner_id"]
+        rows = (
+            _supabase.table("camera_cats")
+            .select("cat_id,is_primary,assigned_at")
+            .eq("camera_id", camera_id)
+            .order("is_primary", desc=True)
+            .order("assigned_at", desc=False)
+            .execute()
+            .data
+            or []
+        )
+        _assigned_cat_ids = [str(r.get("cat_id")) for r in rows if _is_uuid_like(r.get("cat_id"))]
+        print(f"[DB] camera={camera_id} assigned_cats={len(_assigned_cat_ids)}")
+
+        zrows = (
+            _supabase.table("camera_zones")
+            .select("id,zone_type,label,polygon")
+            .eq("camera_id", camera_id)
+            .in_("zone_type", ["food", "litter"])
+            .execute()
+            .data
+            or []
+        )
+        zones_next = {"food": [], "litter": []}
+        baseline = None
+        for z in zrows:
+            zt = str(z.get("zone_type") or "").lower()
+            if zt not in zones_next:
+                continue
+            poly = z.get("polygon") if isinstance(z.get("polygon"), dict) else {}
+            rect = _extract_rect_from_polygon(poly)
+            if not rect:
+                continue
+            zones_next[zt].append({
+                "id": z.get("id"),
+                "label": z.get("label") or zt,
+                "rect": rect,
+            })
+            if not baseline:
+                sig = poly.get("frame_signature")
+                if isinstance(sig, str) and len(sig) >= 8:
+                    baseline = sig
+        with _zone_lock:
+            _zones_by_type = zones_next
+            _zone_baseline_signature = baseline
+        print(f"[DB] camera={camera_id} zones food={len(zones_next['food'])} litter={len(zones_next['litter'])}")
+    except Exception as e:
+        print(f"[DB] load camera context failed: {e}")
+
+
+def _pick_cat_uuid(track_id):
+    if not _assigned_cat_ids:
+        return None
+    if track_id in _track_cat_map:
+        return _track_cat_map[track_id]
+    if len(_assigned_cat_ids) == 1:
+        chosen = _assigned_cat_ids[0]
+    else:
+        chosen = _assigned_cat_ids[int(abs(hash(track_id))) % len(_assigned_cat_ids)]
+    _track_cat_map[track_id] = chosen
+    return chosen
+
+
+def _write_ai_events(results_this_frame):
+    # Deprecated by session-based write; keep function for compatibility.
+    return
+
+
+def _upload_snapshot_to_storage(frame, bbox, cat_uuid, event_iso):
+    if _supabase is None or frame is None:
+        return None
+    if not (_is_uuid_like(_current_camera_id) and _is_uuid_like(cat_uuid)):
+        return None
+    now_ts = time.time()
+    snap_key = f"{_current_camera_id}|{cat_uuid}"
+    if (now_ts - _snapshots_last_ts.get(snap_key, 0.0)) < SNAPSHOT_COOLDOWN_SEC:
+        return None
+
+    try:
+        x1, y1, x2, y2 = [int(v) for v in bbox]
+        h, w = frame.shape[:2]
+        x1, y1 = max(0, x1 - 18), max(0, y1 - 18)
+        x2, y2 = min(w, x2 + 18), min(h, y2 + 18)
+        if x2 <= x1 or y2 <= y1:
+            return None
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return None
+        ok, enc = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 82])
+        if not ok:
+            return None
+        stamp = event_iso.replace(":", "").replace("-", "").replace(".", "")
+        object_path = f"{_current_camera_id}/{cat_uuid}/session_{stamp}_{int(now_ts*1000)}.jpg"
+        bucket = "camera-snapshots"
+        storage = _supabase.storage.from_(bucket)
+        try:
+            storage.upload(object_path, enc.tobytes(), {"content-type": "image/jpeg", "x-upsert": "true"})
+        except Exception as e:
+            if "Bucket not found" in str(e):
+                created = False
+                for call in (
+                    lambda: _supabase.storage.create_bucket(bucket),
+                    lambda: _supabase.storage.create_bucket(bucket, {"public": True}),
+                    lambda: _supabase.storage.create_bucket(bucket, options={"public": True}),
+                    lambda: _supabase.storage.create_bucket(bucket, public=True),
+                ):
+                    try:
+                        call()
+                        created = True
+                        break
+                    except Exception:
+                        continue
+                if not created:
+                    raise RuntimeError("cannot create storage bucket camera-snapshots")
+                storage = _supabase.storage.from_(bucket)
+                storage.upload(object_path, enc.tobytes(), {"content-type": "image/jpeg", "x-upsert": "true"})
+            else:
+                raise
+        res = storage.get_public_url(object_path)
+        if isinstance(res, dict):
+            data = res.get("data") or {}
+            url = data.get("publicUrl") or data.get("public_url")
+        elif hasattr(res, "get"):
+            url = res.get("publicUrl") or res.get("public_url")
+        else:
+            url = str(res) if res else None
+        _snapshots_last_ts[snap_key] = now_ts
+        return url
+    except Exception as e:
+        print(f"[DB] snapshot upload failed: {e}")
+        return None
+
+
+def _commit_session(cat_uuid, sess, frame=None):
+    global _last_db_write_at
+    if not (_supabase and _is_uuid_like(_current_camera_id) and _is_uuid_like(cat_uuid)):
+        return
+    behavior_db = str(sess.get("behavior_db") or "activity")
+    duration = float(sess["last_ts"] - sess["start_ts"])
+    if int(sess.get("frames") or 0) < SESSION_MIN_FRAMES:
+        return
+    min_duration = float(BEHAVIOR_MIN_DURATION_SEC.get(behavior_db, SESSION_MIN_DURATION_SEC))
+    if duration < max(SESSION_MIN_DURATION_SEC, min_duration):
+        return
+    cooldown_sec = float(BEHAVIOR_EVENT_COOLDOWN_SEC.get(behavior_db, 0.0))
+    dedupe_key = f"{cat_uuid}|{behavior_db}"
+    last_commit_ts = float(_last_committed_by_cat_behavior.get(dedupe_key) or 0.0)
+    if cooldown_sec > 0 and last_commit_ts > 0 and (float(sess["last_ts"]) - last_commit_ts) < cooldown_sec:
+        return
+
+    confidence = float(sess["conf_sum"] / max(1, sess["conf_n"]))
+    event_iso = datetime.fromtimestamp(sess["last_ts"], tz=timezone.utc).isoformat()
+    abnormal = behavior_db == "abnormal"
+
+    try:
+        _supabase.table("ai_cat_events").insert({
+            "camera_id": _current_camera_id,
+            "cat_id": cat_uuid,
+            "behavior_label": behavior_db,
+            "confidence": confidence,
+            "abnormal": abnormal,
+            "occurred_at": event_iso,
+        }).execute()
+        _last_committed_by_cat_behavior[dedupe_key] = float(sess["last_ts"])
+        _last_db_write_at = event_iso
+    except Exception as e:
+        print(f"[DB] insert ai_cat_events failed: {e}")
+        return
+
+    snapshot_url = _upload_snapshot_to_storage(frame, sess.get("bbox"), cat_uuid, event_iso)
+    try:
+        _supabase.table("ai_cat_identity_review").insert({
+            "camera_id": _current_camera_id,
+            "pred_cat_id": cat_uuid,
+            "confidence": confidence,
+            "behavior_label": behavior_db,
+            "occurred_at": event_iso,
+            "snapshot_url": snapshot_url,
+            "reviewed": True,
+            "resolved_by": "auto",
+            "resolved_cat_id": cat_uuid,
+            "reviewed_at": event_iso,
+            "source": "serverCam_session",
+            "session_id": f"session_{cat_uuid}_{int(sess['start_ts'])}_{int(sess['last_ts'])}",
+            "metadata": {
+                "session_based": True,
+                "duration_sec": round(duration, 2),
+                "frames": int(sess["frames"]),
+                "has_snapshot": bool(snapshot_url),
+            },
+        }).execute()
+        _last_db_write_at = event_iso
+    except Exception as e:
+        print(f"[DB] insert ai_cat_identity_review failed: {e}")
+
+
+def _update_activity_sessions(frame, results_this_frame):
+    now_ts = time.time()
+    seen = {}
+    for r in results_this_frame:
+        track_id = r.get("track_id")
+        cat_uuid = _pick_cat_uuid(track_id)
+        if not _is_uuid_like(cat_uuid):
+            continue
+        prev = seen.get(cat_uuid)
+        if prev is None or float(r.get("confidence") or 0.0) >= float(prev.get("confidence") or 0.0):
+            seen[cat_uuid] = r
+
+    for cat_uuid, r in seen.items():
+        with _zone_lock:
+            has_zone_rules = (len(_zones_by_type.get("food") or []) + len(_zones_by_type.get("litter") or [])) > 0
+        zone_behavior = _behavior_from_zone(r.get("bbox"), frame.shape if frame is not None else None)
+        if has_zone_rules and zone_behavior:
+            behavior_db = zone_behavior
+        else:
+            behavior_db = _map_behavior_to_db(r.get("behavior"))
+            # Count eat/litter only when inside configured zones to reduce false positives.
+            if has_zone_rules and behavior_db in ("eat", "litter"):
+                behavior_db = "activity"
+        conf = float(r.get("confidence") or 0.0)
+        bbox = r.get("bbox") or [0, 0, 0, 0]
+        sess = _activity_sessions.get(cat_uuid)
+        if not sess:
+            _activity_sessions[cat_uuid] = {
+                "behavior_db": behavior_db,
+                "start_ts": now_ts,
+                "last_ts": now_ts,
+                "conf_sum": conf,
+                "conf_n": 1,
+                "frames": 1,
+                "bbox": bbox,
+            }
+            continue
+
+        if sess["behavior_db"] == behavior_db:
+            sess["last_ts"] = now_ts
+            sess["conf_sum"] += conf
+            sess["conf_n"] += 1
+            sess["frames"] += 1
+            sess["bbox"] = bbox
+        else:
+            _commit_session(cat_uuid, sess, frame=frame)
+            _activity_sessions[cat_uuid] = {
+                "behavior_db": behavior_db,
+                "start_ts": now_ts,
+                "last_ts": now_ts,
+                "conf_sum": conf,
+                "conf_n": 1,
+                "frames": 1,
+                "bbox": bbox,
+            }
+
+    stale = []
+    for cat_uuid, sess in _activity_sessions.items():
+        if cat_uuid in seen:
+            continue
+        if (now_ts - sess["last_ts"]) >= SESSION_IDLE_TIMEOUT_SEC:
+            _commit_session(cat_uuid, sess, frame=frame)
+            stale.append(cat_uuid)
+    for cat_uuid in stale:
+        _activity_sessions.pop(cat_uuid, None)
+
+
+def _guess_source_type(source_url):
+    s = str(source_url or "").lower()
+    if any(ext in s for ext in (".mp4", ".webm", ".mov", ".mkv", ".avi")):
+        return "demo"
+    if "storage/v1/object/public/" in s:
+        return "demo"
+    return "live"
 
 # ── thread อ่านกล้อง ──────────────────────────────────────────────────────────
-def _camera_reader_thread():
-    global _latest_frame, _frame_idx
-    print(f"📷 [Camera] กำลังเชื่อมต่อ: {RTSP_URL}")
+def _pick_active_camera_from_db():
+    if _supabase is None:
+        return None
+    try:
+        rows = (
+            _supabase.table("cameras")
+            .select("id,owner_id,stream_source,stream_source_type,is_primary,is_ai_enabled,ai_connection_status,created_at")
+            .order("is_primary", desc=True)
+            .order("created_at", desc=False)
+            .limit(50)
+            .execute()
+            .data
+            or []
+        )
+        candidates = []
+        for r in rows:
+            src = _normalize_source_url(r.get("stream_source"))
+            if not _is_valid_source_url(src):
+                continue
+            c = dict(r)
+            c["stream_source"] = src
+            c["_source_type_guess"] = _guess_source_type(src)
+            candidates.append(c)
+        if not candidates:
+            return None
+
+        # Prefer cameras that already have assigned cats.
+        candidate_ids = [c.get("id") for c in candidates if _is_uuid_like(c.get("id"))]
+        assigned_map = {}
+        if candidate_ids:
+            try:
+                cc_rows = (
+                    _supabase.table("camera_cats")
+                    .select("camera_id")
+                    .in_("camera_id", candidate_ids)
+                    .execute()
+                    .data
+                    or []
+                )
+                for rr in cc_rows:
+                    cid = str(rr.get("camera_id") or "")
+                    assigned_map[cid] = assigned_map.get(cid, 0) + 1
+            except Exception:
+                assigned_map = {}
+
+        # Prefer LIVE sources first so demo URLs do not override active RTSP cameras.
+        live_first = sorted(
+            candidates,
+            key=lambda r: (
+                0 if r.get("_source_type_guess") == "live" else 1,
+                0 if assigned_map.get(str(r.get("id") or ""), 0) > 0 else 1,
+                0 if (r.get("is_ai_enabled") is True or str(r.get("ai_connection_status") or "").lower() == "online") else 1,
+                0 if r.get("is_primary") else 1,
+            ),
+        )
+        return live_first[0]
+    except Exception as e:
+        print(f"[DB] pick active camera failed: {e}")
+        return None
+
+
+def _apply_source_from_db(cam_row):
+    global _current_source, _source_type, _current_camera_id, _current_owner_id, _source_updated_at, _last_context_refresh_at
+    if not cam_row:
+        return False
+    source_url = _normalize_source_url(cam_row.get("stream_source"))
+    if not source_url:
+        return False
+    camera_id = cam_row.get("id")
+    owner_id = cam_row.get("owner_id")
+    source_type = _guess_source_type(source_url)
+
+    changed = False
+    with _source_lock:
+        # Do not let DB demo source hijack a working live camera stream.
+        if _camera_status == "connected" and _source_type == "live" and source_type == "demo":
+            return False
+        # Keep current live stream stable while healthy; don't hot-swap to another DB live URL.
+        if (
+            _camera_status == "connected"
+            and _is_uuid_like(_current_camera_id)
+            and _source_type == "live"
+            and source_type == "live"
+            and str(_current_source or "") != str(source_url or "")
+        ):
+            return False
+        new_key = f"{source_type}|{camera_id}|{source_url}"
+        old_key = f"{_source_type}|{_current_camera_id}|{_current_source}"
+        if new_key != old_key:
+            _source_type = source_type
+            _current_source = source_url
+            _current_camera_id = camera_id
+            _current_owner_id = owner_id
+            _source_updated_at = time.time()
+            _track_cat_map.clear()
+            _activity_sessions.clear()
+            changed = True
+
+    # Keep camera context fresh even when source URL doesn't change.
+    # This allows server-only mode (no UI) to keep assigned cats synced from DB.
+    now_ts = time.time()
+    if changed or (not _is_uuid_like(_current_camera_id)) or (now_ts - _last_context_refresh_at > 60):
+        _refresh_camera_context(camera_id=camera_id, owner_id=owner_id)
+        _last_context_refresh_at = now_ts
+        if changed:
+            print(f"[DB] auto source applied camera={camera_id} type={source_type}")
+    return changed
+
+
+def _db_source_sync_thread():
+    # Keep source synced from DB even when UI app is not opened.
     while True:
-        cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
+        try:
+            cam = _pick_active_camera_from_db()
+            if cam:
+                _apply_source_from_db(cam)
+            else:
+                # No camera row found yet; clear transient mapping but keep stream alive.
+                _track_cat_map.clear()
+        except Exception as e:
+            print(f"[DB] source sync error: {e}")
+        time.sleep(DB_SOURCE_SYNC_SEC)
+
+
+def _camera_reader_thread():
+    global _latest_frame, _latest_frame_ts, _frame_idx, _capture_fps, _camera_status, _current_source, _source_type, _last_good_source, _last_good_type
+
+    while True:
+        with _source_lock:
+            source_to_play = _current_source
+            type_to_play   = _source_type
+        
+        print(f"📷 [VideoSource] สลับเป็นโหมด: {type_to_play} | Source: {source_to_play}")
+        cap = cv2.VideoCapture(source_to_play, cv2.CAP_FFMPEG if "rtsp" in str(source_to_play).lower() else cv2.CAP_ANY)
+        try:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+            if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+        except Exception:
+            pass
+
         if not cap.isOpened():
-            print("❌ [Camera] เชื่อมต่อล้มเหลว รออีก 3 วิ...")
-            time.sleep(3)
+            print("❌ [VideoSource] เปิดไม่ได้ รออีก 3 วิ...")
+            _mark_bad_source(source_to_play, cooldown_sec=180)
+            with _source_lock:
+                _camera_status = "disconnected"
+                # Fallback to last known good source if new source cannot be opened
+                if _last_good_source and _current_source != _last_good_source:
+                    print(f"↩ [VideoSource] fallback to last good source: {_last_good_source}")
+                    _current_source = _last_good_source
+                    _source_type = _last_good_type
+            time.sleep(1)
             continue
-        print("✅ [Camera] เชื่อมต่อสำเร็จ!")
+
+        with _source_lock:
+            _camera_status = "connected"
+            _last_good_source = source_to_play
+            _last_good_type = type_to_play
+
+        print(f"✅ [VideoSource] เริ่มเล่น {type_to_play} แล้ว!")
+        
+        # ถ้ารูปแบบไฟล์เป็นวีดีโอ ให้ cap.get(cv2.CAP_PROP_FPS) ไว้คำนวณ wait time
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        frame_time = 1.0 / fps
+
+        # ลูปอ่านเฟรม
         while True:
+            # เช็คว่ามีคำสั่งเปลี่ยน source หรือไม่
+            with _source_lock:
+                if _current_source != source_to_play:
+                    print("🔄 [VideoSource] มีคำสั่งเปลี่ยน Source ขอ stop ตัวเก่า...")
+                    break 
+
+            start_t = time.time()
             ok, frame = cap.read()
+            
             if not ok:
-                print("⚠️  [Camera] สัญญาณขาด กำลัง reconnect...")
-                cap.release()
-                time.sleep(1)
-                break
+                if type_to_play == "demo":
+                    # 🔥 วิดีโอเล่นจบแล้ว ให้ loop ใหม่ 🔥
+                    print("🔄 [VideoSource] วิดีโอเล่นจบแล้ว... กำลังวน Loop ใหม่")
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # กลับไปเฟรม 0
+                    continue
+                else:    
+                    print("⚠️  [VideoSource] สัญญาณสดขาด กำลัง reconnect...")
+                    _mark_bad_source(source_to_play, cooldown_sec=60)
+                    break
+
+            now_ts = time.time()
             with _latest_frame_lock:
+                if _latest_frame_ts > 0:
+                    dt = now_ts - _latest_frame_ts
+                    if dt > 0:
+                        inst_fps = 1.0 / dt
+                        _capture_fps = inst_fps if _capture_fps <= 0 else ((_capture_fps * 0.85) + (inst_fps * 0.15))
                 _latest_frame = frame.copy()
+                _latest_frame_ts = now_ts
                 _frame_idx += 1
+
+            if (_frame_idx % 30) == 0:
+                _update_camera_move_state(frame)
+
+            # ควบคุมความเร็วการเล่นสำหรับ VOD video
+            if type_to_play == "demo":
+                elapsed = time.time() - start_t
+                if elapsed < frame_time:
+                    time.sleep(frame_time - elapsed)
+
+        cap.release()
+        time.sleep(1)
 
 # ── thread ประมวลผล AI ────────────────────────────────────────────────────────
 def _ai_worker_thread():
-    global _latest_annotated
+    global _latest_annotated, _latest_annotated_ts
     last_processed_idx = -1
-    classify_every = 2
+    classify_every = 4
     classify_counter = 0
 
     while True:
@@ -140,6 +1020,7 @@ def _ai_worker_thread():
             if annotated is not None:
                 with _ai_results_lock:
                     _latest_annotated = annotated
+                    _latest_annotated_ts = time.time()
             continue
 
         last_processed_idx = cur_idx
@@ -148,6 +1029,7 @@ def _ai_worker_thread():
         if _tracker is None:
             with _ai_results_lock:
                 _latest_annotated = frame.copy()
+                _latest_annotated_ts = time.time()
             continue
 
         # ── resize สำหรับ inference ──────────────────────────────────────────
@@ -241,6 +1123,7 @@ def _ai_worker_thread():
 
                 results_this_frame.append({
                     "cat_id":    cat_id,
+                    "track_id":  obj.track_id,
                     "behavior":  behavior,
                     "confidence": round(float(confidence), 3),
                     "abnormal":  abnormal,
@@ -261,41 +1144,286 @@ def _ai_worker_thread():
 
         with _ai_results_lock:
             _latest_annotated = annotated
+            _latest_annotated_ts = time.time()
             _ai_results[:] = results_this_frame
+        _update_activity_sessions(frame, results_this_frame)
 
 # ── เริ่ม background threads ──────────────────────────────────────────────────
+try:
+    _apply_source_from_db(_pick_active_camera_from_db())
+except Exception:
+    pass
 threading.Thread(target=_camera_reader_thread, daemon=True).start()
 threading.Thread(target=_ai_worker_thread,     daemon=True).start()
+threading.Thread(target=_db_source_sync_thread, daemon=True).start()
 
 # ── MJPEG stream generator ────────────────────────────────────────────────────
-def _generate_mjpeg():
+def _clamp_int(value, default_value, low, high):
+    try:
+        v = int(value)
+    except Exception:
+        v = int(default_value)
+    return max(low, min(high, v))
+
+
+def _encode_stream_frame(frame, quality, max_width):
+    if frame is None:
+        return None
+    out = frame
+    try:
+        h, w = out.shape[:2]
+        if w > max_width > 0:
+            scale = max_width / float(w)
+            out = cv2.resize(out, (max_width, max(1, int(h * scale))))
+    except Exception:
+        out = frame
+
+    ok, buf = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
+    if not ok:
+        return None
+    return buf.tobytes()
+
+
+def _generate_mjpeg_raw(out_fps=None, jpeg_quality=None, max_width=None):
+    out_fps = _clamp_int(out_fps, STREAM_OUTPUT_FPS, 6, 30)
+    jpeg_quality = _clamp_int(jpeg_quality, JPEG_QUALITY, 35, 90)
+    max_width = _clamp_int(max_width, STREAM_MAX_WIDTH, 320, 1920)
     while True:
         with _ai_results_lock:
-            frame = _latest_annotated
+            ann = _latest_annotated.copy() if _latest_annotated is not None else None
+        with _latest_frame_lock:
+            raw = _latest_frame.copy() if _latest_frame is not None else None
+
+        # Raw-first for smooth motion.
+        frame = raw if raw is not None else ann
 
         if frame is None:
             # ยังไม่มีภาพ — ส่ง placeholder สีดำ
             placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
             cv2.putText(placeholder, "Waiting for camera...",
                         (120, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
-            ret, buf = cv2.imencode(".jpg", placeholder)
+            payload = _encode_stream_frame(placeholder, jpeg_quality, max_width)
         else:
-            ret, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            payload = _encode_stream_frame(frame, jpeg_quality, max_width)
 
-        if not ret:
+        if not payload:
             time.sleep(0.033)
             continue
 
         yield (
             b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+            b"Content-Type: image/jpeg\r\n"
+            b"Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n"
+            b"Pragma: no-cache\r\n\r\n" + payload + b"\r\n"
         )
-        time.sleep(0.033)   # ~30 fps cap
+        time.sleep(1.0 / max(1, out_fps))
+
+
+def _generate_mjpeg_ai(out_fps=None, jpeg_quality=None, max_width=None):
+    out_fps = _clamp_int(out_fps, STREAM_OUTPUT_FPS, 6, 30)
+    jpeg_quality = _clamp_int(jpeg_quality, JPEG_QUALITY, 35, 90)
+    max_width = _clamp_int(max_width, STREAM_MAX_WIDTH, 320, 1920)
+    while True:
+        with _ai_results_lock:
+            ann = _latest_annotated.copy() if _latest_annotated is not None else None
+        with _latest_frame_lock:
+            raw = _latest_frame.copy() if _latest_frame is not None else None
+
+        # AI overlay feed; fallback to raw when AI frame is not available.
+        frame = ann if ann is not None else raw
+
+        if frame is None:
+            placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(placeholder, "Waiting for camera...",
+                        (120, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
+            payload = _encode_stream_frame(placeholder, jpeg_quality, max_width)
+        else:
+            payload = _encode_stream_frame(frame, jpeg_quality, max_width)
+
+        if not payload:
+            time.sleep(0.033)
+            continue
+
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n"
+            b"Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n"
+            b"Pragma: no-cache\r\n\r\n" + payload + b"\r\n"
+        )
+        time.sleep(1.0 / max(1, out_fps))
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/api/video_feed")
 def video_feed():
-    return Response(_generate_mjpeg(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    fps = request.args.get("fps")
+    quality = request.args.get("quality")
+    width = request.args.get("width")
+    return Response(
+        _generate_mjpeg_raw(out_fps=fps, jpeg_quality=quality, max_width=width),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"},
+    )
+
+@app.route("/api/video_feed_raw")
+def video_feed_raw():
+    fps = request.args.get("fps")
+    quality = request.args.get("quality")
+    width = request.args.get("width")
+    return Response(
+        _generate_mjpeg_raw(out_fps=fps, jpeg_quality=quality, max_width=width),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"},
+    )
+
+@app.route("/api/video_feed_ai")
+def video_feed_ai():
+    fps = request.args.get("fps")
+    quality = request.args.get("quality")
+    width = request.args.get("width")
+    return Response(
+        _generate_mjpeg_ai(out_fps=fps, jpeg_quality=quality, max_width=width),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"},
+    )
+
+@app.route("/api/latest_frame.jpg")
+def latest_frame_jpg():
+    with _ai_results_lock:
+        frame = _latest_annotated.copy() if _latest_annotated is not None else None
+    if frame is None:
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(frame, "No frame yet", (190, 245), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
+    if not ok:
+        return Response(status=503)
+    return Response(buf.tobytes(), mimetype="image/jpeg")
+
+
+@app.route("/api/frame_signature")
+def frame_signature():
+    with _latest_frame_lock:
+        frame = _latest_frame.copy() if _latest_frame is not None else None
+        ts = _latest_frame_ts
+    sig = _frame_signature(frame)
+    return jsonify({
+        "status": "ok" if sig else "no_frame",
+        "signature": sig,
+        "frame_ts": ts,
+    })
+
+
+@app.route("/api/zone_status")
+def zone_status():
+    with _zone_lock:
+        food_n = len(_zones_by_type.get("food") or [])
+        litter_n = len(_zones_by_type.get("litter") or [])
+        baseline = _zone_baseline_signature
+    with _source_lock:
+        cam_id = _current_camera_id
+    return jsonify({
+        "status": "ok",
+        "camera_id": cam_id,
+        "zones_configured": food_n + litter_n,
+        "food_zones": food_n,
+        "litter_zones": litter_n,
+        "has_baseline_signature": bool(baseline),
+        "camera_moved": bool(_camera_moved),
+        "camera_moved_since": _camera_moved_since or None,
+        "signature_distance": _last_zone_distance,
+    })
+
+@app.route("/api/set_source", methods=["POST"])
+def set_source():
+    global _current_source, _source_type, _current_camera_id, _current_owner_id, _source_updated_at
+    try:
+        data = request.get_json(silent=True) or {}
+        source_url = _normalize_source_url(data.get("source_url"))
+        requested_type = str(data.get("source_type") or "").strip().lower()
+        camera_id = data.get("camera_id")
+        owner_id = data.get("owner_id")
+
+        source_type = requested_type if requested_type in ("live", "demo") else _guess_source_type(source_url)
+        if not source_url:
+            # Fallback: if app does not provide demo URL, keep live mode on default camera source.
+            if source_type == "demo":
+                return jsonify({"status": "error", "message": "source_url is required for demo source"}), 400
+            source_url = RTSP_URL
+        if not _is_valid_source_url(source_url):
+            return jsonify({"status": "error", "message": "invalid source_url"}), 400
+
+        if _is_temporarily_bad_source(source_url):
+            return jsonify({
+                "status": "error",
+                "message": "source temporarily blocked after recent connection failure",
+                "source": source_url,
+            }), 409
+
+        # Fast-path: no-op when requested source is already active.
+        with _source_lock:
+            current_key = f"{_source_type}|{_current_camera_id}|{_current_source}"
+        requested_key = f"{source_type}|{camera_id}|{source_url}"
+        if requested_key != current_key:
+            readable = _probe_source_readable(source_url, source_type=source_type)
+            if not readable:
+                _mark_bad_source(source_url, cooldown_sec=180)
+                return jsonify({
+                    "status": "error",
+                    "message": "source is not reachable/readable",
+                    "source": source_url,
+                }), 409
+
+        # Fast-path: no-op when requested source is already active.
+        with _source_lock:
+            if (
+                _current_source == source_url
+                and _source_type == source_type
+                and str(_current_camera_id or "") == str(camera_id or "")
+                and str(_current_owner_id or "") == str(owner_id or "")
+            ):
+                return jsonify({
+                    "status": "ok",
+                    "message": "unchanged",
+                    "source": _current_source,
+                    "type": _source_type,
+                    "camera_id": _current_camera_id,
+                    "owner_id": _current_owner_id,
+                    "updated_at": _source_updated_at,
+                })
+
+        with _source_lock:
+            _source_type = source_type
+            _current_source = source_url
+            _current_camera_id = camera_id
+            _current_owner_id = owner_id
+            _source_updated_at = time.time()
+            _track_cat_map.clear()
+            _activity_sessions.clear()
+
+        _refresh_camera_context(camera_id=camera_id, owner_id=owner_id)
+
+        return jsonify({
+            "status": "ok",
+            "source": _current_source,
+            "type": _source_type,
+            "camera_id": _current_camera_id,
+            "owner_id": _current_owner_id,
+            "updated_at": _source_updated_at,
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+@app.route("/api/source_status")
+def source_status():
+    with _source_lock:
+        return jsonify({
+            "status": "ok",
+            "source": _current_source,
+            "source_type": _source_type,
+            "camera_status": _camera_status,
+            "camera_id": _current_camera_id,
+            "owner_id": _current_owner_id,
+            "updated_at": _source_updated_at,
+        })
 
 @app.route("/api/ai_results")
 def ai_results():
@@ -304,12 +1432,96 @@ def ai_results():
         data = list(_ai_results)
     return jsonify({"results": data, "ts": time.time()})
 
+
+@app.route("/api/environment")
+def environment():
+    # Tapo C200C has no onboard temperature/humidity sensor.
+    # We estimate environment via weather API using camera coordinates.
+    cam_id = request.args.get("camera_id")
+    if not cam_id:
+        with _source_lock:
+            cam_id = _current_camera_id
+
+    lat_q = _to_float(request.args.get("lat"))
+    lon_q = _to_float(request.args.get("lon"))
+    if lat_q is not None and lon_q is not None:
+        lat, lon, coord_source = lat_q, lon_q, "query"
+    else:
+        lat, lon, coord_source = _get_coords_for_camera(cam_id)
+
+    if lat is None or lon is None:
+        return jsonify({
+            "status": "no_coords",
+            "message": "Missing camera coordinates. Set CAMERA_LAT/CAMERA_LON or CAMERA_COORDS_JSON.",
+            "camera_id": cam_id,
+        }), 200
+
+    cache_key = f"{cam_id}|{round(lat, 6)}|{round(lon, 6)}"
+    now_ts = time.time()
+    if (
+        _environment_cache.get("key") == cache_key
+        and (now_ts - float(_environment_cache.get("ts") or 0.0)) < ENV_CACHE_SEC
+        and isinstance(_environment_cache.get("payload"), dict)
+    ):
+        payload = dict(_environment_cache["payload"])
+        payload["cache"] = True
+        return jsonify(payload)
+
+    current = _fetch_open_meteo_current(lat, lon)
+    if not current:
+        return jsonify({
+            "status": "unavailable",
+            "camera_id": cam_id,
+            "lat": lat,
+            "lon": lon,
+            "coord_source": coord_source,
+        }), 200
+
+    payload = {
+        "status": "ok",
+        "camera_id": cam_id,
+        "lat": lat,
+        "lon": lon,
+        "coord_source": coord_source,
+        "temperature": current["temperature"],
+        "humidity": current["humidity"],
+        "provider": current["provider"],
+        "cache": False,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _environment_cache["key"] = cache_key
+    _environment_cache["ts"] = now_ts
+    _environment_cache["payload"] = payload
+    return jsonify(payload)
+
 @app.route("/api/health")
 def health():
-    has_frame = _latest_annotated is not None
-    return jsonify({"camera": has_frame, "ai": _tracker is not None})
+    frame_age = time.time() - float(_latest_frame_ts or 0.0)
+    has_frame = _latest_frame is not None and frame_age <= 4.0
+    with _zone_lock:
+        zones_count = len(_zones_by_type.get("food") or []) + len(_zones_by_type.get("litter") or [])
+    with _source_lock:
+        return jsonify({
+            "camera": has_frame,
+            "ai": _tracker is not None,
+            "camera_status": _camera_status,
+            "source_type": _source_type,
+            "source": _current_source,
+            "camera_id": _current_camera_id,
+            "owner_id": _current_owner_id,
+            "source_updated_at": _source_updated_at,
+            "db_enabled": _supabase is not None,
+            "assigned_cats": len(_assigned_cat_ids),
+            "zones_configured": zones_count,
+            "camera_moved": bool(_camera_moved),
+            "last_db_write_at": _last_db_write_at,
+            "frame_age_sec": round(frame_age, 3) if _latest_frame_ts else None,
+            "capture_fps": round(float(_capture_fps), 1) if _capture_fps > 0 else None,
+        })
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print("🚀 [Camera+AI Server] กำลังรันบน Port 5000...")
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+
+
