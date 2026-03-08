@@ -15,6 +15,7 @@ import {
     StyleSheet,
     Image,
     Dimensions,
+    ScrollView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
@@ -235,6 +236,11 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                     ]}
                 >
                     <TouchableOpacity activeOpacity={1} onPress={() => setDropdownOpen(false)}>
+                        <ScrollView
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
+                            contentContainerStyle={styles.scrollContent}
+                        >
                         <View style={styles.header}>
                             <View style={styles.headerLeft}>
                                 <Text style={styles.headerTitle}>Identify Cat</Text>
@@ -449,6 +455,7 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                                 )}
                             </AnimatedTouchableOpacity>
                         </View>
+                        </ScrollView>
                     </TouchableOpacity>
                 </Animated.View>
             </TouchableOpacity>
@@ -466,6 +473,7 @@ const styles = StyleSheet.create({
     modalContainer: {
         width: SCREEN_WIDTH * 0.9,
         maxWidth: 400,
+        maxHeight: '88%',
         backgroundColor: '#FFFFFF',
         borderRadius: 18,
         padding: 16,
@@ -476,6 +484,9 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.14,
         shadowRadius: 18,
         elevation: 10,
+    },
+    scrollContent: {
+        paddingBottom: 4,
     },
     header: {
         flexDirection: 'row',
@@ -608,6 +619,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         gap: 10,
+        flexWrap: 'wrap',
     },
     btnLoadingRow: {
         flexDirection: 'row',
@@ -618,6 +630,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         borderRadius: 999,
         backgroundColor: '#00897B',
+        flexGrow: 1,
+        minWidth: 100,
+        alignItems: 'center',
     },
     confirmButtonDisabled: {
         backgroundColor: '#CFD8DC',
@@ -635,6 +650,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
         borderRadius: 999,
         backgroundColor: '#EDF2F6',
+        flexGrow: 1,
+        minWidth: 100,
+        alignItems: 'center',
     },
     skipButtonDisabled: {
         backgroundColor: '#ECEFF1',
@@ -644,6 +662,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         borderRadius: 999,
         backgroundColor: '#FFE4E6',
+        flexGrow: 1,
+        minWidth: 100,
+        alignItems: 'center',
     },
     rejectButtonDisabled: {
         backgroundColor: '#ECEFF1',

@@ -100,6 +100,14 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
     const brandScales = useRef({ tapo: new Animated.Value(1), xiaomi: new Animated.Value(1), ezviz: new Animated.Value(1), custom: new Animated.Value(1) }).current;
 
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const scopedModeKey = session?.user?.id ? `camera_monitoringMode:${session.user.id}` : 'camera_monitoringMode';
+    const scopedCatsKey = session?.user?.id ? `camera_selectedCats:${session.user.id}` : 'camera_selectedCats';
+    const persistSelectedCats = async (catIds) => {
+        const unique = [...new Set((catIds || []).filter(Boolean))];
+        await AsyncStorage.setItem(scopedCatsKey, JSON.stringify(unique));
+        await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(unique));
+        return unique;
+    };
 
     const animateSelection = (brandId) => {
         Object.keys(brandScales).forEach(id => {
@@ -111,8 +119,8 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
         const load = async () => {
             try {
                 await AlertEngine.setScope(session?.user?.id || 'anonymous');
-                const mode = await AsyncStorage.getItem('camera_monitoringMode');
-                const savedCatsJson = await AsyncStorage.getItem('camera_selectedCats');
+                const mode = (await AsyncStorage.getItem(scopedModeKey)) || (await AsyncStorage.getItem('camera_monitoringMode'));
+                const savedCatsJson = (await AsyncStorage.getItem(scopedCatsKey)) || (await AsyncStorage.getItem('camera_selectedCats'));
                 const savedStatus = await AsyncStorage.getItem('camera_status');
                 const savedBrand = await AsyncStorage.getItem('camera_brand');
                 const savedCameraId = await AsyncStorage.getItem('camera_id');
@@ -145,13 +153,26 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
                         const onlyCat = [cats[0].id];
                         setMonitoringMode('single');
                         setSelectedCats(onlyCat);
+                        await AsyncStorage.setItem(scopedModeKey, 'single');
                         await AsyncStorage.setItem('camera_monitoringMode', 'single');
+                        await AsyncStorage.setItem(scopedCatsKey, JSON.stringify(onlyCat));
                         await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(onlyCat));
                     } else if (savedCatsJson) {
-                        setSelectedCats(JSON.parse(savedCatsJson));
+                        const parsed = JSON.parse(savedCatsJson);
+                        const valid = Array.isArray(parsed) ? parsed.filter((id) => cats.some((c) => c.id === id)) : [];
+                        const fallback = valid.length > 0 ? valid : cats.map(c => c.id);
+                        setSelectedCats(fallback);
+                        await persistSelectedCats(fallback);
                     } else if (cats && cats.length > 0) {
-                        if (mode === 'single') setSelectedCats([cats[0].id]);
-                        else setSelectedCats(cats.map(c => c.id));
+                        if (mode === 'single') {
+                            const first = [cats[0].id];
+                            setSelectedCats(first);
+                            await persistSelectedCats(first);
+                        } else {
+                            const allCatIds = cats.map(c => c.id);
+                            setSelectedCats(allCatIds);
+                            await persistSelectedCats(allCatIds);
+                        }
                     }
                 }
             } catch (e) { console.error("Load failed:", e); }
@@ -426,9 +447,9 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
             }
         }
         setSelectedCats(newSelected);
-        await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(newSelected));
-        if (cameraStatus === 'connected' && cameraId) {
-            await syncCameraCatsAssignment(cameraId, newSelected);
+        const persisted = await persistSelectedCats(newSelected);
+        if (cameraId) {
+            await syncCameraCatsAssignment(cameraId, persisted);
         }
     };
 
@@ -438,17 +459,25 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
             return;
         }
         setMonitoringMode(mode);
+        await AsyncStorage.setItem(scopedModeKey, mode);
         await AsyncStorage.setItem('camera_monitoringMode', mode);
-        if (cameraStatus === 'connected') await upsertCameraConfig({ mode });
+        // Persist mode to DB even when not connected yet, so app state won't fallback to single.
+        const resolvedCameraId = (await upsertCameraConfig({ mode })) || cameraId;
         if (mode === 'single') {
             if (myCats && myCats.length > 0) {
                 const first = [myCats[0].id];
                 setSelectedCats(first);
-                await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(first));
-                if (cameraStatus === 'connected' && cameraId) await syncCameraCatsAssignment(cameraId, first);
+                const persisted = await persistSelectedCats(first);
+                if (resolvedCameraId) await syncCameraCatsAssignment(resolvedCameraId, persisted);
             } else {
                 setSelectedCats([]);
             }
+        } else {
+            // Multi mode defaults to all cats selected, user can uncheck later.
+            const nextMulti = myCats.map((c) => c.id);
+            setSelectedCats(nextMulti);
+            const persisted = await persistSelectedCats(nextMulti);
+            if (resolvedCameraId) await syncCameraCatsAssignment(resolvedCameraId, persisted);
         }
     };
 
