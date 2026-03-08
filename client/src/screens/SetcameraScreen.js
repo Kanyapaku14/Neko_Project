@@ -25,8 +25,14 @@ const CAMERA_BRANDS = [
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 // 🚨 กำหนด URL ของ Camera Server (Port 5000)
+<<<<<<< HEAD
 const VIDEO_STREAM_URL = 'http://192.168.1.131:5000/api/video_feed';
 const CAMERA_RTSP_URL = 'rtsp://testt1:1234test@192.168.1.140:554/stream2';
+=======
+const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed_raw?fps=15&quality=62&width=960';
+const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
+const CAMERA_RTSP_URL = 'rtsp://testt1:1234test@192.168.1.102:554/stream2';
+>>>>>>> 228e0ead3f779122e0f5fb5aa2df96a172abfbee
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -80,11 +86,14 @@ const LiveCameraStream = React.memo(({ streamUrl }) => {
 // ==============================================
 // 2. Main Component (หน้าจอตั้งค่า)
 // ==============================================
-export default function SetcameraScreen({ onNavigate, session }) {
+export default function SetcameraScreen({ onNavigate, session, params }) {
     const defaultZoneLabel = 'Litter Box Zone';
+    const CAMERA_SETUP_BACKUP_KEY = 'camera_prev_setup_backup';
     const [cameraStatus, setCameraStatus] = useState("disconnected");
     const [zoneLabel, setZoneLabel] = useState(defaultZoneLabel);
     const [isUpdateMode, setIsUpdateMode] = useState(false);
+    const [latestSnapshotUrl, setLatestSnapshotUrl] = useState(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
+    const [zoneStatus, setZoneStatus] = useState({ camera_moved: false, zones_configured: 0 });
 
     // ล็อค URL ไว้ให้โหลดแค่ครั้งเดียว
     const streamUrlRef = useRef(`${VIDEO_STREAM_URL}?t=${new Date().getTime()}`);
@@ -98,6 +107,7 @@ export default function SetcameraScreen({ onNavigate, session }) {
     const [customCameraBrand, setCustomCameraBrand] = useState('');
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
+    const [signalInfo, setSignalInfo] = useState({ pingMs: null, fps: null, frameAgeSec: null, lastCheckedAt: null });
 
     // Modals
     const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -170,6 +180,58 @@ export default function SetcameraScreen({ onNavigate, session }) {
         load();
     }, [session]);
 
+    useEffect(() => {
+        const restorePreviousSetupIfNeeded = async () => {
+            if (!params?.restorePreviousSetup) return;
+            try {
+                const raw = await AsyncStorage.getItem(CAMERA_SETUP_BACKUP_KEY);
+                if (!raw) return;
+                const backup = JSON.parse(raw);
+                const entries = Object.entries(backup?.storage || {}).filter(([, v]) => typeof v === 'string');
+                if (entries.length > 0) await AsyncStorage.multiSet(entries);
+
+                if (backup?.cameraStatus) setCameraStatus(backup.cameraStatus);
+                if (backup?.selectedCameraPreset) {
+                    setSelectedCameraPreset(backup.selectedCameraPreset);
+                    setCommittedCameraBrand(backup.selectedCameraPreset);
+                    animateSelection(backup.selectedCameraPreset);
+                }
+                if (backup?.monitoringMode) setMonitoringMode(backup.monitoringMode);
+                if (Array.isArray(backup?.selectedCats)) setSelectedCats(backup.selectedCats);
+                if (backup?.cameraId) setCameraId(backup.cameraId);
+                if (backup?.zoneLabel) setZoneLabel(backup.zoneLabel);
+                setIsUpdateMode(Boolean(backup?.selectedCameraPreset));
+
+                await AsyncStorage.removeItem(CAMERA_SETUP_BACKUP_KEY);
+            } catch (_e) { }
+        };
+        restorePreviousSetupIfNeeded();
+    }, [params?.restorePreviousSetup]);
+
+    const refreshLatestSnapshot = async () => {
+        setLatestSnapshotUrl(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
+        try {
+            const targetCameraId = cameraId || await AsyncStorage.getItem('camera_id');
+            const url = targetCameraId
+                ? `${VIDEO_SERVER_BASE}/api/zone_status?camera_id=${encodeURIComponent(targetCameraId)}`
+                : `${VIDEO_SERVER_BASE}/api/zone_status`;
+            const res = await fetch(url);
+            const st = await res.json();
+            setZoneStatus({
+                camera_moved: Boolean(st?.camera_moved),
+                zones_configured: Number(st?.zones_configured || 0),
+            });
+        } catch (_e) {
+            // ignore
+        }
+    };
+
+    useEffect(() => {
+        refreshLatestSnapshot();
+        const t = setInterval(refreshLatestSnapshot, 15000);
+        return () => clearInterval(t);
+    }, [cameraId]);
+
     const syncCameraCatsAssignment = async (targetCameraId, catIds) => {
         if (!targetCameraId || !Array.isArray(catIds)) return;
         try {
@@ -205,15 +267,18 @@ export default function SetcameraScreen({ onNavigate, session }) {
                 ai_mode: modeValue,
                 ai_connection_status: connectionStatus,
                 is_primary: true,
-                stream_source: CAMERA_RTSP_URL,
-                stream_source_type: 'rtsp'
             };
 
             let resolvedCameraId = cameraId;
             if (resolvedCameraId) {
                 await supabase.from('cameras').update(payload).eq('id', resolvedCameraId);
             } else {
-                const { data: inserted } = await supabase.from('cameras').insert(payload).select('id').single();
+                const insertPayload = {
+                    ...payload,
+                    stream_source: CAMERA_RTSP_URL,
+                    stream_source_type: 'rtsp',
+                };
+                const { data: inserted } = await supabase.from('cameras').insert(insertPayload).select('id').single();
                 resolvedCameraId = inserted?.id || null;
             }
 
@@ -232,6 +297,27 @@ export default function SetcameraScreen({ onNavigate, session }) {
         if (session?.user?.id && cameraId) {
             const aiConnectionStatus = status === 'connected' ? 'online' : 'offline';
             try { await supabase.from('cameras').update({ ai_connection_status: aiConnectionStatus }).eq('id', cameraId); } catch (err) { }
+        }
+    };
+
+    const refreshSignalStatus = async () => {
+        const startedAt = Date.now();
+        try {
+            const res = await fetch(`${VIDEO_SERVER_BASE}/api/health`);
+            const h = await res.json();
+            const pingMs = Math.max(1, Date.now() - startedAt);
+            const isConnected = h?.camera_status === 'connected' || h?.camera === true;
+            const nextStatus = isConnected ? 'connected' : 'disconnected';
+            await updateCameraStatus(nextStatus);
+            setSignalInfo({
+                pingMs,
+                fps: Number.isFinite(Number(h?.capture_fps)) ? Number(h.capture_fps) : null,
+                frameAgeSec: Number.isFinite(Number(h?.frame_age_sec)) ? Number(h.frame_age_sec) : null,
+                lastCheckedAt: new Date().toISOString(),
+            });
+        } catch (_e) {
+            await updateCameraStatus('disconnected');
+            setSignalInfo((prev) => ({ ...prev, lastCheckedAt: new Date().toISOString() }));
         }
     };
 
@@ -261,6 +347,19 @@ export default function SetcameraScreen({ onNavigate, session }) {
         try {
             await wait(900);
             if (isChangingConnectedBrand) {
+                const keys = ['camera_status', 'camera_brand', 'camera_monitoringMode', 'camera_selectedCats', 'camera_setup_complete', 'camera_zone_summary', 'camera_zone_feeding', 'camera_zone_litter', 'camera_id'];
+                const pairs = await AsyncStorage.multiGet(keys);
+                const storage = {};
+                pairs.forEach(([k, v]) => { if (typeof v === 'string') storage[k] = v; });
+                await AsyncStorage.setItem(CAMERA_SETUP_BACKUP_KEY, JSON.stringify({
+                    storage,
+                    cameraStatus,
+                    selectedCameraPreset: committedCameraBrand,
+                    monitoringMode,
+                    selectedCats,
+                    cameraId,
+                    zoneLabel,
+                }));
                 await applyBrandChange(selectedCameraPreset);
             } else {
                 await upsertCameraConfig({ brand: selectedCameraPreset, aiConnectionStatus: 'online' });
@@ -270,6 +369,16 @@ export default function SetcameraScreen({ onNavigate, session }) {
                 setCommittedCameraBrand(selectedCameraPreset);
                 setIsUpdateMode(true);
             }
+
+            // หลังยืนยันเชื่อม/เปลี่ยนกล้อง พาไปหน้า Phone ที่ขั้นเชื่อมสำเร็จทันที
+            onNavigate('Phone', {
+                initialStep: 'live',
+                brand: selectedCameraPreset,
+                mode: 'new',
+                returnTo: 'Setcamera',
+                confirmBackToPrevious: Boolean(isChangingConnectedBrand),
+                returnParams: isChangingConnectedBrand ? { restorePreviousSetup: true } : null,
+            });
 
             Animated.sequence([
                 Animated.spring(successAnim, { toValue: 1, tension: 50, friction: 7, useNativeDriver: true }),
@@ -290,6 +399,12 @@ export default function SetcameraScreen({ onNavigate, session }) {
         if (isChangingConnectedBrand && committedCameraBrand) {
             setSelectedCameraPreset(committedCameraBrand);
             animateSelection(committedCameraBrand);
+            return;
+        }
+        // ผู้ใช้ที่ยังไม่เคยเชื่อม: ถ้า Cancel ให้ไม่ค้างไฮไลท์ไว้
+        if (!committedCameraBrand) {
+            setSelectedCameraPreset(null);
+            animateSelection('');
         }
     };
 
@@ -315,12 +430,9 @@ export default function SetcameraScreen({ onNavigate, session }) {
     };
 
     const handleTestConnection = () => {
-        if (cameraStatus === 'connected') {
-            updateCameraStatus('connecting');
-            setTimeout(() => updateCameraStatus('connected'), 800);
-        } else {
-            updateCameraStatus('disconnected');
-        }
+        if (cameraStatus === 'connecting') return;
+        setCameraStatus('connecting');
+        refreshSignalStatus();
     };
 
     const toggleCatSelection = async (id) => {
@@ -361,6 +473,17 @@ export default function SetcameraScreen({ onNavigate, session }) {
         }
     };
 
+    const isSameAsCurrentBrand =
+        cameraStatus === 'connected' &&
+        Boolean(committedCameraBrand) &&
+        selectedCameraPreset === committedCameraBrand;
+
+    useEffect(() => {
+        refreshSignalStatus();
+        const timer = setInterval(refreshSignalStatus, 15000);
+        return () => clearInterval(timer);
+    }, []);
+
     return (
         <View style={{ flex: 1, backgroundColor: '#f5fffdff' }}>
             <StatusBar style="dark" translucent backgroundColor="transparent" />
@@ -395,13 +518,17 @@ export default function SetcameraScreen({ onNavigate, session }) {
                             </View>
 
                             <Text style={styles.statusDesc}>
-                                {cameraStatus === 'connected' ? 'Connection Health: Excellent \nSignal Strength: Strong' : cameraStatus === 'connecting' ? 'Establishing secure connection...' : 'No signal received from this camera\nPlease check the camera power and internet connection'}
+                                {cameraStatus === 'connected'
+                                    ? `Signal OK  Ping: ${signalInfo.pingMs ?? '--'} ms  FPS: ${signalInfo.fps ?? '--'}${signalInfo.frameAgeSec != null ? `  Frame age: ${signalInfo.frameAgeSec.toFixed(2)}s` : ''}`
+                                    : cameraStatus === 'connecting'
+                                        ? 'Checking camera signal...'
+                                        : 'No signal received from this camera\nPlease check power, network, and RTSP source'}
                             </Text>
 
                             <TouchableOpacity
                                 style={[styles.actionButtonGray, cameraStatus === 'connected' && { backgroundColor: '#4CAF50', borderColor: '#4CAF50' }, cameraStatus === 'connecting' && { opacity: 0.6 }, cameraStatus === 'disconnected' && { opacity: 0.65 }]}
                                 onPress={handleTestConnection}
-                                disabled={cameraStatus === 'connecting' || cameraStatus !== 'connected'}
+                                disabled={cameraStatus === 'connecting'}
                             >
                                 <Text style={[styles.actionButtonText, cameraStatus === 'connected' && { color: '#fff' }]}>
                                     {cameraStatus === 'connected' ? 'Refresh Signal' : cameraStatus === 'connecting' ? 'Connecting...' : 'Test Connection'}
@@ -421,16 +548,27 @@ export default function SetcameraScreen({ onNavigate, session }) {
 
                                 {cameraStatus === 'connected' ? (
                                     <View style={styles.previewConnectedWrap}>
-                                        {/* 🚨 ใช้ Component กล้องยิงตรง WebView แบบ CameraScreen */}
-                                        <LiveCameraStream streamUrl={streamUrlRef.current} />
+                                        <Image source={{ uri: latestSnapshotUrl }} style={styles.previewImage} resizeMode="cover" />
 
                                         <View style={styles.zoneMarkerFixed} pointerEvents="none">
                                             <Text style={styles.zoneMarkerText}>{zoneLabel}</Text>
                                         </View>
                                         {/* ลบตัวอัปเดตเวลาออก เปลี่ยนเป็นข้อความคงที่ */}
                                         <Text style={styles.scanUpdateText} pointerEvents="none">
-                                            Live Feed Active
+                                            Latest Snapshot
                                         </Text>
+                                        <View style={styles.snapshotToolbar}>
+                                            <TouchableOpacity style={styles.snapshotRefreshBtn} onPress={refreshLatestSnapshot}>
+                                                <Ionicons name="refresh" size={14} color="#0F766E" />
+                                                <Text style={styles.snapshotRefreshText}>Refresh</Text>
+                                            </TouchableOpacity>
+                                            {zoneStatus.camera_moved && (
+                                                <View style={styles.snapshotAlertBadge}>
+                                                    <MaterialCommunityIcons name="alert" size={13} color="#B42318" />
+                                                    <Text style={styles.snapshotAlertText}>Camera moved - re-set zones</Text>
+                                                </View>
+                                            )}
+                                        </View>
                                     </View>
                                 ) : (
                                     <View style={styles.previewPlaceholder}>
@@ -524,9 +662,30 @@ export default function SetcameraScreen({ onNavigate, session }) {
                                             <TextInput style={styles.input} value={customCameraBrand} onChangeText={setCustomCameraBrand} placeholder="Type camera brand/model..." placeholderTextColor="#999" />
                                         </View>
                                     )}
-                                    <TouchableOpacity style={[styles.actionButtonGray, { backgroundColor: '#00897B', borderColor: '#00897B' }, !selectedCameraPreset && { backgroundColor: '#9CA3AF', borderColor: '#9CA3AF' }]} onPress={handleConnectCamera} disabled={isConnecting || !selectedCameraPreset}>
-                                        <Text style={[styles.actionButtonText, { color: '#fff' }]}>{isConnecting ? 'Connecting...' : !selectedCameraPreset ? 'Select Camera First' : isUpdateMode ? 'Update Connection' : 'Connect Camera'}</Text>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.actionButtonGray,
+                                            { backgroundColor: '#00897B', borderColor: '#00897B' },
+                                            (!selectedCameraPreset || isSameAsCurrentBrand) && { backgroundColor: '#9CA3AF', borderColor: '#9CA3AF' }
+                                        ]}
+                                        onPress={handleConnectCamera}
+                                        disabled={isConnecting || !selectedCameraPreset || isSameAsCurrentBrand}
+                                    >
+                                        <Text style={[styles.actionButtonText, { color: '#fff' }]}>
+                                            {isConnecting
+                                                ? 'Connecting...'
+                                                : !selectedCameraPreset
+                                                    ? 'Select Camera First'
+                                                    : isSameAsCurrentBrand
+                                                        ? 'Current Camera'
+                                                        : isUpdateMode
+                                                            ? 'Update Connection'
+                                                            : 'Connect Camera'}
+                                        </Text>
                                     </TouchableOpacity>
+                                    {isSameAsCurrentBrand && (
+                                        <Text style={styles.infoText}>Choose another brand to change camera.</Text>
+                                    )}
                                 </Animated.View>
                             )}
                         </View>
@@ -577,6 +736,11 @@ const styles = StyleSheet.create({
     previewPlaceholder: { justifyContent: 'center', alignItems: 'center', padding: 20 },
     previewConnectedWrap: { width: '100%', height: '100%', backgroundColor: '#E5E7EB', overflow: 'hidden' },
     previewImage: { width: '100%', height: '100%' },
+    snapshotToolbar: { position: 'absolute', left: 10, right: 10, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8 },
+    snapshotRefreshBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+    snapshotRefreshText: { color: '#0F766E', fontSize: 11, fontWeight: '700' },
+    snapshotAlertBadge: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10 },
+    snapshotAlertText: { color: '#B42318', fontSize: 10, fontWeight: '700' },
     zoneMarkerFixed: { position: 'absolute', top: 24, left: 18, backgroundColor: 'rgba(0, 105, 92, 0.9)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
     zoneMarkerText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
     scanUpdateText: { position: 'absolute', right: 12, bottom: 56, color: '#FFFFFF', fontSize: 10, backgroundColor: 'rgba(0, 0, 0, 0.45)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },

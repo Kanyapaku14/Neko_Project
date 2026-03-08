@@ -5,6 +5,7 @@ import { analyzeHealthLog } from '../utils/healthLogic';
 import AlertEngine from '../services/AlertEngine';
 
 const CAMERA_ID_KEY = 'camera_id';
+const VIDEO_SERVER_BASE = 'http://192.168.1.100:5000';
 
 const normalizeBehavior = (value) => {
   const v = String(value || '').toLowerCase();
@@ -98,14 +99,14 @@ export default function useCameraData(session, cameraStatus) {
                 .from('ai_cat_events')
                 .select('id, cat_id, camera_id, behavior_label, confidence, abnormal, occurred_at')
                 .eq('camera_id', storedCameraId)
-                .in('cat_id', selectedIds)
                 .gte('occurred_at', dayStartIso)
                 .order('occurred_at', { ascending: false })
-                .limit(200),
+                .limit(500),
             ]);
 
             if (!summaryErr && !eventErr && (Array.isArray(summaries) || Array.isArray(events))) {
-              const aiEvents = Array.isArray(events) ? events : [];
+              const aiEventsAll = Array.isArray(events) ? events : [];
+              const aiEvents = aiEventsAll.filter((e) => e?.cat_id && selectedIds.includes(e.cat_id));
               const aiSummaries = Array.isArray(summaries) ? summaries : [];
 
               if (aiEvents.length > 0 || aiSummaries.length > 0) {
@@ -134,19 +135,25 @@ export default function useCameraData(session, cameraStatus) {
                 });
 
                 // กรณี DB มี cat_id ที่ events บอกว่าไม่ใช่แมวของ user
-                const unknownCatEvents = aiEvents.filter((e) => e.cat_id && !selectedIds.includes(e.cat_id));
-                if (selectedIds.length > 0 && unknownCatEvents.length > 0) {
-                  const unknownIds = [...new Set(unknownCatEvents.map((e) => e.cat_id))];
-                  // ดึง snapshot จาก ai_cat_identity_review
-                  const { data: reviewSnaps } = await supabase
+                const unknownCatEvents = aiEventsAll.filter((e) => e.cat_id && !selectedIds.includes(e.cat_id));
+                let reviewSnaps = [];
+                if (storedCameraId) {
+                  const { data } = await supabase
                     .from('ai_cat_identity_review')
                     .select('snapshot_url, pred_cat_id, occurred_at')
                     .eq('camera_id', storedCameraId)
-                    .eq('reviewed', false)
+                    .not('snapshot_url', 'is', null)
                     .order('occurred_at', { ascending: false })
                     .limit(20);
-
-                  if (selectedIds.length === 1 && unknownIds.length >= 2) {
+                  reviewSnaps = Array.isArray(data) ? data : [];
+                }
+                if (selectedIds.length > 0 && unknownCatEvents.length > 0) {
+                  const unknownIds = [...new Set(unknownCatEvents.map((e) => e.cat_id))];
+                  // ดึง snapshot จาก ai_cat_identity_review
+                  if (
+                    (selectedIds.length === 1 && unknownIds.length >= 2) ||
+                    (selectedIds.length >= 2 && unknownIds.length >= selectedIds.length)
+                  ) {
                     // กรณี DB มี 1 แมวแต่กล้องตรวจได้ 2+ cat_id
                     // ขึ้น popup เดียวแสดง 2 รูปพร้อมกัน ให้เลือกว่าตัวไหนคือแมวเรา
                     const multiSnapshots = unknownIds.slice(0, 2).map((uid) => {
@@ -159,14 +166,17 @@ export default function useCameraData(session, cameraStatus) {
                         snapshot_url: snap?.snapshot_url || null,
                       };
                     });
+                    const pairDedupeKey = `identity_pair:${storedCameraId}:${unknownIds.slice(0, 4).sort().join('|')}:${selectedIds.length}`;
                     AlertEngine.logPendingIdentity({
-                      behaviorLabel: 'unknown',
+                      behaviorLabel: (selectedIds.length >= 2 && unknownIds.length === selectedIds.length) ? 'identity_map' : 'unknown',
                       confidence: 0.5,
-                      cropSnapshot: multiSnapshots[0]?.snapshot_url || null,
+                      cropSnapshot: multiSnapshots[0]?.snapshot_url || `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`,
                       multiSnapshots,   // ← field ใหม่: array ของ 2 รูป
-                      sessionId: `dual_cat_${unknownIds.slice(0, 2).map(u => u.slice(0, 6)).join('_')}`,
-                      source: 'useCameraData_dual',
+                      sessionId: pairDedupeKey,
+                      source: (selectedIds.length >= 2 && unknownIds.length === selectedIds.length) ? 'identity_map_exact' : 'useCameraData_dual',
                       isAbnormal: false,
+                      dedupeKey: pairDedupeKey,
+                      cooldownMs: 15 * 60 * 1000,
                     });
                   } else {
                     // กรณี DB มี 2+ แมว: ขึ้น popup แยกตาม cat_id
@@ -175,13 +185,18 @@ export default function useCameraData(session, cameraStatus) {
                       const snap = reviewSnaps?.find((r) =>
                         !r.pred_cat_id || !selectedIds.includes(r.pred_cat_id)
                       );
+                      const behaviorNorm = normalizeBehavior(sample?.behavior_label);
+                      const isAbnormalUnknown = behaviorNorm === 'abnormal';
+                      const unknownDedupeKey = `identity_unknown:${storedCameraId}:${unknownId}:${behaviorNorm}`;
                       AlertEngine.logPendingIdentity({
                         behaviorLabel: sample?.behavior_label || 'activity',
                         confidence: sample?.confidence ?? 0.5,
-                        cropSnapshot: snap?.snapshot_url || null,
-                        sessionId: `unknown_cat_${unknownId.slice(0, 8)}`,
+                        cropSnapshot: snap?.snapshot_url || `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`,
+                        sessionId: unknownDedupeKey,
                         source: 'useCameraData_unknown',
-                        isAbnormal: false,
+                        isAbnormal: isAbnormalUnknown,
+                        dedupeKey: unknownDedupeKey,
+                        cooldownMs: isAbnormalUnknown ? 60 * 1000 : 10 * 60 * 1000,
                       });
                     });
                   }
@@ -190,25 +205,32 @@ export default function useCameraData(session, cameraStatus) {
                 // กรณี litter เยอะมาก (ตั้งแต่ 5 ครั้ง/วัน) → ถามว่าแมวตัวไหนใช้มากสุด
                 const LITTER_ALERT_THRESHOLD = 5;
                 if (litterCount >= LITTER_ALERT_THRESHOLD) {
-                  const topCatId = Object.entries(litterEventsByCat).sort((a, b) => b[1] - a[1])[0]?.[0];
+                  const top = Object.entries(litterEventsByCat).sort((a, b) => b[1] - a[1])[0];
+                  const topCatId = top?.[0] || null;
+                  const topCount = Number(top?.[1] || 0);
+                  const topLabel = topCatId && selectedIds.includes(topCatId) ? `cat ${topCatId.slice(0, 6)}` : 'unknown cat';
                   // ai_cat_events ไม่มี snapshot_url — ใช้ null หรือดึงจาก identity_review
-                  AlertEngine.logPendingIdentity({
-                    behaviorLabel: 'litter',
-                    confidence: 0.85,
-                    cropSnapshot: null,
-                    sessionId: `litter_alert_${toLocalDate()}`,
-                    source: 'litter_anomaly',
-                    isAbnormal: false,
+                  AlertEngine.logEvent({
+                    type: 'litter_summary',
+                    severity: 'info',
+                    title: 'Litter activity summary',
+                    desc: `High litter activity detected today. Most frequent: ${topLabel} (${topCount} events).`,
+                    details: 'Summary alert (batched) to reduce repeated prompts.',
+                    source: 'litter_anomaly_summary',
+                    dedupeKey: `litter_summary:${storedCameraId}:${toLocalDate()}`,
+                    cooldownMs: 20 * 60 * 1000,
                   });
                 }
 
                 const maxBin = Math.max(1, ...bins);
-                newData.activity = [...bins.map((v) => Math.round((v / maxBin) * 100)), bins[3]];
+                const normalizedBins = bins.map((v) => Math.round((v / maxBin) * 100));
+                // 5 points for chart labels [00,06,12,18,24], keep last point as normalized closing value.
+                newData.activity = [...normalizedBins, normalizedBins[3]];
                 newData.food = eatCount;
                 newData.litter = litterCount;
 
                 const summaryAbnormal = aiSummaries.reduce((sum, s) => sum + (s.total_abnormal || 0), 0);
-                const totalSignals = Math.max(aiEvents.length, eatCount + litterCount + summaryAbnormal);
+                const totalSignals = Math.max(aiEventsAll.length, eatCount + litterCount + summaryAbnormal);
                 const abnormalPct = Math.min(100, Math.round(((abnormalCount + summaryAbnormal) / Math.max(1, totalSignals)) * 100));
                 const normalPct = 100 - abnormalPct;
 
@@ -223,8 +245,10 @@ export default function useCameraData(session, cameraStatus) {
                   }
                 };
 
-                const totalFeed = aiSummaries.reduce((sum, s) => sum + (s.total_feeding || 0), 0);
-                const totalLitter = aiSummaries.reduce((sum, s) => sum + (s.total_litter || 0), 0);
+                const totalFeedSummary = aiSummaries.reduce((sum, s) => sum + (s.total_feeding || 0), 0);
+                const totalLitterSummary = aiSummaries.reduce((sum, s) => sum + (s.total_litter || 0), 0);
+                const totalFeed = totalFeedSummary > 0 ? totalFeedSummary : eatCount;
+                const totalLitter = totalLitterSummary > 0 ? totalLitterSummary : litterCount;
                 const routineScore = Math.max(55, 100 - abnormalPct);
                 const wellnessScore = Math.max(45, Math.round((routineScore + normalPct) / 2));
 
@@ -245,7 +269,7 @@ export default function useCameraData(session, cameraStatus) {
                     default: return { label: 'Activity', icon: 'run', color: '#FFB74D' };
                   }
                 };
-                newData.recentActivities = aiEvents.slice(0, 8).map((e, idx) => {
+                newData.recentActivities = aiEventsAll.slice(0, 8).map((e, idx) => {
                   const disp = behaviorDisplay(e.behavior_label);
                   return {
                     id: e.id || `evt_${idx}`,
@@ -284,7 +308,7 @@ export default function useCameraData(session, cameraStatus) {
                   : (log.normal_logs?.[0] || log.normal_logs);
 
                 const unifiedLog = { ...log, ...(details || {}) };
-                totalFood += unifiedLog.food_amount || 0;
+                totalFood += Number(unifiedLog.total_food_grams || 0);
 
                 if (unifiedLog.urine_level || unifiedLog.stool_level) {
                   totalLitter += 1;

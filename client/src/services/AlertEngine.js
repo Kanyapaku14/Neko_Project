@@ -42,6 +42,7 @@ class AlertEngineService {
         this.unreadCount = 0;
         this.activeCriticalAlerts = false;
         this.pendingIdentityCount = 0;
+        this.lastEmitByKey = {};
         this.isReady = false;
         this.emitter = new SimpleEmitter();
         this.scopeKey = 'anonymous';
@@ -66,6 +67,7 @@ class AlertEngineService {
         this.unreadCount = 0;
         this.activeCriticalAlerts = false;
         this.pendingIdentityCount = 0;
+        this.lastEmitByKey = {};
         this.isReady = false;
         await this._loadAlertsForScope(this.scopeKey);
     }
@@ -74,7 +76,18 @@ class AlertEngineService {
         try {
             const stored = await AsyncStorage.getItem(`${ALERT_STORAGE_KEY_PREFIX}:${scopeKey}`);
             if (stored) {
-                this.alerts = JSON.parse(stored);
+                const parsed = JSON.parse(stored);
+                const now = Date.now();
+                // Drop stale pending identity alerts on app relaunch to prevent old popup spam.
+                this.alerts = (Array.isArray(parsed) ? parsed : []).filter((a) => {
+                    if (!a) return false;
+                    if (a.pendingIdentityConfirm === true) {
+                        const ts = new Date(a.timestamp || 0).getTime();
+                        if (!Number.isFinite(ts)) return false;
+                        return (now - ts) <= (2 * 60 * 60 * 1000);
+                    }
+                    return true;
+                });
             }
         } catch (e) {
             console.error("AlertEngine: Failed to load alerts", e);
@@ -118,6 +131,16 @@ class AlertEngineService {
      */
     async logEvent(alertData) {
         const normalizedSeverity = (alertData.severity || 'info').toLowerCase();
+        const nowMs = Date.now();
+        const dedupeKey = alertData.dedupeKey ? String(alertData.dedupeKey) : null;
+        const cooldownMs = Number(alertData.cooldownMs || 0);
+
+        if (dedupeKey && cooldownMs > 0) {
+            const lastTs = Number(this.lastEmitByKey[dedupeKey] || 0);
+            if (lastTs > 0 && (nowMs - lastTs) < cooldownMs) {
+                return;
+            }
+        }
 
         // Prevent duplicate spam of the same un-resolved critical event type
         if (normalizedSeverity === 'critical') {
@@ -129,15 +152,30 @@ class AlertEngineService {
         }
 
         // Duplicate guard for pending_identity:
-        // If the same (sessionId + behaviorLabel) is already waiting for confirmation, skip.
+        // If the same (sessionId + behaviorLabel) is already waiting, update existing to newest instead of dropping.
         if (alertData.pendingIdentityConfirm === true) {
-            const isDuplicate = this.alerts.some(
+            const dupIdx = this.alerts.findIndex(
                 a => a.pendingIdentityConfirm === true
                     && a.sessionId === alertData.sessionId
                     && a.behaviorLabel === alertData.behaviorLabel
             );
-            if (isDuplicate) {
-                console.log(`AlertEngine: Ignored duplicate pending_identity for [${alertData.behaviorLabel}] in session [${alertData.sessionId}]`);
+            if (dupIdx >= 0) {
+                const prev = this.alerts[dupIdx];
+                const prevTs = new Date(prev.timestamp || 0).getTime();
+                const nextTs = new Date(alertData.timestamp || Date.now()).getTime();
+                if (Number.isFinite(nextTs) && nextTs >= prevTs) {
+                    this.alerts[dupIdx] = {
+                        ...prev,
+                        confidence: alertData.confidence ?? prev.confidence ?? null,
+                        cropSnapshot: alertData.cropSnapshot || prev.cropSnapshot || null,
+                        multiSnapshots: Array.isArray(alertData.multiSnapshots) ? alertData.multiSnapshots : (prev.multiSnapshots || null),
+                        source: alertData.source || prev.source || null,
+                        remoteReviewId: alertData.remoteReviewId || prev.remoteReviewId || null,
+                        timestamp: alertData.timestamp || prev.timestamp || new Date().toISOString(),
+                        dedupeKey: dedupeKey || prev.dedupeKey || null,
+                    };
+                    await this._saveAlerts();
+                }
                 return;
             }
         }
@@ -165,6 +203,7 @@ class AlertEngineService {
             resolved: normalizedSeverity !== 'critical',
             _fromRemote: alertData._fromRemote === true,
             remoteReviewId: alertData.remoteReviewId || null,
+            dedupeKey,
 
             // â”€â”€ Identity Confirmation Fields (optional, undefined if not a pending_identity alert) â”€â”€
             // pendingIdentityConfirm: bool â€” true while waiting for user to identify the cat
@@ -182,6 +221,7 @@ class AlertEngineService {
                 behaviorLabel: alertData.behaviorLabel || null,
                 confidence: alertData.confidence ?? null,
                 cropSnapshot: alertData.cropSnapshot || null,
+                multiSnapshots: Array.isArray(alertData.multiSnapshots) ? alertData.multiSnapshots : null,
                 sessionId: alertData.sessionId || null,
                 source: alertData.source || null,
                 resolvedCatId: null,
@@ -193,6 +233,7 @@ class AlertEngineService {
         };
 
         this.alerts.unshift(newAlert);
+        if (dedupeKey) this.lastEmitByKey[dedupeKey] = nowMs;
 
         // Keep history manageable (e.g., last 50 alerts)
         if (this.alerts.length > 50) {
@@ -214,10 +255,10 @@ class AlertEngineService {
     /**
      * Submit a new uncertain behavior detection for user confirmation.
      * Replaces the former IdentityConfirmQueue.submit()
-     * @param {Object} payload - { behaviorLabel, confidence, cropSnapshot, sessionId, source, isAbnormal }
+     * @param {Object} payload - { behaviorLabel, confidence, cropSnapshot, multiSnapshots, sessionId, source, isAbnormal, dedupeKey, cooldownMs }
      */
     async logPendingIdentity(payload) {
-        const { behaviorLabel, confidence, cropSnapshot, sessionId, source, isAbnormal } = payload;
+        const { behaviorLabel, confidence, cropSnapshot, multiSnapshots, sessionId, source, isAbnormal, dedupeKey, cooldownMs } = payload;
         if (!behaviorLabel) return;
 
         const confidencePct = confidence != null ? Math.round(confidence * 100) : null;
@@ -236,9 +277,12 @@ class AlertEngineService {
             behaviorLabel,
             confidence: confidence ?? null,
             cropSnapshot: cropSnapshot || null,
+            multiSnapshots: Array.isArray(multiSnapshots) ? multiSnapshots : null,
             sessionId: sessionId || null,
             source: source || null,
             isAbnormal: isAbnormal || false,
+            dedupeKey: dedupeKey || null,
+            cooldownMs: Number(cooldownMs || 0),
         });
     }
 

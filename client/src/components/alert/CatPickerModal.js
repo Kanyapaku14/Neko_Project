@@ -21,6 +21,7 @@ import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+const VIDEO_SERVER_BASE = 'http://192.168.1.100:5000';
 
 const BEHAVIOR_ICON_MAP = {
     vomiting: { icon: 'emoticon-sick-outline', color: '#D32F2F' },
@@ -49,6 +50,7 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
     const rejectPressAnim = useRef(new Animated.Value(0)).current;
     const skipPressAnim = useRef(new Animated.Value(0)).current;
     const closePressAnim = useRef(new Animated.Value(0)).current;
+    const [selectedSnapshotIdx, setSelectedSnapshotIdx] = React.useState(null);
     const isSubmitting = submittingAction !== null;
 
     React.useEffect(() => {
@@ -98,12 +100,18 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
         }
     }, [visible, modalOpacity, modalScale]);
 
+    React.useEffect(() => {
+        if (visible) setSelectedSnapshotIdx(null);
+    }, [visible]);
+
     if (!alert) return null;
 
     const { behaviorLabel, confidence, cropSnapshot, multiSnapshots } = alert;
     const isMultiMode = Array.isArray(multiSnapshots) && multiSnapshots.length >= 2;
     const confidencePct = confidence != null ? Math.round(confidence * 100) : null;
     const { icon: behaviorIcon, color: behaviorColor } = getBehaviorIcon(behaviorLabel);
+    const fallbackSnapshotUri = `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${encodeURIComponent(alert?.timestamp || Date.now())}`;
+    const previewSnapshotUri = cropSnapshot || fallbackSnapshotUri;
 
     const handlePickCat = (catId) => {
         if (isSubmitting) return;
@@ -120,9 +128,6 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
     };
 
     // สำหรับโหมด multi-snapshot: สลับรูปที่เลือก์ (0 หรือ 1)
-    const [selectedSnapshotIdx, setSelectedSnapshotIdx] = React.useState(null);
-    React.useEffect(() => { if (visible) setSelectedSnapshotIdx(null); }, [visible]);
-
     const handleConfirmMulti = async () => {
         if (selectedSnapshotIdx === null || !Array.isArray(multiSnapshots)) return;
         const chosen = multiSnapshots[selectedSnapshotIdx];
@@ -293,14 +298,7 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                             </>
                         ) : (
                             <View style={styles.detectionCard}>
-                                {cropSnapshot ? (
-                                    <Image source={{ uri: cropSnapshot }} style={styles.snapshot} resizeMode="cover" />
-                                ) : (
-                                    <View style={styles.snapshotPlaceholder}>
-                                        <MaterialCommunityIcons name="camera-off-outline" size={32} color="#B0BEC5" />
-                                        <Text style={styles.snapshotPlaceholderText}>No image available</Text>
-                                    </View>
-                                )}
+                                <Image source={{ uri: previewSnapshotUri }} style={styles.snapshot} resizeMode="cover" />
                                 <View style={styles.infoRow}>
                                     <View style={[styles.behaviorBadge, { backgroundColor: `${behaviorColor}20` }]}>
                                         <MaterialCommunityIcons name={behaviorIcon} size={18} color={behaviorColor} />

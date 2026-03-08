@@ -17,6 +17,7 @@ const GRID_PADDING = 16;
 const LIVE_WINDOW_MS = 5 * 60 * 1000;
 const SAVED_LIMIT = 500;
 const SAVED_STORAGE_KEY = 'gallery_saved_snapshots_v1';
+const VIDEO_SERVER_BASE = 'http://192.168.1.100:5000';
 const getStartOfDayIso = () => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -50,6 +51,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     const [nowTs, setNowTs] = useState(Date.now());
     const pageAnim = useRef(new Animated.Value(0)).current;
     const headerAnim = useRef(new Animated.Value(0)).current;
+    const cameraIdsCacheRef = useRef({ ownerId: null, ids: [], fetchedAt: 0 });
     const [showStatsModal, setShowStatsModal] = useState(false);
     const [selectedCatId, setSelectedCatId] = useState(null);
     const [selectedCatName, setSelectedCatName] = useState(null);
@@ -136,6 +138,31 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
         if (!session?.user?.id) return;
         const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
         if (data) setUserProfile(data);
+    };
+
+    const getUserCameraIds = async () => {
+        const ownerId = session?.user?.id;
+        if (!ownerId) return [];
+
+        const cache = cameraIdsCacheRef.current;
+        const now = Date.now();
+        if (cache.ownerId === ownerId && Array.isArray(cache.ids) && cache.ids.length >= 0 && (now - cache.fetchedAt) < 30000) {
+            return cache.ids;
+        }
+
+        const { data: cameras, error: camErr } = await supabase
+            .from('cameras')
+            .select('id')
+            .eq('owner_id', ownerId);
+
+        if (camErr || !Array.isArray(cameras)) {
+            cameraIdsCacheRef.current = { ownerId, ids: [], fetchedAt: now };
+            return [];
+        }
+
+        const ids = cameras.map((c) => c.id).filter(Boolean);
+        cameraIdsCacheRef.current = { ownerId, ids, fetchedAt: now };
+        return ids;
     };
 
     const persistSavedSnapshots = async (items) => {
@@ -235,38 +262,33 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
             const dbSnapshots = [];
             // 2. Pull DB snapshots from ai_cat_identity_review for this user's cameras
             if (session?.user?.id) {
-                const { data: cameras, error: camErr } = await supabase
-                    .from('cameras')
-                    .select('id')
-                    .eq('owner_id', session.user.id);
-
-                if (!camErr && Array.isArray(cameras) && cameras.length > 0) {
-                    const cameraIds = cameras.map((c) => c.id);
+                const cameraIds = await getUserCameraIds();
+                if (cameraIds.length > 0) {
                     const { data: reviews, error: reviewErr } = await supabase
                         .from('ai_cat_identity_review')
                         .select('id, camera_id, behavior_label, confidence, occurred_at, snapshot_url, created_at, metadata, reviewed, resolved_cat_id')
                         .in('camera_id', cameraIds)
                         .eq('reviewed', true)
-                        .not('snapshot_url', 'is', null)
                         .order('occurred_at', { ascending: false })
                         .limit(400);
 
                     if (!reviewErr && Array.isArray(reviews)) {
                         reviews.forEach((r) => {
-                            // Mobile app can render network URLs directly.
-                            if (!r.snapshot_url) return;
                             // กรองตาม selectedCatId: ถ้าเลือกแมวอยู่ ให้เห็นเฉพาะของแมวนั้น
-                            if (selectedCatId && r.resolved_cat_id && r.resolved_cat_id !== selectedCatId) return;
+                            if (selectedCatId && r.resolved_cat_id !== selectedCatId) return;
+                            const fallbackUri = `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${encodeURIComponent(r.occurred_at || r.created_at || Date.now())}`;
+                            const hasSnapshot = Boolean(r.snapshot_url);
                             dbSnapshots.push({
                                 id: `db_${r.id}`,
                                 dbRowId: r.id,
-                                uri: r.snapshot_url,
+                                uri: r.snapshot_url || fallbackUri,
                                 date: r.occurred_at || r.created_at || new Date().toISOString(),
-                                title: r.behavior_label ? `AI: ${r.behavior_label}` : 'AI Snapshot',
+                                title: r.behavior_label ? `AI: ${r.behavior_label}${hasSnapshot ? '' : ' (session)'}` : 'AI Snapshot',
                                 type: 'ai_snapshot',
                                 metadata: r.metadata || {},
                                 savedInDb: Boolean(r.metadata?.saved),
                                 catId: r.resolved_cat_id || null,
+                                hasRealSnapshot: hasSnapshot,
                             });
                         });
                     }
@@ -309,22 +331,17 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     const fetchDailyStats = async () => {
         if (!session?.user?.id) return;
         try {
-            const { data: cameras, error: camErr } = await supabase
-                .from('cameras')
-                .select('id')
-                .eq('owner_id', session.user.id);
-
-            if (camErr || !Array.isArray(cameras) || cameras.length === 0) {
+            const cameraIds = await getUserCameraIds();
+            if (cameraIds.length === 0) {
                 setDailyStats({ total: 0, recentLive: 0, saved: 0 });
                 return;
             }
 
-            const cameraIds = cameras.map((c) => c.id);
             const dayStartIso = getStartOfDayIso();
 
             const { data: rows, error: rowErr } = await supabase
                 .from('ai_cat_identity_review')
-                .select('id, occurred_at, created_at, metadata')
+                .select('id, occurred_at, created_at, metadata, resolved_cat_id')
                 .in('camera_id', cameraIds)
                 .eq('reviewed', true)
                 .gte('occurred_at', dayStartIso)
@@ -332,14 +349,17 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                 .limit(5000);
 
             if (rowErr || !Array.isArray(rows)) return;
+            const filteredRows = selectedCatId
+                ? rows.filter((r) => r.resolved_cat_id === selectedCatId)
+                : rows;
 
             const now = Date.now();
-            const total = rows.length;
-            const recentLive = rows.filter((r) => {
+            const total = filteredRows.length;
+            const recentLive = filteredRows.filter((r) => {
                 const ts = new Date(r.occurred_at || r.created_at || 0).getTime();
                 return Number.isFinite(ts) && (now - ts) <= LIVE_WINDOW_MS;
             }).length;
-            const saved = rows.filter((r) => Boolean(r.metadata?.saved)).length;
+            const saved = filteredRows.filter((r) => Boolean(r.metadata?.saved)).length;
             setDailyStats({ total, recentLive, saved });
         } catch (e) {
             console.error('Failed to fetch daily gallery stats:', e);
@@ -520,19 +540,15 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                         }
                         rightComponent={
                             <View style={styles.headerRight}>
-                                {selectedCatName && (
-                                    <View style={[styles.headerPill, { backgroundColor: '#D0F0EC', marginRight: 6 }]}>
-                                        <MaterialCommunityIcons name="cat" size={12} color="#0C5A58" />
-                                        <Text style={styles.headerPillText} numberOfLines={1}>{selectedCatName}</Text>
-                                    </View>
-                                )}
                                 <TouchableOpacity
                                     style={styles.headerPill}
                                     onPress={() => setShowStatsModal(true)}
                                     activeOpacity={0.7}
                                 >
                                     <MaterialCommunityIcons name="cat" size={14} color="#0C5A58" />
-                                    <Text style={styles.headerPillText}>{dailyStats.total}</Text>
+                                    <Text style={styles.headerPillText} numberOfLines={1}>
+                                        {selectedCatName ? `${selectedCatName} · ${dailyStats.total}` : `${dailyStats.total}`}
+                                    </Text>
                                 </TouchableOpacity>
                             </View>
                         }
@@ -585,21 +601,6 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                                 numColumns={columnCount}
                                 contentContainerStyle={styles.gridContent}
                                 columnWrapperStyle={styles.columnWrapper}
-                                ListHeaderComponent={
-                                    <View style={styles.galleryIntroCard}>
-                                        <View style={styles.galleryIntroIconWrap}>
-                                            <Ionicons name="images-outline" size={18} color="#0C5A58" />
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={styles.galleryIntroText}>{activeZone === 'live' ? 'Live Activity Feed' : 'Your Saved Cat Moments'}</Text>
-                                            <Text style={styles.galleryIntroSubText}>
-                                                {activeZone === 'live'
-                                                    ? 'Auto-updates from recent detections'
-                                                    : 'Only snapshots you kept'}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                }
                                 ListEmptyComponent={
                                     <View style={styles.emptyState}>
                                         <Ionicons name="images-outline" size={64} color="#B0BEC5" />
