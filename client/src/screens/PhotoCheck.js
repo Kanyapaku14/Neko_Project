@@ -122,7 +122,7 @@ export default function PhotoCheck({ onNavigate, session }) {
             // 2. Insert record ลง public.ai_photo_checks → รับ id กลับมา
             const userId = session?.user?.id ?? null;
             const { data: inserted, error: dbError } = await supabase
-                .from('ai_photo_checks')
+                .from('public.ai_photo_checks')
                 .insert([{
                     user_id: userId,
                     image_face_url: urls[0] ?? null,

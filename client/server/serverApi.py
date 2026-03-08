@@ -34,8 +34,7 @@ CORS(app)
 try:
     print("⏳ กำลังเชื่อมต่อ Gemini...")
     client = genai.Client(api_key=GEMINI_API_KEY)
-    print("✅ Gemini เชื่อมต่อสำเร็จ")
-    
+    print("✅ Gemini เชื่อมต่อสำเร็จ")                                                                                              
     print("⏳ กำลังเชื่อมต่อ Supabase...")
     if not SUPABASE_KEY:
         raise ValueError("หา SUPABASE_SERVICE_KEY ไม่พบ โปรดเช็คการตั้งค่าในไฟล์ .env")
@@ -339,7 +338,7 @@ def photo_check():
             return jsonify({"error": "recordId is required"}), 400
 
         # 1. ดึง record จาก Supabase
-        res = supabase.table('ai_photo_checks').select(
+        res = supabase.table('public.ai_photo_checks').select(
             'id, image_face_url, image_body_url, image_poop_url, image_vomit_url'
         ).eq('id', record_id).single().execute()
 
@@ -406,7 +405,7 @@ def photo_check():
 
         # 3. เรียก Gemini Vision
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-3-flash-preview",
             contents=[types.Content(parts=gemini_parts, role="user")],
             config=types.GenerateContentConfig(response_mime_type="application/json")
         )
@@ -414,7 +413,7 @@ def photo_check():
         ai_result = json.loads(response.text)
 
         # 4. บันทึกผลกลับ Supabase
-        supabase.table('ai_photo_checks').update({
+        supabase.table('public.ai_photo_checks').update({
             'status': 'done',
             'ai_result': ai_result
         }).eq('id', record_id).execute()
@@ -427,7 +426,7 @@ def photo_check():
         # อัปเดตสถานะเป็น error ใน Supabase
         try:
             if record_id:
-                supabase.table('ai_photo_checks').update({
+                supabase.table('public.ai_photo_checks').update({
                     'status': 'error'
                 }).eq('id', record_id).execute()
         except:
