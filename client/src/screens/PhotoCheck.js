@@ -201,7 +201,7 @@ export default function PhotoCheck({ onNavigate, session }) {
                             style={{
                                 width: '45%',
                                 aspectRatio: 1,
-                                backgroundColor: phoneCameraEnabled ? '#FFF' : '#F1F5F9',
+                                backgroundColor: '#FFF',
                                 borderRadius: 15,
                                 borderStyle: images[index] ? 'solid' : 'dashed',
                                 borderWidth: 2,
@@ -269,7 +269,7 @@ export default function PhotoCheck({ onNavigate, session }) {
                         shadowOffset: { width: 0, height: 4 },
                         shadowOpacity: 0.2,
                         shadowRadius: 5,
-                        elevation: phoneCameraEnabled ? 5 : 0,
+                        elevation: 5,
                     }}
                     onPress={handleStartAiCheck}
                     disabled={loading}
