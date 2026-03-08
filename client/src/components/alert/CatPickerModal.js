@@ -55,6 +55,10 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
     const closePressAnim = useRef(new Animated.Value(0)).current;
     const [selectedSnapshotIdx, setSelectedSnapshotIdx] = React.useState(null);
     const isSubmitting = submittingAction !== null;
+    const fallbackSnapshotUri = React.useMemo(
+        () => `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${encodeURIComponent(alert?.timestamp || alert?.id || 'latest')}`,
+        [alert?.timestamp, alert?.id]
+    );
 
     React.useEffect(() => {
         return () => {
@@ -113,10 +117,6 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
     const isMultiMode = Array.isArray(multiSnapshots) && multiSnapshots.length >= 2;
     const confidencePct = confidence != null ? Math.round(confidence * 100) : null;
     const { icon: behaviorIcon, color: behaviorColor } = getBehaviorIcon(behaviorLabel);
-    const fallbackSnapshotUri = React.useMemo(
-        () => `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${encodeURIComponent(alert?.timestamp || alert?.id || 'latest')}`,
-        [alert?.timestamp, alert?.id]
-    );
     const previewSnapshotUri = cropSnapshot || fallbackSnapshotUri;
 
     const handlePickCat = (catId) => {
