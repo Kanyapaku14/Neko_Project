@@ -12,9 +12,7 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
-  Platform,
-  AppState,
-  DeviceEventEmitter
+  Platform
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -24,20 +22,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient';
 import HomeHeader from '../components/HomeHeader';
 
-import { WebView } from 'react-native-webview'; // <-- ?????? WebView
+import { WebView } from 'react-native-webview'; // <-- ต้องมี WebView
 import BottomNav from '../components/BottomNav';
 import useCameraData from '../hooks/useCameraData';
 import ActivityLevelChart from '../components/ActivityLevelChart';
 import AlertEngine, { AlertEvents } from '../services/AlertEngine';
 import PendingIdentityBanner from '../components/alert/PendingIdentityBanner';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
-import { CAMERA_API_BASE, CAMERA_STREAM_QUERY, CAMERA_STREAM_URL } from '../config/cameraApi';
 
 const { width } = Dimensions.get('window');
 
-const VIDEO_STREAM_URL = CAMERA_STREAM_URL;
-const VIDEO_STREAM_QUERY = CAMERA_STREAM_QUERY;
-const VIDEO_SERVER_BASE = CAMERA_API_BASE;
+const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+// 🚨 เปลี่ยน 192.168.1.159 เป็น IP จริงของคอมพิวเตอร์คุณเสมอ
+const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed';
+const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
 
 const isDemoLikeSource = (source = '') => {
   const s = String(source || '').toLowerCase();
@@ -54,29 +52,6 @@ const isDemoLikeSource = (source = '') => {
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
-const ButtonScale = ({ children, onPress, style, disabled = false }) => {
-  const scaleValue = useRef(new Animated.Value(1)).current;
-
-  const onPressIn = () => {
-    Animated.spring(scaleValue, { toValue: 0.95, useNativeDriver: true }).start();
-  };
-  const onPressOut = () => {
-    Animated.spring(scaleValue, { toValue: 1, useNativeDriver: true }).start();
-  };
-
-  return (
-    <AnimatedTouchableOpacity
-      activeOpacity={disabled ? 1 : 0.9}
-      onPress={disabled ? undefined : onPress}
-      onPressIn={onPressIn}
-      onPressOut={onPressOut}
-      style={[style, disabled && { opacity: 0.45 }, { transform: [{ scale: scaleValue }] }]}
-    >
-      {children}
-    </AnimatedTouchableOpacity>
-  );
-};
-
 const DecorativeCatEars = () => (
   <View style={styles.earContainer} pointerEvents="none">
     <View style={[styles.ear, styles.earLeft]} />
@@ -88,6 +63,7 @@ export default function CameraScreen({ onNavigate, session }) {
   const [showSetupIntro, setShowSetupIntro] = useState(null);
   const [requireSetcamera, setRequireSetcamera] = useState(false);
 
+  // 🚨 บังคับสถานะเป็น connected เพื่อเทสกล้อง
   const [cameraStatus, setCameraStatus] = useState('connected');
   const [currentCamera, setCurrentCamera] = useState(1);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
@@ -96,28 +72,16 @@ export default function CameraScreen({ onNavigate, session }) {
   const [cats, setCats] = useState([]);
   const [selectedCat, setSelectedCat] = useState(null);
   const [showCatSwitcher, setShowCatSwitcher] = useState(false);
-  const [environment, setEnvironment] = useState({ temperature: null, humidity: null });
-  const [proStats, setProStats] = useState({ ping: null, bitrate: null, fps: null });
+  const [environment, setEnvironment] = useState({ temperature: 25.4, humidity: 58 });
+  const [proStats, setProStats] = useState({ ping: 42, bitrate: 1.2, fps: 30 });
   const [livePreviewUri, setLivePreviewUri] = useState(null);
   const [quickSummary, setQuickSummary] = useState({ eventsToday: 0, lastDetected: '--' });
-  // ??? stream_source ??? DB
+  // ดึง stream_source จาก DB
   const [dbStreamUrl, setDbStreamUrl] = useState(null);
-  const [streamNonce, setStreamNonce] = useState(Date.now());
-  const streamWebViewUrl = `${VIDEO_STREAM_URL}?${VIDEO_STREAM_QUERY}&t=${streamNonce}`;
-  const lastStreamRefreshAtRef = useRef(0);
+  const [streamWebViewUrl] = useState(`${VIDEO_STREAM_URL}?t=${Date.now()}`);
   const lastAppliedSourceRef = useRef('');
-  const healthMissCountRef = useRef(0);
-  const lastConnectedAtRef = useRef(0);
 
   const { data, refetch } = useCameraData(session, cameraStatus);
-  const scopedKey = (base) => (session?.user?.id ? `${base}:${session.user.id}` : base);
-
-  const refreshStream = (reason = 'manual', minIntervalMs = 8000) => {
-    const now = Date.now();
-    if ((now - lastStreamRefreshAtRef.current) < minIntervalMs) return;
-    lastStreamRefreshAtRef.current = now;
-    setStreamNonce(now);
-  };
 
   // Animations
   const bannerAnim = useRef(new Animated.Value(0)).current;
@@ -184,7 +148,7 @@ export default function CameraScreen({ onNavigate, session }) {
     return () => AlertEngine.off(AlertEvents.UPDATED, handler);
   }, []);
 
-  // ?????????? (camera_setup_complete ????????? set) -> ???? Phone.js ?????
+  // ผู้ใช้ใหม่ (camera_setup_complete ยังไม่ถูก set) -> หน้า Phone.js ทันที
   useEffect(() => {
     if (showSetupIntro === true) {
       onNavigate('Phone', { initialStep: 'intro' });
@@ -194,29 +158,18 @@ export default function CameraScreen({ onNavigate, session }) {
   useEffect(() => {
     const applySourceToBackend = async ({ sourceUrl, cameraId, ownerId }) => {
       const cleanSource = String(sourceUrl || '').trim();
-      const sourceType = cleanSource ? (isDemoLikeSource(cleanSource) ? 'demo' : 'live') : 'live';
-      const sourceKey = `${sourceType}|${cameraId}|${cleanSource || 'DEFAULT_LIVE'}`;
-      if (lastAppliedSourceRef.current === sourceKey) return;
+      if (!cleanSource) return;
 
-      // Avoid forcing backend source restart when it is already set correctly.
-      try {
-        const statusRes = await fetch(`${VIDEO_SERVER_BASE}/api/source_status`);
-        const status = await statusRes.json();
-        const backendKey = `${status?.source_type || 'live'}|${status?.camera_id || ''}|${String(status?.source || '').trim() || 'DEFAULT_LIVE'}`;
-        if (backendKey === sourceKey) {
-          lastAppliedSourceRef.current = sourceKey;
-          return;
-        }
-      } catch (_e) {
-        // continue to set_source fallback
-      }
+      const sourceType = isDemoLikeSource(cleanSource) ? 'demo' : 'live';
+      const sourceKey = `${sourceType}|${cameraId}|${cleanSource}`;
+      if (lastAppliedSourceRef.current === sourceKey) return;
 
       await fetch(`${VIDEO_SERVER_BASE}/api/set_source`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source_type: sourceType,
-          source_url: cleanSource || null,
+          source_url: cleanSource,
           camera_id: cameraId || null,
           owner_id: ownerId || null,
         })
@@ -227,10 +180,9 @@ export default function CameraScreen({ onNavigate, session }) {
 
     const fetchStatusAndSetup = async () => {
       try {
-        const setupKey = scopedKey('camera_setup_complete');
-        const hasSetup = (await AsyncStorage.getItem(setupKey)) || (await AsyncStorage.getItem('camera_setup_complete'));
+        const hasSetup = await AsyncStorage.getItem('camera_setup_complete');
         let hasValidSource = false;
-        const storedCameraId = (await AsyncStorage.getItem(scopedKey('camera_id'))) || (await AsyncStorage.getItem('camera_id'));
+        const storedCameraId = await AsyncStorage.getItem('camera_id');
         let cameraId = storedCameraId;
 
         if (session?.user?.id) {
@@ -250,12 +202,12 @@ export default function CameraScreen({ onNavigate, session }) {
             const ownedStoredCam = userCameras.find((c) => c.id === storedCameraId);
             const activeCam = ownedStoredCam || userCameras[0];
             cameraId = activeCam.id;
-            await AsyncStorage.setItem(scopedKey('camera_id'), cameraId);
+            await AsyncStorage.setItem('camera_id', cameraId);
 
             const source = String(activeCam.stream_source || '').trim();
             hasValidSource = Boolean(source);
             setDbStreamUrl(hasValidSource ? source : null);
-            setCameraStatus('connected');
+            setCameraStatus(hasValidSource ? 'connected' : 'disconnected');
 
             try {
               await applySourceToBackend({
@@ -281,7 +233,7 @@ export default function CameraScreen({ onNavigate, session }) {
             .maybeSingle();
           const source = (camRow?.stream_source || '').trim();
           hasValidSource = Boolean(source);
-          // ???? URL ?????????? WebView — ?????????? connection logic
+          // เก็บ URL เพื่อใส่ใน WebView — ไม่เปลี่ยน connection logic
           if (hasValidSource) {
             setDbStreamUrl(source);
             setCameraStatus('connected');
@@ -295,24 +247,13 @@ export default function CameraScreen({ onNavigate, session }) {
               console.log('Failed to update python backend source (fallback)', e);
             }
           } else {
-            // No DB source for this account -> fallback to default live camera on backend
-            setCameraStatus('connected');
-            try {
-              await applySourceToBackend({
-                sourceUrl: null,
-                cameraId,
-                ownerId: session.user.id,
-              });
-            } catch (e) {
-              console.log('Failed to fallback python backend source', e);
-            }
+            setCameraStatus('disconnected');
           }
         }
 
         setRequireSetcamera(!hasValidSource);
         setShowSetupIntro(prev => {
-          // If DB already has a valid stream source, do not force setup intro again.
-          const shouldShow = (hasSetup !== 'true') && !hasValidSource;
+          const shouldShow = hasSetup !== 'true';
           return (prev === null || prev !== shouldShow) ? shouldShow : prev;
         });
 
@@ -322,101 +263,15 @@ export default function CameraScreen({ onNavigate, session }) {
     };
 
     fetchStatusAndSetup();
-    const interval = setInterval(fetchStatusAndSetup, 60000);
+    const interval = setInterval(fetchStatusAndSetup, 2000);
     return () => clearInterval(interval);
   }, [session?.user?.id]);
 
   useEffect(() => {
     let timer;
-    const pollBackendHealth = async () => {
-      try {
-        const startedAt = Date.now();
-        const res = await fetch(`${VIDEO_SERVER_BASE}/api/health`);
-        const h = await res.json();
-        const pingMs = Math.max(1, Date.now() - startedAt);
-        setProStats((prev) => ({
-          ...prev,
-          ping: pingMs,
-          fps: Number.isFinite(Number(h?.capture_fps)) ? Number(h.capture_fps) : prev.fps,
-        }));
-        if (h?.camera_status === 'connected' || h?.camera === true) {
-          healthMissCountRef.current = 0;
-          lastConnectedAtRef.current = Date.now();
-          setCameraStatus('connected');
-        } else if (h?.camera_status === 'disconnected') {
-          healthMissCountRef.current += 1;
-          // Debounce disconnected to avoid stream flicker/remount on transient drops.
-          if (healthMissCountRef.current >= 3 && (Date.now() - lastConnectedAtRef.current) > 15000) {
-            setCameraStatus('disconnected');
-          } else {
-            setCameraStatus('connected');
-          }
-        } else {
-          setCameraStatus('connected');
-        }
-      } catch (_e) {
-        healthMissCountRef.current += 1;
-        if (healthMissCountRef.current >= 3 && (Date.now() - lastConnectedAtRef.current) > 15000) {
-          setCameraStatus('disconnected');
-        } else {
-          setCameraStatus('connected');
-        }
-      }
-    };
-
-    pollBackendHealth();
-    timer = setInterval(pollBackendHealth, 8000);
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, []);
-
-  useEffect(() => {
-    let timer;
-    const fetchEnvironment = async () => {
-      try {
-        const cameraId = (await AsyncStorage.getItem(scopedKey('camera_id'))) || (await AsyncStorage.getItem('camera_id'));
-        const url = cameraId
-          ? `${VIDEO_SERVER_BASE}/api/environment?camera_id=${encodeURIComponent(cameraId)}`
-          : `${VIDEO_SERVER_BASE}/api/environment`;
-        const res = await fetch(url);
-        const env = await res.json();
-        if (env?.status === 'ok') {
-          setEnvironment({
-            temperature: Number(env.temperature),
-            humidity: Number(env.humidity),
-          });
-        } else {
-          setEnvironment({ temperature: null, humidity: null });
-        }
-      } catch (_e) {
-        setEnvironment({ temperature: null, humidity: null });
-      }
-    };
-
-    fetchEnvironment();
-    timer = setInterval(fetchEnvironment, 5 * 60 * 1000);
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [session?.user?.id]);
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        // Refresh MJPEG only with cooldown to avoid frequent remount jitter.
-        refreshStream('app_active', 15000);
-        refetch?.();
-      }
-    });
-    return () => sub?.remove?.();
-  }, [refetch]);
-
-  useEffect(() => {
-    let timer;
     const fetchLatestPreview = async () => {
       try {
-        const cameraId = (await AsyncStorage.getItem(scopedKey('camera_id'))) || (await AsyncStorage.getItem('camera_id'));
+        const cameraId = await AsyncStorage.getItem('camera_id');
         if (!cameraId) {
           setLivePreviewUri(null);
           return;
@@ -459,6 +314,36 @@ export default function CameraScreen({ onNavigate, session }) {
     };
   }, [cameraStatus]);
 
+  // Simulate environment data from camera stream
+  useEffect(() => {
+    let interval;
+    if (cameraStatus === 'connected') {
+      interval = setInterval(() => {
+        setEnvironment(prev => {
+          const tempChange = (Math.random() * 0.4) - 0.2;
+          let newTemp = prev.temperature + tempChange;
+          if (newTemp > 30) newTemp = 30;
+          if (newTemp < 22) newTemp = 22;
+
+          const humChange = Math.floor(Math.random() * 3) - 1;
+          let newHum = prev.humidity + humChange;
+          if (newHum > 70) newHum = 70;
+          if (newHum < 40) newHum = 40;
+
+          return { temperature: newTemp, humidity: newHum };
+        });
+
+        setProStats(prev => {
+          const newPing = Math.max(12, Math.min(120, prev.ping + (Math.floor(Math.random() * 15) - 7)));
+          const newBitrate = Math.max(0.5, Math.min(4.5, prev.bitrate + (Math.random() * 0.4 - 0.2)));
+          const newFps = Math.max(24, Math.min(30, prev.fps + (Math.floor(Math.random() * 3) - 1)));
+          return { ping: newPing, bitrate: newBitrate, fps: newFps };
+        });
+      }, 5000);
+    }
+    return () => clearInterval(interval);
+  }, [cameraStatus]);
+
   // Fetch Cats for Switcher
   useEffect(() => {
     const fetchCats = async () => {
@@ -470,7 +355,7 @@ export default function CameraScreen({ onNavigate, session }) {
 
         if (data && data.length > 0) {
           setCats(data);
-          const lastCatId = await AsyncStorage.getItem(scopedKey('last_selected_cat_id'));
+          const lastCatId = await AsyncStorage.getItem('last_selected_cat_id');
           const found = data.find(c => c.id === lastCatId);
           setSelectedCat(found || data[0]);
         }
@@ -479,34 +364,34 @@ export default function CameraScreen({ onNavigate, session }) {
     fetchCats();
   }, [session]);
 
-  // ??? Quick Summary ??? DB (Events Today + Last Detected)
+  // ดึง Quick Summary จาก DB (Events Today + Last Detected)
   useEffect(() => {
     const fetchQuickSummary = async () => {
       if (cameraStatus !== 'connected' || !session?.user?.id) return;
       try {
-        const cameraId = (await AsyncStorage.getItem(scopedKey('camera_id'))) || (await AsyncStorage.getItem('camera_id'));
+        const cameraId = await AsyncStorage.getItem('camera_id');
         if (!cameraId) return;
+
         const dayStart = new Date();
         dayStart.setHours(0, 0, 0, 0);
 
-        // Events today — ?????? ai_cat_events ??? camera_id
-        let countQuery = supabase
+        // Events today — นับจาก ai_cat_events ตาม camera_id
+        const { count } = await supabase
           .from('ai_cat_events')
           .select('id', { count: 'exact', head: true })
           .eq('camera_id', cameraId)
           .gte('occurred_at', dayStart.toISOString());
-        const { count } = await countQuery;
 
-        // Last detected — ?????? ai_cat_identity_review ??? reviewed=true
-        let lastReviewQuery = supabase
+        // Last detected — ดึงจาก ai_cat_identity_review ที่ reviewed=true
+        const { data: lastReview } = await supabase
           .from('ai_cat_identity_review')
           .select('resolved_cat_id, occurred_at')
           .eq('camera_id', cameraId)
           .eq('reviewed', true)
           .not('resolved_cat_id', 'is', null)
           .order('occurred_at', { ascending: false })
-          .limit(1);
-        const { data: lastReview } = await lastReviewQuery.maybeSingle();
+          .limit(1)
+          .maybeSingle();
 
         let lastDetectedName = '--';
         if (lastReview?.resolved_cat_id) {
@@ -521,30 +406,16 @@ export default function CameraScreen({ onNavigate, session }) {
       }
     };
     fetchQuickSummary();
-    const t = setInterval(fetchQuickSummary, 60000); // refresh ??? 1 ????
+    const t = setInterval(fetchQuickSummary, 60000); // refresh ทุก 1 นาที
     return () => clearInterval(t);
   }, [cameraStatus, session]);
 
   const handleSelectCat = async (cat) => {
-    if (!cat?.id) return;
     setSelectedCat(cat);
     setShowCatSwitcher(false);
-    await AsyncStorage.multiSet([
-      [scopedKey('last_selected_cat_id'), cat.id],
-      ['last_selected_cat_id', cat.id],
-      [scopedKey('selectedCatId'), cat.id],
-      ['selectedCatId', cat.id],
-    ]);
-    // Switch cat only updates display profile, not detection scope
-    DeviceEventEmitter.emit('catChanged', cat);
-    await AlertEngine.logEvent({
-      type: 'cat_profile_switch',
-      severity: 'info',
-      title: `Switched to ${cat.name || 'selected cat'}`,
-      desc: 'Display profile updated. Detection and alerts continue in combined camera mode.',
-      dedupeKey: `cat_profile_switch:${session?.user?.id || 'anonymous'}:${cat.id}`,
-      cooldownMs: 5000,
-    });
+    await AsyncStorage.setItem('last_selected_cat_id', cat.id);
+    // เชื่อม filter ของ useCameraData — ห้ามแตะ camera selection logic
+    await AsyncStorage.setItem('camera_selectedCats', JSON.stringify([cat.id]));
     refetch();
   };
 
@@ -552,10 +423,33 @@ export default function CameraScreen({ onNavigate, session }) {
     onNavigate('Setcamera');
   };
 
+  const ButtonScale = ({ children, onPress, style, disabled = false }) => {
+    const scaleValue = useRef(new Animated.Value(1)).current;
+
+    const onPressIn = () => {
+      Animated.spring(scaleValue, { toValue: 0.95, useNativeDriver: true }).start();
+    };
+    const onPressOut = () => {
+      Animated.spring(scaleValue, { toValue: 1, useNativeDriver: true }).start();
+    };
+
+    return (
+      <AnimatedTouchableOpacity
+        activeOpacity={disabled ? 1 : 0.9}
+        onPress={disabled ? undefined : onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        style={[style, disabled && { opacity: 0.45 }, { transform: [{ scale: scaleValue }] }]}
+      >
+        {children}
+      </AnimatedTouchableOpacity>
+    );
+  };
+
   if (!data) return null;
 
   const CameraSetupIntro = ({ onSetup, onMaybeLater }) => {
-    // ... (?????????????????????)
+    // ... (โค้ดส่วนนี้เหมือนเดิม)
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" color="#00695C" />
@@ -620,29 +514,39 @@ export default function CameraScreen({ onNavigate, session }) {
       <LinearGradient colors={['#f5fffdff', '#f5fffdff']} style={{ flex: 1 }}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
           <HomeHeader
-            onNotify={() => onNavigate('Alert')}
-            onSetting={() => onNavigate('Setcamera')}
+            leftComponent={
+              <TouchableOpacity style={styles.catProfileCard} onPress={() => setShowCatSwitcher(!showCatSwitcher)} activeOpacity={0.8}>
+                <View style={styles.catAvatarContainer}>
+                  <Image source={selectedCat?.image_url ? { uri: selectedCat.image_url } : require('../../assets/cioncat.jpg')} style={styles.catAvatar} />
+                  <View style={[styles.onlineIndicator, { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : '#B0BEC5' }]} />
+                </View>
+              </TouchableOpacity>
+            }
+            rightComponent={
+              <TouchableOpacity onPress={() => onNavigate('Alert')} style={styles.bellButton}>
+                <Ionicons name="notifications-outline" size={26} color="#00695C" />
+                {unreadAlerts > 0 ? <View style={styles.notificationDot} /> : null}
+              </TouchableOpacity>
+            }
           />
 
           <PendingIdentityBanner count={pendingIdentityCount} onPress={openPendingQueue} />
 
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-            {/* ???? SetupPromptCard ??????????????????? stream_source (?????? camera status) */}
+            {/* แสดง SetupPromptCard ถ้ายังไม่ได้ตั้งค่า stream_source (ไม่แตะ camera status) */}
             {requireSetcamera && <SetupPromptCard />}
 
             <Animated.View style={{ opacity, transform: [{ translateY }] }}>
 
-              {/* ?? ???????????? (???????? WebView ????????? ?????? HTML) */}
+              {/* 🚨 โซนแสดงกล้อง (ปรับเป็น WebView แบบยิงตรง ไม่ฝัง HTML) */}
               <View style={styles.cameraContainer}>
                 <View style={styles.cameraFrame}>
-                  {cameraStatus !== 'disconnected' ? (
+                  {cameraStatus === 'connected' ? (
                     <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#E5E7EB' }}>
                       <WebView
-                        key={`cam-${streamNonce}`}
                         source={{ uri: streamWebViewUrl }}
                         style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
-                        cacheEnabled={false}
                         scrollEnabled={false}
                         bounces={false}
                         showsVerticalScrollIndicator={false}
@@ -650,24 +554,23 @@ export default function CameraScreen({ onNavigate, session }) {
                         originWhitelist={['*']}
                         mixedContentMode="always"
                         allowsInlineMediaPlayback={true}
-                        onError={() => refreshStream('webview_error', 8000)}
-                        onHttpError={() => refreshStream('webview_http_error', 8000)}
-                        onContentProcessDidTerminate={() => refreshStream('webview_terminate', 8000)}
                       />
                     </View>
                   ) : (
                     <View style={styles.videoPlaceholder}>
-                      <Text style={styles.liveFeedLabel}>Camera Disconnected</Text>
+                      <Text style={styles.liveFeedLabel}>Connecting...</Text>
                     </View>
                   )}
 
                   <View style={[styles.cameraStatusBadge, { backgroundColor: cameraStatus === 'connected' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(30, 30, 30, 0.75)' }]}>
                     <Animated.View style={[styles.cameraStatusDot, {
                       opacity: cameraStatus === 'connected' ? pulseAnim : 1,
-                      backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : '#F44336'
+                      backgroundColor: cameraStatus === 'connected' ? '#4CAF50' :
+                        cameraStatus === 'connecting' ? '#FFC107' : '#F44336'
                     }]} />
                     <Text style={[styles.cameraStatusText, { color: cameraStatus === 'connected' ? '#1B5E20' : '#fff' }]}>
-                      {cameraStatus === 'connected' ? 'Connected' : 'Camera Disconnected'}
+                      {cameraStatus === 'connected' ? 'Connected' :
+                        cameraStatus === 'connecting' ? 'Connecting...' : 'Camera Disconnected'}
                     </Text>
                   </View>
                 </View>
@@ -688,11 +591,7 @@ export default function CameraScreen({ onNavigate, session }) {
                     <Text style={styles.weatherCity}>Home</Text>
                     <Text style={styles.weatherCondition}>
                       {cameraStatus === 'connected'
-                        ? (environment.humidity != null && environment.humidity > 70
-                          ? 'Humid'
-                          : environment.temperature != null && environment.temperature > 30
-                            ? 'Warm'
-                            : 'Live')
+                        ? (environment.humidity > 70 ? 'Humid' : environment.temperature > 30 ? 'Warm' : 'Comfort')
                         : 'No Signal'}
                     </Text>
                   </View>
@@ -702,37 +601,37 @@ export default function CameraScreen({ onNavigate, session }) {
                       <MaterialCommunityIcons name="weather-partly-cloudy" size={28} color="#6366F1" />
                     </View>
                     <Text style={styles.weatherTemp}>
-                      {cameraStatus === 'connected' && environment.temperature != null ? `${Number(environment.temperature).toFixed(1)}°C` : '--°C'}
+                      {cameraStatus === 'connected' ? `${environment.temperature.toFixed(1)}°C` : '--°C'}
                     </Text>
                     <View style={styles.weatherHumidityPill}>
                       <MaterialCommunityIcons name="water-percent" size={12} color="#5B67D6" style={{ marginRight: 4 }} />
                       <Text style={styles.weatherHumidity}>
-                        {cameraStatus === 'connected' && environment.humidity != null ? `${environment.humidity}%` : '--%'}
+                        {cameraStatus === 'connected' ? `${environment.humidity}%` : '--%'}
                       </Text>
                     </View>
                   </View>
                 </LinearGradient>
               </View>
 
-              {/* Stream Stats Bar — ping/bitrate/fps ??? proStats + Quick Summary */}
+              {/* Stream Stats Bar — ping/bitrate/fps จาก proStats + Quick Summary */}
               {cameraStatus === 'connected' && (
                 <View style={styles.streamStatsBar}>
                   <View style={styles.streamStatItem}>
                     <MaterialCommunityIcons name="access-point" size={13} color="#00695C" />
                     <Text style={styles.streamStatLabel}>Ping</Text>
-                    <Text style={styles.streamStatValue}>{proStats.ping != null ? `${Math.round(proStats.ping)}ms` : '--'}</Text>
+                    <Text style={styles.streamStatValue}>{Math.round(proStats.ping)}ms</Text>
                   </View>
                   <View style={styles.streamStatDivider} />
                   <View style={styles.streamStatItem}>
                     <MaterialCommunityIcons name="video" size={13} color="#00695C" />
                     <Text style={styles.streamStatLabel}>Bitrate</Text>
-                    <Text style={styles.streamStatValue}>{proStats.bitrate != null ? `${proStats.bitrate.toFixed(1)} Mbps` : '--'}</Text>
+                    <Text style={styles.streamStatValue}>{proStats.bitrate.toFixed(1)} Mbps</Text>
                   </View>
                   <View style={styles.streamStatDivider} />
                   <View style={styles.streamStatItem}>
                     <MaterialCommunityIcons name="speedometer" size={13} color="#00695C" />
                     <Text style={styles.streamStatLabel}>FPS</Text>
-                    <Text style={styles.streamStatValue}>{proStats.fps != null ? Math.round(proStats.fps) : '--'}</Text>
+                    <Text style={styles.streamStatValue}>{proStats.fps}</Text>
                   </View>
                   <View style={styles.streamStatDivider} />
                   <View style={styles.streamStatItem}>
@@ -810,7 +709,7 @@ export default function CameraScreen({ onNavigate, session }) {
                 </View>
               </SectionOverlay>
 
-              {/* Stats Grid — Food & Litter ??? DB */}
+              {/* Stats Grid — Food & Litter จาก DB */}
               <SectionOverlay>
                 <View style={styles.statsRow}>
                   <View style={styles.statCardGlowFood}>
@@ -820,8 +719,8 @@ export default function CameraScreen({ onNavigate, session }) {
                         <MaterialCommunityIcons name="food-apple" size={26} color="#FF6D00" />
                       </View>
                       <View style={styles.statContent}>
-                        <Text style={styles.statValue}>{data.food}</Text>
-                        <Text style={styles.statLabel}>Feeding Events</Text>
+                        <Text style={styles.statValue}>{data.food}g</Text>
+                        <Text style={styles.statLabel}>Food Consumed</Text>
                       </View>
                     </View>
                   </View>
@@ -841,7 +740,7 @@ export default function CameraScreen({ onNavigate, session }) {
                 </View>
               </SectionOverlay>
 
-              {/* Posture & Behavior Card — ??? DB */}
+              {/* Posture & Behavior Card — จาก DB */}
               <SectionOverlay>
                 <View style={styles.cardContainer}>
                   <DecorativeCatEars />
@@ -885,7 +784,7 @@ export default function CameraScreen({ onNavigate, session }) {
                 </View>
               </SectionOverlay>
 
-              {/* Behavior Analytics Card — ???????????????????? DB ???? useCameraData */}
+              {/* Behavior Analytics Card — คำนวณจาก behaviorCalculation.py */}
               <SectionOverlay>
                 <View style={styles.cardContainer}>
                   <View style={styles.cardHeader}>
@@ -979,6 +878,12 @@ export default function CameraScreen({ onNavigate, session }) {
               </SectionOverlay>
 
               {/* Action Buttons */}
+              <ButtonScale style={styles.actionButton} onPress={() => onNavigate('Timeline')}>
+                <MaterialCommunityIcons name="timeline-clock-outline" size={22} color="#00695C" />
+                <Text style={styles.actionButtonText}>View Timeline</Text>
+                <Ionicons name="chevron-forward" size={20} color="#B2DFDB" />
+              </ButtonScale>
+
               <ButtonScale style={styles.actionButton} onPress={() => onNavigate('Gallery')}>
                 <MaterialCommunityIcons name="image-multiple-outline" size={22} color="#00695C" />
                 <Text style={styles.actionButtonText}>Activity Gallery</Text>
@@ -1037,21 +942,7 @@ const styles = StyleSheet.create({
   bellButton: { width: 40, height: 32, justifyContent: 'center', alignItems: 'center', position: 'relative' },
   notificationDot: { position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF5252', borderWidth: 1.5, borderColor: '#FFFFFF' },
   cameraContainer: { marginTop: 12, marginBottom: 24, alignItems: 'center' },
-  cameraFrame: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-    minHeight: 200,
-    maxHeight: 300,
-    borderRadius: 24,
-    overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
-    position: 'relative',
-    elevation: 2,
-    shadowColor: '#546E7A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12
-  },
+  cameraFrame: { width: '100%', height: 220, borderRadius: 24, overflow: 'hidden', backgroundColor: '#FFFFFF', position: 'relative', elevation: 2, shadowColor: '#546E7A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12 },
   videoPlaceholder: { flex: 1, justifyContent: 'center', backgroundColor: '#FFFFFF', alignItems: 'center' },
   livePreviewImage: { width: '100%', height: '100%', backgroundColor: '#E5E7EB' },
   liveFeedLabel: { color: '#64748B', fontSize: 14, fontWeight: '600' },
@@ -1157,4 +1048,3 @@ const styles = StyleSheet.create({
   insightSubtext: { fontSize: 11, color: '#90A4AE', marginTop: 4, textAlign: 'right' },
   insightSubtextLeft: { fontSize: 11, color: '#90A4AE' },
 });
-
