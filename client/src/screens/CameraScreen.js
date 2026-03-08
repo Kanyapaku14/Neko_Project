@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect, useState, useContext } from 'react';
+﻿import React, { useRef, useEffect, useState, useContext, useMemo } from 'react';
 import {
   View,
   Text,
@@ -96,11 +96,45 @@ export default function CameraScreen({ onNavigate, session }) {
   const [selectedCat, setSelectedCat] = useState(null);
   const [environment, setEnvironment] = useState({ temperature: null, humidity: null });
   const [proStats, setProStats] = useState({ ping: null, bitrate: null, fps: null });
+  const [cameraModeFromDb, setCameraModeFromDb] = useState(null);
   const [livePreviewUri, setLivePreviewUri] = useState(null);
   const [quickSummary, setQuickSummary] = useState({ eventsToday: 0, lastDetected: '--' });
   // ดึง stream_source จาก DB
   const [dbStreamUrl, setDbStreamUrl] = useState(null);
   const [streamWebViewUrl] = useState(`${VIDEO_STREAM_URL}?${VIDEO_STREAM_QUERY}&t=${Date.now()}`);
+  const streamWebViewHtml = useMemo(() => `<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+      .wrap {
+        width: 100%;
+        height: 100%;
+        background: #000;
+      }
+      img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <img src="${streamWebViewUrl}" alt="live-stream" />
+    </div>
+  </body>
+</html>`, [streamWebViewUrl]);
   const lastAppliedSourceRef = useRef('');
   const cameraScreenCatKey = session?.user?.id
     ? `camera_screen_selected_cat_id:${session.user.id}`
@@ -108,7 +142,9 @@ export default function CameraScreen({ onNavigate, session }) {
   const healthMissCountRef = useRef(0);
   const lastConnectedAtRef = useRef(0);
 
-  const { data, refetch } = useCameraData(session, cameraStatus);
+  const { data, refetch } = useCameraData(session, cameraStatus, selectedCat?.id || null);
+  const frameWidth = width - 28; // scrollContent horizontal padding (14 + 14)
+  const videoFrameHeight = Math.max(220, Math.min(340, Math.round(frameWidth * 9 / 16)));
 
   // Animations
   const bannerAnim = useRef(new Animated.Value(0)).current;
@@ -241,6 +277,10 @@ export default function CameraScreen({ onNavigate, session }) {
             const activeCam = ownedStoredCam || userCameras[0];
             cameraId = activeCam.id;
             await AsyncStorage.setItem('camera_id', cameraId);
+            if (activeCam?.mode) {
+              const normalized = String(activeCam.mode || '').toLowerCase().includes('single') ? 'single' : 'multi';
+              setCameraModeFromDb(normalized);
+            }
 
             const source = String(activeCam.stream_source || '').trim();
             hasValidSource = Boolean(source);
@@ -441,7 +481,6 @@ export default function CameraScreen({ onNavigate, session }) {
   useEffect(() => {
     const fetchSelectedCat = async () => {
       if (session?.user?.id) {
-        const scopedSelectedCatsKey = `camera_selectedCats:${session.user.id}`;
         const { data: catRows } = await supabase
           .from('cats')
           .select('*')
@@ -458,9 +497,6 @@ export default function CameraScreen({ onNavigate, session }) {
           const found = catRows.find(c => String(c.id) === String(lastCatId));
           const targetCat = found || catRows[0];
           setSelectedCat(targetCat);
-          if (targetCat?.id) {
-            await AsyncStorage.setItem(scopedSelectedCatsKey, JSON.stringify([targetCat.id]));
-          }
         }
       }
     };
@@ -471,10 +507,6 @@ export default function CameraScreen({ onNavigate, session }) {
       (async () => {
         setSelectedCat(cat);
         await AsyncStorage.setItem(cameraScreenCatKey, String(cat.id));
-        if (session?.user?.id) {
-          const scopedSelectedCatsKey = `camera_selectedCats:${session.user.id}`;
-          await AsyncStorage.setItem(scopedSelectedCatsKey, JSON.stringify([cat.id]));
-        }
         await refetch();
       })().catch((e) => {
         console.warn('Failed to apply catChanged selection:', e?.message || e);
@@ -587,9 +619,8 @@ export default function CameraScreen({ onNavigate, session }) {
     </View>
   );
 
-  const modeDisplay = data.settings?.monitoringMode
-    ? data.settings.monitoringMode.charAt(0).toUpperCase() + data.settings.monitoringMode.slice(1)
-    : 'Multi';
+  const effectiveMode = cameraModeFromDb || data.settings?.monitoringMode || 'multi';
+  const modeDisplay = effectiveMode.charAt(0).toUpperCase() + effectiveMode.slice(1);
   const selectedCatsCount = data.settings?.selectedCats?.length ?? 0;
   const householdCatsCount = selectedCatsCount > 0 ? selectedCatsCount : data.cats;
 
@@ -620,12 +651,12 @@ export default function CameraScreen({ onNavigate, session }) {
 
               {/* 🚨 โซนแสดงกล้อง (ปรับเป็น WebView แบบยิงตรง ไม่ฝัง HTML) */}
               <View style={styles.cameraContainer}>
-                <View style={styles.cameraFrame}>
+                <View style={[styles.cameraFrame, { height: videoFrameHeight }]}>
                   {cameraStatus !== 'disconnected' ? (
-                    <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#E5E7EB' }}>
+                    <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#000' }}>
                       <WebView
-                        source={{ uri: streamWebViewUrl }}
-                        style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                        source={{ html: streamWebViewHtml, baseUrl: VIDEO_SERVER_BASE }}
+                        style={{ width: '100%', height: '100%', backgroundColor: '#000' }}
                         cacheEnabled={false}
                         scrollEnabled={false}
                         bounces={false}
@@ -634,6 +665,7 @@ export default function CameraScreen({ onNavigate, session }) {
                         originWhitelist={['*']}
                         mixedContentMode="always"
                         allowsInlineMediaPlayback={true}
+                        automaticallyAdjustContentInsets={false}
                       />
                     </View>
                   ) : (
@@ -1007,9 +1039,9 @@ const styles = StyleSheet.create({
   headerIconButton: { width: 36, height: 32, justifyContent: 'center', alignItems: 'center' },
   notificationDot: { position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF5252', borderWidth: 1.5, borderColor: '#FFFFFF' },
   cameraContainer: { marginTop: 12, marginBottom: 24, alignItems: 'center' },
-  cameraFrame: { width: '100%', height: 300, borderRadius: 24, overflow: 'hidden', backgroundColor: '#FFFFFF', position: 'relative', elevation: 2, shadowColor: '#546E7A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12 },
+  cameraFrame: { width: '100%', borderRadius: 24, overflow: 'hidden', backgroundColor: '#FFFFFF', position: 'relative', elevation: 2, shadowColor: '#546E7A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12 },
   videoPlaceholder: { flex: 1, justifyContent: 'center', backgroundColor: '#FFFFFF', alignItems: 'center' },
-  livePreviewImage: { width: '100%', height: '100%', backgroundColor: '#E5E7EB' },
+  livePreviewImage: { width: '100%', height: '100%', backgroundColor: '#000' },
   liveFeedLabel: { color: '#64748B', fontSize: 14, fontWeight: '600' },
   cameraStatusBadge: { position: 'absolute', top: 12, left: 12, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 3 },
   cameraStatusDot: { width: 10, height: 10, borderRadius: 4, marginRight: 6 },
@@ -1113,3 +1145,6 @@ const styles = StyleSheet.create({
   insightSubtext: { fontSize: 11, color: '#90A4AE', marginTop: 4, textAlign: 'right' },
   insightSubtextLeft: { fontSize: 11, color: '#90A4AE' },
 });
+
+
+

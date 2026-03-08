@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, SafeAreaView, TouchableOpacity, ActivityIndicator, Platform, DeviceEventEmitter } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, ScrollView, StyleSheet, SafeAreaView, TouchableOpacity, ActivityIndicator, Platform, DeviceEventEmitter, useWindowDimensions, Animated } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from 'expo-linear-gradient';
 import BottomNav from "../components/BottomNav";
@@ -65,6 +65,9 @@ const PawProgressBar = ({ label, percent, icon }) => {
 
 
 export default function Dashboard({ onBack, onNavigate, session }) {
+  const { width: screenWidth } = useWindowDimensions();
+  const isNarrowScreen = screenWidth < 390;
+  const radarAnim = useRef(new Animated.Value(0)).current;
   const [currentScore, setCurrentScore] = useState(null);
   const status = getHealthStatus(currentScore || 100);
 
@@ -673,9 +676,9 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     wellness: Number.isFinite(currentScore) ? currentScore : 0,
   };
 
-  const RADAR_SIZE = 180;
+  const RADAR_SIZE = Math.max(210, Math.min(screenWidth - 82, 320));
   const RADAR_CENTER = RADAR_SIZE / 2;
-  const RADAR_R = 62;
+  const RADAR_R = RADAR_SIZE * 0.30;
 
   const getMetricQual = (score, key) => {
     if (score >= 80) return { t: 'Excellent', d: key === 'overall' ? 'Great condition' : 'Healthy levels', c: '#10B981' };
@@ -704,12 +707,33 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     })
     .join(' ') + ' Z';
 
+  const radarLabels = radarAxes.map((a) => {
+    const p = polarPoint(a.angle, 1.16);
+    const isRight = a.angle === 0;
+    const isLeft = a.angle === 180;
+    return {
+      key: a.key,
+      label: a.label,
+      x: p.x,
+      y: p.y + (a.angle === -90 ? -2 : a.angle === 90 ? 10 : 4),
+      anchor: isRight ? 'start' : isLeft ? 'end' : 'middle',
+    };
+  });
+
+  useEffect(() => {
+    Animated.timing(radarAnim, {
+      toValue: 1,
+      duration: 550,
+      useNativeDriver: true,
+    }).start();
+  }, [metricSummary.hydration, metricSummary.digestion, metricSummary.urinary, metricSummary.overall]);
+
   // ==========================================
   // 🎨 RENDER
   // ==========================================
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <LinearGradient colors={['#f5fffd', '#edf7f4']} style={styles.gradientBg}>
+    <LinearGradient colors={['#FFFFFF', '#B2E1DB']} locations={[0.42, 1]} style={styles.gradientBg}>
+      <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
 
           {/* Header */}
@@ -809,30 +833,56 @@ export default function Dashboard({ onBack, onNavigate, session }) {
             <Text style={styles.summaryCardTitle}>Health Score</Text>
             <Text style={styles.summarySubTitle}>Based on latest hydration, digestion, urinary and overall metrics</Text>
             <View style={styles.healthScoreWrap}>
-              <View style={styles.chartMiniSurface}>
+              <Animated.View
+                style={[
+                  styles.chartMiniSurface,
+                  {
+                    opacity: radarAnim,
+                    transform: [{
+                      scale: radarAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.9, 1],
+                      }),
+                    }],
+                  },
+                ]}
+              >
                 <Svg width={RADAR_SIZE} height={RADAR_SIZE} viewBox={`0 0 ${RADAR_SIZE} ${RADAR_SIZE}`}>
                   {[0.25, 0.5, 0.75, 1].map((s) => {
                     const pts = [-90, 0, 90, 180].map((a) => polarPoint(a, s));
                     const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
-                    return <Path key={`grid-${s}`} d={d} stroke="#D6EEFF" fill="none" strokeWidth="1" />;
+                    return <Path key={`grid-${s}`} d={d} stroke="#E9D5FF" fill="none" strokeWidth="1" />;
                   })}
                   {radarAxes.map((a) => {
                     const p = polarPoint(a.angle, 1);
-                    return <Line key={`axis-${a.key}`} x1={RADAR_CENTER} y1={RADAR_CENTER} x2={p.x} y2={p.y} stroke="#B3E5FC" strokeWidth="1" />;
+                    return <Line key={`axis-${a.key}`} x1={RADAR_CENTER} y1={RADAR_CENTER} x2={p.x} y2={p.y} stroke="#D8B4FE" strokeWidth="1" />;
                   })}
-                  <Path d={radarPath} fill="rgba(0, 184, 255, 0.28)" stroke="#00B8FF" strokeWidth="2.6" />
+                  <Path d={radarPath} fill="rgba(168, 85, 247, 0.28)" stroke="#A855F7" strokeWidth="2.8" />
                   {radarAxes.map((a) => {
                     const p = polarPoint(a.angle, Math.max(0, Math.min(100, a.value)) / 100);
-                    return <Circle key={`radar-dot-${a.key}`} cx={p.x} cy={p.y} r={4} fill="#00E5FF" stroke="#FFFFFF" strokeWidth={1.5} />;
+                    return <Circle key={`radar-dot-${a.key}`} cx={p.x} cy={p.y} r={4.5} fill="#C084FC" stroke="#FFFFFF" strokeWidth={1.5} />;
                   })}
+                  {radarLabels.map((l) => (
+                    <SvgText
+                      key={`radar-label-${l.key}`}
+                      x={l.x}
+                      y={l.y}
+                      fontSize={isNarrowScreen ? '10' : '11'}
+                      fontWeight="700"
+                      fill="#6B21A8"
+                      textAnchor={l.anchor}
+                    >
+                      {l.label}
+                    </SvgText>
+                  ))}
                 </Svg>
-              </View>
+              </Animated.View>
               <View style={styles.metricList}>
                 {radarAxes.map((m) => (
                   <View key={m.key} style={styles.metricRow}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.metricLabel}>{m.label}</Text>
-                      <Text style={styles.metricDesc}>{m.d}</Text>
+                      <Text style={styles.metricDesc} numberOfLines={1} ellipsizeMode="tail">{m.d}</Text>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={[styles.metricValue, { color: m.c }]}>{m.t}</Text>
@@ -881,7 +931,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
               <HealthTrendsChart
                 data={chartData}
                 selectedSeries={selectedTrendSeries}
-                onSelectSeries={(next) => setSelectedTrendSeries((prev) => (prev === next ? null : next))}
+                onSelectSeries={(next) => setSelectedTrendSeries(next)}
               />
             )}
 
@@ -1030,8 +1080,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
           current="Overview"
           onNavigate={onNavigate}
         />
-      </LinearGradient>
-    </SafeAreaView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
@@ -1039,7 +1089,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F5F8F7',
+    backgroundColor: 'transparent',
   },
   gradientBg: {
     flex: 1,
@@ -1510,10 +1560,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   healthScoreWrap: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
+    gap: 10,
   },
   breakdownWrap: {
     flexDirection: 'row',
@@ -1522,7 +1571,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   metricList: {
-    flex: 1,
+    width: '100%',
     gap: 6,
   },
   metricRow: {
@@ -1542,7 +1591,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   metricDesc: {
-    fontSize: 10,
+    fontSize: 9,
     color: '#8A9A98',
     marginTop: 2,
     fontWeight: '600',
@@ -1562,7 +1611,11 @@ const styles = StyleSheet.create({
     borderColor: '#EDF3F1',
     borderRadius: 14,
     backgroundColor: '#FBFEFD',
-    padding: 4,
+    padding: 8,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
   },
   donutChartBox: {
     position: 'relative',

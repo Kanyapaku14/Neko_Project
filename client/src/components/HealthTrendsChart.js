@@ -1,17 +1,14 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableWithoutFeedback } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet, useWindowDimensions, TouchableWithoutFeedback } from 'react-native';
 import Svg, { Line, Circle, Path, Text as SvgText, Defs, LinearGradient, Stop } from 'react-native-svg';
-import Animated, { useSharedValue, withTiming, useAnimatedProps, Easing } from 'react-native-reanimated';
 
-const { width } = Dimensions.get('window');
-const CHART_WIDTH = width - 80;
-const CHART_HEIGHT = 180;
-const PADDING = 30;
-
-const AnimatedPath = Animated.createAnimatedComponent(Path);
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+const CHART_HEIGHT = 208;
+const PADDING = 24;
 
 export default function HealthTrendsChart({ data, selectedSeries, onSelectSeries }) {
+  const { width: windowWidth } = useWindowDimensions();
+  const chartOuterWidth = Math.max(280, windowWidth - 52);
+
   if (!data || data.labels.length === 0) {
     return (
       <View style={styles.noDataContainer}>
@@ -28,9 +25,11 @@ export default function HealthTrendsChart({ data, selectedSeries, onSelectSeries
   const maxWater = visibleWater.length ? Math.max(...visibleWater, 1) : 1;
   const maxValue = Math.max(maxFood, maxWater, 1);
 
-  const chartWidth = CHART_WIDTH - PADDING * 2;
+  const chartWidth = chartOuterWidth - PADDING * 2;
   const chartHeight = CHART_HEIGHT - PADDING * 2;
   const xStep = chartWidth / (labels.length - 1 || 1);
+  const maxLabelCount = Math.max(4, Math.floor(chartWidth / 50));
+  const labelStep = Math.max(1, Math.ceil(labels.length / maxLabelCount));
 
   const createSmoothPath = (dataPoints) => {
     if (dataPoints.length === 0) return '';
@@ -54,29 +53,15 @@ export default function HealthTrendsChart({ data, selectedSeries, onSelectSeries
   const foodPath = useMemo(() => createSmoothPath(foodData), [foodData, maxValue, xStep, chartHeight]);
   const waterPath = useMemo(() => createSmoothPath(waterData), [waterData, maxValue, xStep, chartHeight]);
 
-  // Reanimated Hooks for opacity fading
-  const foodOpacity = useSharedValue(1);
-  const waterOpacity = useSharedValue(1);
-
-  useEffect(() => {
-    // Treat null, undefined, or 'both' as showing both graphs
-    const isBoth = !selectedSeries || selectedSeries === 'both';
-    const showFood = isBoth || selectedSeries === 'food';
-    const showWater = isBoth || selectedSeries === 'water';
-
-    foodOpacity.value = withTiming(showFood ? 1 : 0.15, { duration: 350, easing: Easing.out(Easing.quad) });
-    waterOpacity.value = withTiming(showWater ? 1 : 0.15, { duration: 350, easing: Easing.out(Easing.quad) });
-  }, [selectedSeries]);
-
-  const foodProps = useAnimatedProps(() => ({
-    opacity: foodOpacity.value,
-    strokeWidth: foodOpacity.value > 0.8 ? 4 : 2,
-  }));
-
-  const waterProps = useAnimatedProps(() => ({
-    opacity: waterOpacity.value,
-    strokeWidth: waterOpacity.value > 0.8 ? 4 : 2,
-  }));
+  const isBoth = !selectedSeries || selectedSeries === 'both';
+  const showFood = isBoth || selectedSeries === 'food';
+  const showWater = isBoth || selectedSeries === 'water';
+  const foodOpacity = showFood ? 1 : 0.18;
+  const waterOpacity = showWater ? 1 : 0.18;
+  const foodStrokeWidth = showFood ? 4.6 : 2.4;
+  const waterStrokeWidth = showWater ? 4.6 : 2.4;
+  const foodAreaOpacity = foodOpacity * 0.22;
+  const waterAreaOpacity = waterOpacity * 0.22;
 
   const handleChartTap = () => {
     if (onSelectSeries) {
@@ -94,15 +79,15 @@ export default function HealthTrendsChart({ data, selectedSeries, onSelectSeries
   return (
     <TouchableWithoutFeedback onPress={handleChartTap}>
       <View style={styles.container}>
-        <Svg width={CHART_WIDTH} height={CHART_HEIGHT}>
+        <Svg width={chartOuterWidth} height={CHART_HEIGHT}>
           <Defs>
             <LinearGradient id="foodGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <Stop offset="0%" stopColor="rgba(249, 115, 22, 1)" />
-              <Stop offset="100%" stopColor="rgba(249, 115, 22, 0.05)" />
+              <Stop offset="0%" stopColor="rgba(255, 106, 0, 1)" />
+              <Stop offset="100%" stopColor="rgba(255, 106, 0, 0.25)" />
             </LinearGradient>
             <LinearGradient id="waterGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <Stop offset="0%" stopColor="rgba(59, 130, 246, 0.9)" />
-              <Stop offset="100%" stopColor="rgba(59, 130, 246, 0.05)" />
+              <Stop offset="0%" stopColor="rgba(0, 122, 255, 1)" />
+              <Stop offset="100%" stopColor="rgba(0, 122, 255, 0.25)" />
             </LinearGradient>
           </Defs>
 
@@ -113,7 +98,7 @@ export default function HealthTrendsChart({ data, selectedSeries, onSelectSeries
                 key={`grid-${i}`}
                 x1={PADDING}
                 y1={y}
-                x2={CHART_WIDTH - PADDING}
+                x2={chartOuterWidth - PADDING}
                 y2={y}
                 stroke="#E2E8F0"
                 strokeWidth="1"
@@ -123,32 +108,48 @@ export default function HealthTrendsChart({ data, selectedSeries, onSelectSeries
           })}
 
           {/* WATER Background Fill & Stroke */}
-          <AnimatedPath
-            d={`${waterPath} L ${CHART_WIDTH - PADDING} ${CHART_HEIGHT - PADDING} L ${PADDING} ${CHART_HEIGHT - PADDING} Z`}
+          <Path
+            d={`${waterPath} L ${chartOuterWidth - PADDING} ${CHART_HEIGHT - PADDING} L ${PADDING} ${CHART_HEIGHT - PADDING} Z`}
             fill="url(#waterGrad)"
-            animatedProps={waterProps}
+            opacity={waterAreaOpacity}
             onPress={(e) => handleSeriesTap('water', e)}
           />
-          <AnimatedPath
+          <Path
             d={waterPath}
-            stroke="#3B82F6"
+            stroke="#007AFF"
             fill="none"
-            animatedProps={waterProps}
+            opacity={waterOpacity}
+            strokeWidth={waterStrokeWidth}
+            onPress={(e) => handleSeriesTap('water', e)}
+          />
+          <Path
+            d={waterPath}
+            stroke="rgba(0,0,0,0.001)"
+            fill="none"
+            strokeWidth={18}
             onPress={(e) => handleSeriesTap('water', e)}
           />
 
           {/* FOOD Background Fill & Stroke */}
-          <AnimatedPath
-            d={`${foodPath} L ${CHART_WIDTH - PADDING} ${CHART_HEIGHT - PADDING} L ${PADDING} ${CHART_HEIGHT - PADDING} Z`}
+          <Path
+            d={`${foodPath} L ${chartOuterWidth - PADDING} ${CHART_HEIGHT - PADDING} L ${PADDING} ${CHART_HEIGHT - PADDING} Z`}
             fill="url(#foodGrad)"
-            animatedProps={foodProps}
+            opacity={foodAreaOpacity}
             onPress={(e) => handleSeriesTap('food', e)}
           />
-          <AnimatedPath
+          <Path
             d={foodPath}
-            stroke="#F97316"
+            stroke="#FF6A00"
             fill="none"
-            animatedProps={foodProps}
+            opacity={foodOpacity}
+            strokeWidth={foodStrokeWidth}
+            onPress={(e) => handleSeriesTap('food', e)}
+          />
+          <Path
+            d={foodPath}
+            stroke="rgba(0,0,0,0.001)"
+            fill="none"
+            strokeWidth={18}
             onPress={(e) => handleSeriesTap('food', e)}
           />
 
@@ -157,15 +158,15 @@ export default function HealthTrendsChart({ data, selectedSeries, onSelectSeries
             const x = PADDING + index * xStep;
             const y = PADDING + chartHeight - (value / maxValue) * chartHeight;
             return (
-              <AnimatedCircle
+              <Circle
                 key={`water-dot-${index}`}
                 cx={x}
                 cy={y}
                 r={5}
-                fill="#3B82F6"
+                fill="#007AFF"
                 stroke="#FFFFFF"
                 strokeWidth="2"
-                animatedProps={waterProps}
+                opacity={waterOpacity}
                 onPress={(e) => handleSeriesTap('water', e)}
               />
             );
@@ -176,15 +177,15 @@ export default function HealthTrendsChart({ data, selectedSeries, onSelectSeries
             const x = PADDING + index * xStep;
             const y = PADDING + chartHeight - (value / maxValue) * chartHeight;
             return (
-              <AnimatedCircle
+              <Circle
                 key={`food-dot-${index}`}
                 cx={x}
                 cy={y}
                 r={5}
-                fill="#F97316"
+                fill="#FF6A00"
                 stroke="#FFFFFF"
                 strokeWidth="2"
-                animatedProps={foodProps}
+                opacity={foodOpacity}
                 onPress={(e) => handleSeriesTap('food', e)}
               />
             );
@@ -192,6 +193,8 @@ export default function HealthTrendsChart({ data, selectedSeries, onSelectSeries
 
           {/* X-AXIS LABELS */}
           {labels.map((label, index) => {
+            const shouldShow = index === 0 || index === labels.length - 1 || index % labelStep === 0;
+            if (!shouldShow) return null;
             const x = PADDING + index * xStep;
             return (
               <SvgText key={`label-${index}`} x={x} y={CHART_HEIGHT - 5} fontSize="11" fontWeight="600" fill="#94A3B8" textAnchor="middle">

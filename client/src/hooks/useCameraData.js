@@ -34,7 +34,7 @@ const hourBinIndex = (iso) => {
   return 3;
 };
 
-export default function useCameraData(session, cameraStatus) {
+export default function useCameraData(session, cameraStatus, selectedCatId = null) {
   const [data, setData] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
@@ -83,9 +83,11 @@ export default function useCameraData(session, cameraStatus) {
           const catIds = catsData.map((c) => c.id);
           newData.cats = catIds.length;
 
-          const selectedIds = newData.settings.selectedCats?.length
-            ? newData.settings.selectedCats.filter((id) => catIds.includes(id))
-            : catIds;
+          const selectedIds = selectedCatId
+            ? [selectedCatId].filter((id) => catIds.includes(id))
+            : (newData.settings.selectedCats?.length
+              ? newData.settings.selectedCats.filter((id) => catIds.includes(id))
+              : catIds);
           const alertCatIds = catIds;
 
           const today = toLocalDate();
@@ -434,7 +436,7 @@ export default function useCameraData(session, cameraStatus) {
       console.error('Error fetching camera data:', e);
       setData((prev) => prev || newData);
     }
-  }, [session, cameraStatus]);
+  }, [session, cameraStatus, selectedCatId]);
 
   useEffect(() => {
     fetchData();

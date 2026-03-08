@@ -241,11 +241,12 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                 >
 
                     {/* 1. ส่วนรูปแมว (แยกออกมาแล้ว) */}
-                    <View style={{ alignItems: 'center', marginTop: 20, marginBottom: 10 }}>
+                    <View style={{ alignItems: 'center', marginTop: 26, marginBottom: 16 }}>
                         <CatHealthMeter
                             score={computedScore ?? 0}
                             centerImageUri={activeCat?.image_url || null}
                             centerMode="profile"
+                            size={230}
                         />
                     </View>
 
