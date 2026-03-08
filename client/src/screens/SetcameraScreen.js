@@ -25,21 +25,8 @@ const CAMERA_BRANDS = [
     { id: 'custom', label: 'Other (Manual)', icon: 'cog-outline', api: 'Manual API setup' },
 ];
 
-<<<<<<< HEAD
 const VIDEO_STREAM_URL = `${CAMERA_STREAM_URL}?${CAMERA_STREAM_QUERY}`;
 const VIDEO_SERVER_BASE = CAMERA_API_BASE;
-=======
-const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-// 🚨 กำหนด URL ของ Camera Server (Port 5000)
-<<<<<<< HEAD
-const VIDEO_STREAM_URL = 'http://192.168.1.131:5000/api/video_feed';
-const CAMERA_RTSP_URL = 'rtsp://testt1:1234test@192.168.1.140:554/stream2';
-=======
-const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed_raw?fps=15&quality=62&width=960';
-const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
->>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
-const CAMERA_RTSP_URL = 'rtsp://testt1:1234test@192.168.1.102:554/stream2';
->>>>>>> 228e0ead3f779122e0f5fb5aa2df96a172abfbee
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -74,12 +61,7 @@ const LiveCameraStream = React.memo(({ streamUrl }) => {
     return (
         <View style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#E5E7EB', overflow: 'hidden' }}>
             <WebView
-<<<<<<< HEAD
                 source={{ uri: streamUrl }} // à¸¢à¸´à¸‡à¸•à¸£à¸‡à¹„à¸›à¸—à¸µà¹ˆ URL à¹€à¸¥à¸¢ à¹à¸à¹‰à¸›à¸±à¸à¸«à¸²à¸ˆà¸­à¹€à¸—à¸²à¸ˆà¸²à¸ HTML
-=======
-                originWhitelist={['*']}
-                source={{ html: htmlContent, baseUrl: streamUrl }}
->>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
                 style={{ flex: 1, backgroundColor: 'transparent' }}
                 scrollEnabled={false}
                 bounces={false}
@@ -92,11 +74,7 @@ const LiveCameraStream = React.memo(({ streamUrl }) => {
             />
         </View>
     );
-<<<<<<< HEAD
 }, () => true); // <-- à¹„à¸¡à¹‰à¸•à¸²à¸¢: à¸„à¸·à¸™à¸„à¹ˆà¸² true à¹€à¸ªà¸¡à¸­ à¹€à¸žà¸·à¹ˆà¸­à¸šà¸­à¸ React à¸§à¹ˆà¸² "à¸«à¹‰à¸²à¸¡ Re-render à¸à¸¥à¹‰à¸­à¸‡à¸™à¸µà¹‰à¸­à¸µà¸à¸•à¹ˆà¸­à¹„à¸›"
-=======
-}, () => true); // ล็อค: ห้าม Re-render กล้องนี้อีกต่อไป
->>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
 
 // ==============================================
 // 2. Main Component (à¸«à¸™à¹‰à¸²à¸ˆà¸­à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²)

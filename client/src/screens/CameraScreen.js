@@ -34,29 +34,7 @@ const { width } = Dimensions.get('window');
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 // 🚨 เปลี่ยน 192.168.1.159 เป็น IP จริงของคอมพิวเตอร์คุณเสมอ
-<<<<<<< HEAD
 const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed';
-=======
-<<<<<<< HEAD
-const VIDEO_STREAM_URL = 'http://192.168.1.131:5000/api/video_feed';
-=======
-const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed_raw';
-const VIDEO_STREAM_QUERY = 'fps=15&quality=62&width=960';
->>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
-const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
-
-const isDemoLikeSource = (source = '') => {
-  const s = String(source || '').toLowerCase();
-  return (
-    s.endsWith('.mp4') ||
-    s.endsWith('.webm') ||
-    s.endsWith('.mov') ||
-    s.endsWith('.mkv') ||
-    s.endsWith('.avi') ||
-    s.includes('/storage/v1/object/public/')
-  );
-};
->>>>>>> 228e0ead3f779122e0f5fb5aa2df96a172abfbee
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -87,23 +65,8 @@ export default function CameraScreen({ onNavigate, session }) {
   const [quickSummary, setQuickSummary] = useState({ eventsToday: 0, lastDetected: '--' });
   // ดึง stream_source จาก DB
   const [dbStreamUrl, setDbStreamUrl] = useState(null);
-<<<<<<< HEAD
   const [streamWebViewUrl] = useState(`${VIDEO_STREAM_URL}?t=${Date.now()}`);
   const lastAppliedSourceRef = useRef('');
-=======
-<<<<<<< HEAD
-  // AI live results จาก /api/ai_results
-  const [aiResults, setAiResults] = useState([]);
-
-  // 🚨 ล็อค URL ไม่ให้ Re-render บ่อยเกินไป
-  const [stableStreamUrl] = useState(`${VIDEO_STREAM_URL}?t=${new Date().getTime()}`);
-=======
-  const [streamWebViewUrl] = useState(`${VIDEO_STREAM_URL}?${VIDEO_STREAM_QUERY}&t=${Date.now()}`);
-  const lastAppliedSourceRef = useRef('');
-  const healthMissCountRef = useRef(0);
-  const lastConnectedAtRef = useRef(0);
->>>>>>> 228e0ead3f779122e0f5fb5aa2df96a172abfbee
->>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
 
   const { data, refetch } = useCameraData(session, cameraStatus);
 
@@ -592,7 +555,6 @@ export default function CameraScreen({ onNavigate, session }) {
                   {cameraStatus === 'connected' ? (
                     <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#E5E7EB' }}>
                       <WebView
-<<<<<<< HEAD
                         originWhitelist={['*']}
                         source={{
                           html: `<!DOCTYPE html>
@@ -611,14 +573,6 @@ export default function CameraScreen({ onNavigate, session }) {
                           baseUrl: VIDEO_STREAM_URL,
                         }}
                         style={{ flex: 1, width: '100%', height: '100%', backgroundColor: 'transparent' }}
-=======
-                        source={{ uri: streamWebViewUrl }}
-                        style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
-<<<<<<< HEAD
-=======
-                        cacheEnabled={false}
->>>>>>> 228e0ead3f779122e0f5fb5aa2df96a172abfbee
->>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
                         scrollEnabled={false}
                         bounces={false}
                         showsVerticalScrollIndicator={false}

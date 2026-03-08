@@ -7,7 +7,6 @@ import HomeHeader from '../components/HomeHeader';
 import BottomNav from '../components/BottomNav';
 import styles from '../styles/homeStyles';
 import { Ionicons } from '@expo/vector-icons';
-<<<<<<< HEAD
 import AlertEngine from '../services/AlertEngine';
 
 export default function PhotoCheck({ onNavigate }) {
@@ -23,158 +22,6 @@ export default function PhotoCheck({ onNavigate }) {
         onNavigate('AnalysisResult');
     };
 
-=======
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
-import supabase from './config/supabaseClient';
-
-// ── ชื่อ bucket ใน Supabase Storage ─────────────────────────────────────────
-const STORAGE_BUCKET = 'ai-photo-checks';
-
-const PHOTO_SLOTS = [
-    { key: 'face', label: 'Picture Face' },
-    { key: 'body', label: 'Picture Body' },
-    { key: 'poop', label: 'Picture Poop' },
-    { key: 'vomit', label: 'Picture Vomit' },
-];
-
-// ── อัปโหลดรูปไป Supabase Storage ────────────────────────────────────────────
-async function uploadImage(uri, slotKey) {
-    // อ่านไฟล์เป็น base64
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-    });
-
-    // สร้างชื่อไฟล์เป็น unique
-    const ext = uri.split('.').pop()?.split('?')[0] || 'jpg';
-    const filename = `${slotKey}_${Date.now()}.${ext}`;
-    const path = `uploads/${filename}`;
-
-    // decode base64 → ArrayBuffer
-    const byteArr = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-
-    const { error } = await supabase.storage
-        .from(STORAGE_BUCKET)
-        .upload(path, byteArr, {
-            contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
-            upsert: false,
-        });
-
-    if (error) throw new Error(`Upload ${slotKey}: ${error.message}`);
-
-    // คืน public URL
-    const { data } = supabase.storage
-        .from(STORAGE_BUCKET)
-        .getPublicUrl(path);
-
-    return data.publicUrl;
-}
-
-// ── PhotoCheck Screen ─────────────────────────────────────────────────────────
-export default function PhotoCheck({ onNavigate, session }) {
-    const [images, setImages] = useState([null, null, null, null]);
-    const [loading, setLoading] = useState(false);
-
-    // ── เปิด dialog เลือกแหล่งรูป ────────────────────────────────────────────
-    const handlePickImage = async (index) => {
-        Alert.alert(
-            'เลือกรูปภาพ',
-            PHOTO_SLOTS[index].label,
-            [
-                { text: '📷 ถ่ายรูป', onPress: () => openCamera(index) },
-                { text: '🖼️ เลือกจากคลัง', onPress: () => openGallery(index) },
-                { text: 'ยกเลิก', style: 'cancel' },
-            ]
-        );
-    };
-
-    const openCamera = async (index) => {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('ไม่ได้รับสิทธิ์', 'กรุณาอนุญาตให้แอปเข้าถึงกล้องในการตั้งค่า');
-            return;
-        }
-        const result = await ImagePicker.launchCameraAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
-        });
-        if (!result.canceled && result.assets?.length > 0) {
-            const updated = [...images];
-            updated[index] = result.assets[0].uri;
-            setImages(updated);
-        }
-    };
-
-    const openGallery = async (index) => {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('ไม่ได้รับสิทธิ์', 'กรุณาอนุญาตให้แอปเข้าถึงคลังภาพในการตั้งค่า');
-            return;
-        }
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
-        });
-        if (!result.canceled && result.assets?.length > 0) {
-            const updated = [...images];
-            updated[index] = result.assets[0].uri;
-            setImages(updated);
-        }
-    };
-
-    // ── กด Start AI Check → upload → insert DB ────────────────────────────────
-    const handleStartAiCheck = async () => {
-        const hasAny = images.some(Boolean);
-        if (!hasAny) {
-            Alert.alert('ยังไม่มีรูป', 'กรุณาอัปโหลดรูปอย่างน้อย 1 ช่อง');
-            return;
-        }
-
-        setLoading(true);
-        try {
-            // อัปโหลดแต่ละ slot ที่มีรูป (null → ไม่อัปโหลด)
-            const urls = await Promise.all(
-                PHOTO_SLOTS.map(async (slot, i) => {
-                    if (!images[i]) return null;
-                    return await uploadImage(images[i], slot.key);
-                })
-            );
-
-            // เตรียมข้อมูลสำหรับ insert
-            const userId = session?.user?.id ?? null;
-            const row = {
-                user_id: userId,
-                image_face_url: urls[0],   // null ถ้าไม่ได้ส่ง
-                image_body_url: urls[1],
-                image_poop_url: urls[2],
-                image_vomit_url: urls[3],
-                status: 'pending',
-            };
-
-            const { error: dbError } = await supabase
-                .from('ai_photo_checks')
-                .insert([row]);
-
-            if (dbError) throw new Error(dbError.message);
-
-            Alert.alert(
-                '✅ ส่งรูปสำเร็จ!',
-                'ระบบได้รับรูปของคุณแล้ว กำลังวิเคราะห์...',
-                [{ text: 'ตกลง', onPress: () => onNavigate('AnalysisResult') }]
-            );
-        } catch (err) {
-            Alert.alert('เกิดข้อผิดพลาด', err.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // ── Render ────────────────────────────────────────────────────────────────
->>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
     return (
         <SafeAreaView style={styles.container}>
             <HomeHeader
@@ -291,10 +138,6 @@ export default function PhotoCheck({ onNavigate, session }) {
                         elevation: phoneCameraEnabled ? 5 : 0,
                     }}
                     onPress={handleStartAiCheck}
-<<<<<<< HEAD
-=======
-                    disabled={loading}
->>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
                 >
                     {loading ? (
                         <ActivityIndicator color="#FFF" style={{ marginRight: 10 }} />
