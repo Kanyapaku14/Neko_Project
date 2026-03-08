@@ -432,10 +432,10 @@ export default function App() {
         return <SetcameraScreen session={session} params={screenParams} onNavigate={(screen, params) => navigateAuth(screen, params)} />;
       }
       if (currentScreenName === 'PhotoCheck') {
-        return <PhotoCheck onNavigate={(screen, params) => navigateAuth(screen, params)} />;
+        return <PhotoCheck session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
       }
       if (currentScreenName === 'AnalysisResult') {
-        return <AnalysisResult onNavigate={(screen, params) => navigateAuth(screen, params)} session={session} />;
+        return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} result={screenParams?.result} />;
       }
       if (currentScreenName === 'Alert') {
         return <AlertScreen onBack={() => setAuthScreen(screenParams?.returnTo || 'Camera')} onNavigate={(screen, params) => navigateAuth(screen, params)} />;

@@ -8,11 +8,11 @@ import BottomNav from '../components/BottomNav';
 import styles from '../styles/homeStyles';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+
 import supabase from './config/supabaseClient';
 
 // ── ชื่อ bucket ใน Supabase Storage ─────────────────────────────────────────
-const STORAGE_BUCKET = 'ai-photo-checks';
+const STORAGE_BUCKET = 'public.ai_photo_checks';
 
 const PHOTO_SLOTS = [
     { key: 'face', label: 'Picture Face' },
@@ -23,29 +23,21 @@ const PHOTO_SLOTS = [
 
 // ── อัปโหลดรูปไป Supabase Storage ────────────────────────────────────────────
 async function uploadImage(uri, slotKey) {
-    // อ่านไฟล์เป็น base64
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-    });
-
-    // สร้างชื่อไฟล์เป็น unique
     const ext = uri.split('.').pop()?.split('?')[0] || 'jpg';
     const filename = `${slotKey}_${Date.now()}.${ext}`;
     const path = `uploads/${filename}`;
+    const contentType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
 
-    // decode base64 → ArrayBuffer
-    const byteArr = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+    // ใช้ arrayBuffer แทน blob (รองรับใน React Native ทุกเวอร์ชัน)
+    const response = await fetch(uri);
+    const arrayBuffer = await response.arrayBuffer();
 
     const { error } = await supabase.storage
         .from(STORAGE_BUCKET)
-        .upload(path, byteArr, {
-            contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
-            upsert: false,
-        });
+        .upload(path, arrayBuffer, { contentType, upsert: false });
 
     if (error) throw new Error(`Upload ${slotKey}: ${error.message}`);
 
-    // คืน public URL
     const { data } = supabase.storage
         .from(STORAGE_BUCKET)
         .getPublicUrl(path);
@@ -109,7 +101,7 @@ export default function PhotoCheck({ onNavigate, session }) {
         }
     };
 
-    // ── กด Start AI Check → upload → insert DB ────────────────────────────────
+    // ── กด Start AI Check → upload → insert DB → call AI API ─────────────────
     const handleStartAiCheck = async () => {
         const hasAny = images.some(Boolean);
         if (!hasAny) {
@@ -119,7 +111,7 @@ export default function PhotoCheck({ onNavigate, session }) {
 
         setLoading(true);
         try {
-            // อัปโหลดแต่ละ slot ที่มีรูป (null → ไม่อัปโหลด)
+            // 1. อัปโหลดรูปไป Storage
             const urls = await Promise.all(
                 PHOTO_SLOTS.map(async (slot, i) => {
                     if (!images[i]) return null;
@@ -127,34 +119,44 @@ export default function PhotoCheck({ onNavigate, session }) {
                 })
             );
 
-            // เตรียมข้อมูลสำหรับ insert
+            // 2. Insert record ลง public.ai_photo_checks → รับ id กลับมา
             const userId = session?.user?.id ?? null;
-            const row = {
-                user_id: userId,
-                image_face_url: urls[0],   // null ถ้าไม่ได้ส่ง
-                image_body_url: urls[1],
-                image_poop_url: urls[2],
-                image_vomit_url: urls[3],
-                status: 'pending',
-            };
-
-            const { error: dbError } = await supabase
-                .from('ai_photo_checks')
-                .insert([row]);
+            const { data: inserted, error: dbError } = await supabase
+                .from('public.ai_photo_checks')
+                .insert([{
+                    user_id: userId,
+                    image_face_url: urls[0] ?? null,
+                    image_body_url: urls[1] ?? null,
+                    image_poop_url: urls[2] ?? null,
+                    image_vomit_url: urls[3] ?? null,
+                    status: 'pending',
+                }])
+                .select('id')
+                .single();
 
             if (dbError) throw new Error(dbError.message);
+            const recordId = inserted.id;
 
-            Alert.alert(
-                '✅ ส่งรูปสำเร็จ!',
-                'ระบบได้รับรูปของคุณแล้ว กำลังวิเคราะห์...',
-                [{ text: 'ตกลง', onPress: () => onNavigate('AnalysisResult') }]
-            );
+            // 3. เรียก serverApi.py ให้ Gemini วิเคราะห์
+            const apiRes = await fetch('http://192.168.1.131:3000/api/photo-check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recordId }),
+            });
+            const apiJson = await apiRes.json();
+
+            if (!apiRes.ok) throw new Error(apiJson.error || 'AI analysis failed');
+
+            // 4. Navigate พร้อมส่งผล AI ไปหน้า AnalysisResult
+            onNavigate('AnalysisResult', { result: apiJson.result, recordId });
+
         } catch (err) {
             Alert.alert('เกิดข้อผิดพลาด', err.message);
         } finally {
             setLoading(false);
         }
     };
+
 
     // ── Render ────────────────────────────────────────────────────────────────
     return (
@@ -281,7 +283,7 @@ export default function PhotoCheck({ onNavigate, session }) {
                         <Ionicons name="paw" size={24} color="#80CBC4" style={{ marginRight: 10 }} />
                     )}
                     <Text style={{ color: '#FFF', fontSize: 18, fontWeight: 'bold' }}>
-                        {loading ? 'กำลังอัปโหลด...' : 'Start AI Check'}
+                        {loading ? 'กำลังวิเคราะห์...' : 'Start AI Check'}
                     </Text>
                 </TouchableOpacity>
             </ScrollView>
