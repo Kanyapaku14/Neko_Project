@@ -162,7 +162,9 @@ export default function PostDetailScreen({
 
                   {/* Content: Text + Image */}
                   <View style={styles.contentBody}>
-                    <Text style={styles.contentText}>{post.content}</Text>
+                    {!!String(post.content || '').trim() && (
+                      <Text style={styles.contentText}>{post.content}</Text>
+                    )}
                     {post.image && (
                       <Image
                         source={{ uri: post.image }}

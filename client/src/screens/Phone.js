@@ -4,7 +4,6 @@ import {
     Text,
     StyleSheet,
     TouchableOpacity,
-    SafeAreaView,
     ScrollView,
     Animated,
     Easing,
@@ -14,6 +13,7 @@ import {
     Platform,
     Image,
 } from "react-native";
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { PanResponder } from "react-native";
@@ -22,14 +22,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient';
 import AlertEngine from '../services/AlertEngine';
 import { WebView } from 'react-native-webview';
+import HomeHeader from '../components/HomeHeader';
+import { CAMERA_API_BASE, CAMERA_STREAM_QUERY, CAMERA_STREAM_URL } from '../config/cameraApi';
 
 const { width } = Dimensions.get("window");
 
-// 🚨 URL ของเซิร์ฟเวอร์สตรีมภาพ (ตรวจสอบ IP ให้ตรงกับคอมพิวเตอร์ของคุณ)
-const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed_raw?fps=15&quality=62&width=960';
-const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
+// ðŸš¨ URL à¸‚à¸­à¸‡à¹€à¸‹à¸´à¸£à¹Œà¸Ÿà¹€à¸§à¸­à¸£à¹Œà¸ªà¸•à¸£à¸µà¸¡à¸ à¸²à¸ž (à¸•à¸£à¸§à¸ˆà¸ªà¸­à¸š IP à¹ƒà¸«à¹‰à¸•à¸£à¸‡à¸à¸±à¸šà¸„à¸­à¸¡à¸žà¸´à¸§à¹€à¸•à¸­à¸£à¹Œà¸‚à¸­à¸‡à¸„à¸¸à¸“)
+const VIDEO_STREAM_URL = `${CAMERA_STREAM_URL}?${CAMERA_STREAM_QUERY}`;
+const VIDEO_SERVER_BASE = CAMERA_API_BASE;
 
-// 🚨 ประกาศตัวแปรลิงก์กล้อง RTSP ที่นี่ (เพื่อเอาไปบันทึกลง Database)
+// ðŸš¨ à¸›à¸£à¸°à¸à¸²à¸¨à¸•à¸±à¸§à¹à¸›à¸£à¸¥à¸´à¸‡à¸à¹Œà¸à¸¥à¹‰à¸­à¸‡ RTSP à¸—à¸µà¹ˆà¸™à¸µà¹ˆ (à¹€à¸žà¸·à¹ˆà¸­à¹€à¸­à¸²à¹„à¸›à¸šà¸±à¸™à¸—à¸¶à¸à¸¥à¸‡ Database)
 const CAMERA_RTSP_URL = "rtsp://testt1:1234test@192.168.1.102:554/stream2"
 
 const BRANDS = [
@@ -50,6 +52,7 @@ export default function Phone({
     isHideBackButton = false,
     isHideSkipButton = false
 }) {
+    const scopedKey = (base) => (session?.user?.id ? `${base}:${session.user.id}` : base);
     const getStepNumber = (step) => {
         if (typeof step === 'number') return step;
         switch (step) {
@@ -79,7 +82,7 @@ export default function Phone({
     const [inlineNotice, setInlineNotice] = useState(null);
     const startPoint = useRef({ x: 0, y: 0 });
 
-    // ล็อค URL ไว้ไม่ให้ Re-render พร่ำเพรื่อ
+    // à¸¥à¹‡à¸­à¸„ URL à¹„à¸§à¹‰à¹„à¸¡à¹ˆà¹ƒà¸«à¹‰ Re-render à¸žà¸£à¹ˆà¸³à¹€à¸žà¸£à¸·à¹ˆà¸­
     const [stableStreamUrl] = useState(`${VIDEO_STREAM_URL}&t=${new Date().getTime()}`);
     const [latestSnapshotUrl, setLatestSnapshotUrl] = useState(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
     const [zoneStatus, setZoneStatus] = useState({ camera_moved: false, zones_configured: 0 });
@@ -114,7 +117,9 @@ export default function Phone({
     const refreshLatestSnapshot = async () => {
         setLatestSnapshotUrl(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
         try {
-            const cameraId = await AsyncStorage.getItem('camera_id');
+            const cameraId =
+                (await AsyncStorage.getItem(scopedKey('camera_id'))) ||
+                (await AsyncStorage.getItem('camera_id'));
             const url = cameraId
                 ? `${VIDEO_SERVER_BASE}/api/zone_status?camera_id=${encodeURIComponent(cameraId)}`
                 : `${VIDEO_SERVER_BASE}/api/zone_status`;
@@ -143,7 +148,7 @@ export default function Phone({
 
     const showNotice = (message, tone = 'warning') => setInlineNotice({ message, tone });
 
-    // 🚨 ส่วนนี้ถูกแยกออกมาเพื่อบังคับการแสดงผลกล้องให้เหมือนกัน 100% ทุกจุด
+    // ðŸš¨ à¸ªà¹ˆà¸§à¸™à¸™à¸µà¹‰à¸–à¸¹à¸à¹à¸¢à¸à¸­à¸­à¸à¸¡à¸²à¹€à¸žà¸·à¹ˆà¸­à¸šà¸±à¸‡à¸„à¸±à¸šà¸à¸²à¸£à¹à¸ªà¸”à¸‡à¸œà¸¥à¸à¸¥à¹‰à¸­à¸‡à¹ƒà¸«à¹‰à¹€à¸«à¸¡à¸·à¸­à¸™à¸à¸±à¸™ 100% à¸—à¸¸à¸à¸ˆà¸¸à¸”
     const LiveVideoFeed = () => {
         return (
             <WebView
@@ -204,7 +209,7 @@ export default function Phone({
             }
 
             if (!resolvedCameraId) return null;
-            await AsyncStorage.setItem('camera_id', resolvedCameraId);
+            await AsyncStorage.setItem(scopedKey('camera_id'), resolvedCameraId);
             setInlineNotice(null);
             return resolvedCameraId;
         } catch (e) {
@@ -220,8 +225,8 @@ export default function Phone({
             await ensureCameraWithSource(selectedBrand, 'online');
             setIsConnecting(false);
             setConnected(true);
-            await AsyncStorage.setItem('camera_status', 'connected');
-            await AsyncStorage.setItem('camera_brand', selectedBrand);
+            await AsyncStorage.setItem(scopedKey('camera_status'), 'connected');
+            await AsyncStorage.setItem(scopedKey('camera_brand'), selectedBrand);
             setCurrentStep(2);
             Animated.sequence([
                 Animated.spring(successAnim, { toValue: 1, tension: 50, friction: 7, useNativeDriver: true }),
@@ -233,9 +238,9 @@ export default function Phone({
     };
 
     const handleSkip = async () => {
-        await AsyncStorage.setItem('camera_status', 'disconnected');
-        await AsyncStorage.setItem('camera_brand', '');
-        await AsyncStorage.setItem('camera_setup_complete', 'true');
+        await AsyncStorage.setItem(scopedKey('camera_status'), 'disconnected');
+        await AsyncStorage.setItem(scopedKey('camera_brand'), '');
+        await AsyncStorage.setItem(scopedKey('camera_setup_complete'), 'true');
         onConfirm();
     };
 
@@ -296,7 +301,9 @@ export default function Phone({
             ['camera_zone_summary', 'Feeding + Litter'],
         ]);
         try {
-            const cameraId = await AsyncStorage.getItem('camera_id');
+            const cameraId =
+                (await AsyncStorage.getItem(scopedKey('camera_id'))) ||
+                (await AsyncStorage.getItem('camera_id'));
             if (!cameraId) return;
             let frameSig = null;
             let frameSigTs = null;
@@ -371,21 +378,31 @@ export default function Phone({
             <LinearGradient colors={["#f5fffdff", "#f5fffdff"]} style={{ flex: 1 }}>
                 <SafeAreaView style={styles.container}>
                     {/* Header */}
-                    <View style={styles.header}>
-                        {!isHideBackButton && currentStep === 1 ? (
-                            <TouchableOpacity onPress={onBack} style={styles.backBtnStyle} activeOpacity={0.85}>
-                                <Ionicons name="chevron-back" size={28} color="#333" />
+                    <HomeHeader
+                        onNotify={() => onNavigate && onNavigate('Alert')}
+                        leftComponent={
+                            !isHideBackButton && currentStep === 1 ? (
+                                <TouchableOpacity onPress={onBack} style={styles.backBtnStyle} activeOpacity={0.85}>
+                                    <Ionicons name="chevron-back" size={28} color="#333" />
+                                </TouchableOpacity>
+                            ) : !isHideBackButton || currentStep > 1 ? (
+                                <TouchableOpacity onPress={handlePrevStep} style={styles.backBtnStyle} activeOpacity={0.85}>
+                                    <Ionicons name="chevron-back" size={28} color="#333" />
+                                </TouchableOpacity>
+                            ) : (
+                                <View style={styles.backBtnStyle} />
+                            )
+                        }
+                        rightComponent={
+                            <TouchableOpacity
+                                style={styles.headerIconBtn}
+                                onPress={() => onNavigate && onNavigate('Alert')}
+                                activeOpacity={0.75}
+                            >
+                                <Ionicons name="notifications-outline" size={20} color="#718096" />
                             </TouchableOpacity>
-                        ) : !isHideBackButton || currentStep > 1 ? (
-                            <TouchableOpacity onPress={handlePrevStep} style={styles.backBtnStyle} activeOpacity={0.85}>
-                                <Ionicons name="chevron-back" size={28} color="#333" />
-                            </TouchableOpacity>
-                        ) : (
-                            <View style={styles.backBtnStyle} />
-                        )}
-                        <View style={styles.titleContainer}><Text style={styles.headerTitle}>Camera Setup</Text></View>
-                        <View style={styles.headerIconBtn} />
-                    </View>
+                        }
+                    />
 
                     {!isUpdateMode && (
                         <View style={styles.stepBar}>
@@ -460,7 +477,7 @@ export default function Phone({
                                             <Text style={styles.subtitle}>Verify the camera feed is working correctly.</Text>
                                         </View>
 
-                                        {/* 🚨 แสดงกล้องผ่าน Component ย่อย */}
+                                        {/* ðŸš¨ à¹à¸ªà¸”à¸‡à¸à¸¥à¹‰à¸­à¸‡à¸œà¹ˆà¸²à¸™ Component à¸¢à¹ˆà¸­à¸¢ */}
                                         <View style={[styles.previewCard, { overflow: 'hidden' }]}>
                                             <LiveVideoFeed />
                                         </View>
@@ -510,7 +527,7 @@ export default function Phone({
                                                     </View>
                                                 )}
                                             </View>
-                                            {/* กรอบรับ Touch */}
+                                            {/* à¸à¸£à¸­à¸šà¸£à¸±à¸š Touch */}
                                             <View
                                                 style={[styles.minimalPreviewBg, { overflow: 'hidden', position: 'relative' }]}
                                                 onLayout={(evt) => {
@@ -519,13 +536,13 @@ export default function Phone({
                                                 }}
                                                 {...drawPanResponder}
                                             >
-                                                {/* 🚨 เลเยอร์ชั้นล่าง: ใช้ภาพล่าสุดจากกล้องสำหรับ label zone ที่แม่นยำ */}
+                                                {/* ðŸš¨ à¹€à¸¥à¹€à¸¢à¸­à¸£à¹Œà¸Šà¸±à¹‰à¸™à¸¥à¹ˆà¸²à¸‡: à¹ƒà¸Šà¹‰à¸ à¸²à¸žà¸¥à¹ˆà¸²à¸ªà¸¸à¸”à¸ˆà¸²à¸à¸à¸¥à¹‰à¸­à¸‡à¸ªà¸³à¸«à¸£à¸±à¸š label zone à¸—à¸µà¹ˆà¹à¸¡à¹ˆà¸™à¸¢à¸³ */}
                                                 <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
                                                     <Image source={{ uri: latestSnapshotUrl }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
                                                     <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.15)' }} />
                                                 </View>
 
-                                                {/* เลเยอร์ชั้นบน: วาดกรอบ */}
+                                                {/* à¹€à¸¥à¹€à¸¢à¸­à¸£à¹Œà¸Šà¸±à¹‰à¸™à¸šà¸™: à¸§à¸²à¸”à¸à¸£à¸­à¸š */}
                                                 <View style={styles.gridOverlay} pointerEvents="none" />
 
                                                 {feedingZone.w > 0 && (
@@ -565,11 +582,11 @@ export default function Phone({
                                             <MaterialCommunityIcons name="check-circle" size={50} color="#4CAF50" />
                                         </View>
                                         <Text style={[styles.title, { fontSize: 28, marginBottom: 10 }]}>Ready to Monitor!</Text>
-                                        <Text style={[styles.subtitle, { textAlign: 'center', paddingHorizontal: 20, fontSize: 16 }]}>Your AI health monitoring system is active and ready to keep an eye on your cat 🐾</Text>
+                                        <Text style={[styles.subtitle, { textAlign: 'center', paddingHorizontal: 20, fontSize: 16 }]}>Your AI health monitoring system is active and ready to keep an eye on your cat ðŸ¾</Text>
                                     </View>
                                     <TouchableOpacity style={[styles.nextButton, { width: '100%' }]} onPress={async () => {
                                         await persistZones();
-                                        await AsyncStorage.setItem('camera_setup_complete', 'true');
+                                        await AsyncStorage.setItem(scopedKey('camera_setup_complete'), 'true');
                                         onConfirm();
                                     }}>
                                         <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
@@ -690,3 +707,4 @@ const styles = StyleSheet.create({
     confirmPrimaryBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: '#111827' },
     confirmPrimaryText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 });
+

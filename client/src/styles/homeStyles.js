@@ -47,7 +47,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 5,
-    zIndex: -1,
+    zIndex: 0,
   },
 
   title: {

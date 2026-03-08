@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, SafeAreaView, TouchableOpacity, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, SafeAreaView, TouchableOpacity, ActivityIndicator, Platform, DeviceEventEmitter } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from 'expo-linear-gradient';
 import BottomNav from "../components/BottomNav";
@@ -7,6 +7,7 @@ import HealthTrendsChart from "../components/HealthTrendsChart";
 import HomeHeader from "../components/HomeHeader";
 import CatHealthMeter from "../components/CatHealthMeter";
 import supabase from "./config/supabaseClient";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
@@ -89,9 +90,35 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     overall: 0,
   });
   const [alertSummary, setAlertSummary] = useState({ unread: 0, critical: 0, warning: 0, info: 0 });
-  const [cameraSummary, setCameraSummary] = useState({ total: 0, online: 0, offline: 0, primaryName: '--', sourceType: '--' });
+  const [cameraSummary, setCameraSummary] = useState({ total: 0, online: 0, offline: 0, primaryName: '--', sourceType: '--', brand: '--' });
   const [latestAssessment, setLatestAssessment] = useState(null);
   const [latestAlertItem, setLatestAlertItem] = useState(null);
+  const [selectedCatId, setSelectedCatId] = useState(null);
+  const healthCacheKey = (userId, catId) => (userId && catId ? `health_status_cache:${userId}:${catId}` : null);
+
+  const getSelectedCatIdFromStorage = async () => {
+    const scopedKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
+    return (await AsyncStorage.getItem(scopedKey)) || (await AsyncStorage.getItem('selectedCatId'));
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSelectedCat = async () => {
+      if (!session?.user?.id) return;
+      const stored = await getSelectedCatIdFromStorage();
+      if (mounted) setSelectedCatId(stored || null);
+    };
+    loadSelectedCat();
+
+    const sub = DeviceEventEmitter.addListener('catChanged', (cat) => {
+      const nextId = cat?.id ? String(cat.id) : null;
+      setSelectedCatId(nextId);
+    });
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, [session?.user?.id]);
 
   useEffect(() => {
     if (session?.user) {
@@ -99,50 +126,89 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     } else {
       setLoading(false);
     }
-  }, [session, selectedPeriod]);
+  }, [session?.user?.id, selectedPeriod, selectedCatId]);
+
+  useEffect(() => {
+    const persistHealthCache = async () => {
+      try {
+        if (!session?.user?.id || !catDetails?.id || !Number.isFinite(currentScore)) return;
+        const statusNow = getHealthStatus(currentScore);
+        const key = healthCacheKey(session.user.id, catDetails.id);
+        if (!key) return;
+        await AsyncStorage.setItem(key, JSON.stringify({
+          score: currentScore,
+          color: statusNow.color,
+          label: statusNow.label,
+          text: statusNow.text,
+          at: new Date().toISOString(),
+        }));
+        await AsyncStorage.setItem(`health_status_cache_last:${session.user.id}`, JSON.stringify({
+          catId: catDetails.id,
+          score: currentScore,
+          color: statusNow.color,
+          label: statusNow.label,
+          text: statusNow.text,
+          at: new Date().toISOString(),
+        }));
+      } catch (_) { }
+    };
+    persistHealthCache();
+  }, [session?.user?.id, catDetails?.id, currentScore]);
 
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
+      const [{ data: profile }, { data: catsData, error: catsError }] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single(),
+        supabase
+          .from("cats")
+          .select("*")
+          .eq("owner_id", session.user.id)
+          .order('created_at', { ascending: true }),
+      ]);
+      setUserProfile(profile || null);
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
-      setUserProfile(profile);
-
-      const { data: catData, error: catError } = await supabase
-        .from("cats")
-        .select("*")
-        .eq("owner_id", session.user.id)
-        .limit(1)
-        .single();
-
-      if (catError || !catData) {
+      const allCats = Array.isArray(catsData) ? catsData : [];
+      if (catsError || allCats.length === 0) {
         console.log("No cat found");
         await fetchOwnerSummaryOnly();
         setLoading(false);
         setCurrentScore(100);
         return;
       }
-      setCatDetails(catData);
+      const storedSelectedCatId = selectedCatId || await getSelectedCatIdFromStorage();
+      const effectiveCat =
+        allCats.find((c) => String(c.id) === String(storedSelectedCatId || '')) ||
+        allCats[0];
+      setCatDetails(effectiveCat);
+      if (!storedSelectedCatId || String(storedSelectedCatId) !== String(effectiveCat.id)) {
+        setSelectedCatId(String(effectiveCat.id));
+        const scopedKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
+        await AsyncStorage.setItem(scopedKey, String(effectiveCat.id));
+        await AsyncStorage.setItem('selectedCatId', String(effectiveCat.id));
+      }
 
-      await Promise.all([
-        fetchAccumulatedEventSummary(catData.id),
-        fetchOwnerSummaryOnly(),
-        fetchLatestAssessment(catData.id),
-        fetchMetricSummary(catData.id),
-      ]);
-
-      let daysLimit = selectedPeriod === "1 MONTH" ? 30 : 7;
-
-      const { data: logsData, error: logsError } = await supabase
+      const daysLimit = selectedPeriod === "1 MONTH" ? 30 : 7;
+      const logsPromise = supabase
         .from("daily_logs")
         .select("*, normal_logs(*), something_off_logs(*)")
-        .eq("cat_id", catData.id)
+        .eq("cat_id", effectiveCat.id)
         .order("log_date", { ascending: false })
         .limit(daysLimit);
+
+      const [, , , , logsResult] = await Promise.all([
+        fetchAccumulatedEventSummary(effectiveCat.id),
+        fetchOwnerSummaryOnly(),
+        fetchLatestAssessment(effectiveCat.id),
+        fetchMetricSummary(effectiveCat.id),
+        logsPromise,
+      ]);
+
+      const { data: logsData, error: logsError } = logsResult || {};
 
       if (logsError) throw logsError;
 
@@ -199,7 +265,9 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       });
 
     } catch (error) {
-      console.error("Error fetching logs:", error);
+      console.warn("Dashboard fetch warning:", error?.message || error);
+      setAlertSummary({ unread: 0, critical: 0, warning: 0, info: 0 });
+      setCameraSummary((prev) => ({ ...prev, total: 0, online: 0, offline: 0, primaryName: '--', sourceType: '--' }));
     } finally {
       setLoading(false);
     }
@@ -310,65 +378,73 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const fetchOwnerSummaryOnly = async () => {
     const ownerId = session?.user?.id;
     if (!ownerId) return;
-
-    const [{ data: cams }, unreadRes, criticalRes, warningRes, infoRes, latestAlertRes] = await Promise.all([
-      supabase
+    try {
+      const { data: cams } = await supabase
         .from('cameras')
-        .select('id, name, is_primary, ai_connection_status, stream_source_type')
-        .eq('owner_id', ownerId),
-      supabase
-        .from('alerts')
-        .select('id', { head: true, count: 'exact' })
-        .eq('owner_id', ownerId)
-        .eq('is_read', false)
-        .eq('is_deleted', false),
-      supabase
-        .from('alerts')
-        .select('id', { head: true, count: 'exact' })
-        .eq('owner_id', ownerId)
-        .eq('severity', 'critical')
-        .eq('is_deleted', false),
-      supabase
-        .from('alerts')
-        .select('id', { head: true, count: 'exact' })
-        .eq('owner_id', ownerId)
-        .eq('severity', 'warning')
-        .eq('is_deleted', false),
-      supabase
-        .from('alerts')
-        .select('id', { head: true, count: 'exact' })
-        .eq('owner_id', ownerId)
-        .eq('severity', 'info')
-        .eq('is_deleted', false),
-      supabase
-        .from('alerts')
-        .select('title, severity, timestamp, is_read')
-        .eq('owner_id', ownerId)
-        .eq('is_deleted', false)
-        .order('timestamp', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+        .select('id, name, brand, is_primary, ai_connection_status, stream_source_type')
+        .eq('owner_id', ownerId);
 
-    const totalCam = (cams || []).length;
-    const onlineCam = (cams || []).filter((c) => c.ai_connection_status === 'online').length;
-    const offlineCam = Math.max(0, totalCam - onlineCam);
-    const primaryCam = (cams || []).find((c) => c.is_primary) || (cams || [])[0];
+      const selectedCameraId =
+        (await AsyncStorage.getItem(`camera_id:${ownerId}`)) ||
+        (await AsyncStorage.getItem('camera_id'));
+      const totalCam = (cams || []).length;
+      const onlineCam = (cams || []).filter((c) => c.ai_connection_status === 'online').length;
+      const offlineCam = Math.max(0, totalCam - onlineCam);
+      const activeCam =
+        (cams || []).find((c) => c.id === selectedCameraId) ||
+        (cams || []).find((c) => c.is_primary) ||
+        (cams || [])[0];
+      const activeCamId = activeCam?.id || null;
+      const resolvedBrand = String(activeCam?.brand || '').trim();
+      const resolvedName = String(activeCam?.name || '').trim();
+      const displayCameraName = resolvedBrand || resolvedName || '--';
 
-    setCameraSummary({
-      total: totalCam,
-      online: onlineCam,
-      offline: offlineCam,
-      primaryName: primaryCam?.name || '--',
-      sourceType: primaryCam?.stream_source_type || '--',
-    });
-    setAlertSummary({
-      unread: Number.isFinite(unreadRes?.count) ? unreadRes.count : 0,
-      critical: Number.isFinite(criticalRes?.count) ? criticalRes.count : 0,
-      warning: Number.isFinite(warningRes?.count) ? warningRes.count : 0,
-      info: Number.isFinite(infoRes?.count) ? infoRes.count : 0,
-    });
-    setLatestAlertItem(latestAlertRes?.data || null);
+      const mkAlertBaseQuery = (selectColumns, options = {}) => {
+        let q = supabase
+          .from('alerts')
+          .select(selectColumns, options)
+          .eq('owner_id', ownerId)
+          .eq('is_deleted', false);
+        if (activeCamId) q = q.eq('camera_id', activeCamId);
+        return q;
+      };
+
+      const [unreadRes, criticalRes, warningRes, infoRes, latestAlertRes] = await Promise.all([
+        mkAlertBaseQuery('id', { head: true, count: 'exact' })
+          .eq('is_read', false),
+        mkAlertBaseQuery('id', { head: true, count: 'exact' })
+          .eq('severity', 'critical'),
+        mkAlertBaseQuery('id', { head: true, count: 'exact' })
+          .eq('severity', 'warning'),
+        mkAlertBaseQuery('id', { head: true, count: 'exact' })
+          .eq('severity', 'info'),
+        mkAlertBaseQuery('title, severity, timestamp, is_read')
+          .order('timestamp', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      setCameraSummary({
+        total: totalCam,
+        online: onlineCam,
+        offline: offlineCam,
+        primaryName: displayCameraName,
+        sourceType: activeCam?.stream_source_type || '--',
+        brand: resolvedBrand || '--',
+      });
+      setAlertSummary({
+        unread: Number.isFinite(unreadRes?.count) ? unreadRes.count : 0,
+        critical: Number.isFinite(criticalRes?.count) ? criticalRes.count : 0,
+        warning: Number.isFinite(warningRes?.count) ? warningRes.count : 0,
+        info: Number.isFinite(infoRes?.count) ? infoRes.count : 0,
+      });
+      setLatestAlertItem(latestAlertRes?.data || null);
+    } catch (error) {
+      console.warn('fetchOwnerSummaryOnly warning:', error?.message || error);
+      setCameraSummary({ total: 0, online: 0, offline: 0, primaryName: '--', sourceType: '--', brand: '--' });
+      setAlertSummary({ unread: 0, critical: 0, warning: 0, info: 0 });
+      setLatestAlertItem(null);
+    }
   };
 
   const fetchLatestAssessment = async (catId) => {
@@ -657,6 +733,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                 <Text style={styles.scoreSectionLabel}>HEALTH STATUS</Text>
 
                 <CatHealthMeter
+                  size={260}
                   score={currentScore}
                   statusText={status.label}
                   statusColor={status.color}
@@ -730,19 +807,24 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
           <View style={styles.summaryCard}>
             <Text style={styles.summaryCardTitle}>Health Score</Text>
+            <Text style={styles.summarySubTitle}>Based on latest hydration, digestion, urinary and overall metrics</Text>
             <View style={styles.healthScoreWrap}>
               <View style={styles.chartMiniSurface}>
                 <Svg width={RADAR_SIZE} height={RADAR_SIZE} viewBox={`0 0 ${RADAR_SIZE} ${RADAR_SIZE}`}>
                   {[0.25, 0.5, 0.75, 1].map((s) => {
                     const pts = [-90, 0, 90, 180].map((a) => polarPoint(a, s));
                     const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
-                    return <Path key={`grid-${s}`} d={d} stroke="#E0F2F1" fill="none" strokeWidth="1" />;
+                    return <Path key={`grid-${s}`} d={d} stroke="#D6EEFF" fill="none" strokeWidth="1" />;
                   })}
                   {radarAxes.map((a) => {
                     const p = polarPoint(a.angle, 1);
-                    return <Line key={`axis-${a.key}`} x1={RADAR_CENTER} y1={RADAR_CENTER} x2={p.x} y2={p.y} stroke="#B2DFDB" strokeWidth="1" />;
+                    return <Line key={`axis-${a.key}`} x1={RADAR_CENTER} y1={RADAR_CENTER} x2={p.x} y2={p.y} stroke="#B3E5FC" strokeWidth="1" />;
                   })}
-                  <Path d={radarPath} fill="rgba(38,166,154,0.30)" stroke="#00897B" strokeWidth="2.5" />
+                  <Path d={radarPath} fill="rgba(0, 184, 255, 0.28)" stroke="#00B8FF" strokeWidth="2.6" />
+                  {radarAxes.map((a) => {
+                    const p = polarPoint(a.angle, Math.max(0, Math.min(100, a.value)) / 100);
+                    return <Circle key={`radar-dot-${a.key}`} cx={p.x} cy={p.y} r={4} fill="#00E5FF" stroke="#FFFFFF" strokeWidth={1.5} />;
+                  })}
                 </Svg>
               </View>
               <View style={styles.metricList}>
@@ -902,7 +984,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
               </View>
             </View>
             <Text style={styles.summaryFootnote} numberOfLines={1}>
-              Primary: {cameraSummary.primaryName} | Source: {cameraSummary.sourceType}
+              Active: {cameraSummary.primaryName} | Source: {cameraSummary.sourceType}
             </Text>
             <Text style={styles.summaryFootnote} numberOfLines={2}>
               Latest Alert: {latestAlertItem?.title || '--'}
@@ -1343,6 +1425,13 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#1F3B37',
     marginBottom: 12,
+  },
+  summarySubTitle: {
+    fontSize: 11,
+    color: '#6B8B93',
+    marginTop: -6,
+    marginBottom: 10,
+    fontWeight: '600',
   },
   summaryCardHeadRow: {
     flexDirection: 'row',

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, Image, TouchableOpacity, DeviceEventEmitter } from "react-native";
+import { View, Text, Image, TouchableOpacity, DeviceEventEmitter, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from "../screens/config/supabaseClient";
@@ -19,6 +19,7 @@ export default function HomeHeader({
   const [cats, setCats] = useState([]);
   const [activeCat, setActiveCat] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [isSwitchingCat, setIsSwitchingCat] = useState(false);
 
   useEffect(() => {
     fetchCats();
@@ -28,6 +29,7 @@ export default function HomeHeader({
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) return;
+      const selectedCatKey = `selectedCatId:${session.user.id}`;
 
       const { data: catData, error } = await supabase
         .from('cats')
@@ -40,7 +42,9 @@ export default function HomeHeader({
         setCats(catData);
 
         // Load selected cat from storage
-        const storedCatId = await AsyncStorage.getItem('selectedCatId');
+        const storedCatId =
+          (await AsyncStorage.getItem(selectedCatKey)) ||
+          (await AsyncStorage.getItem('selectedCatId'));
         if (storedCatId) {
           const found = catData.find(c => c.id.toString() === storedCatId);
           const currentCat = found || catData[0];
@@ -48,7 +52,7 @@ export default function HomeHeader({
           DeviceEventEmitter.emit('catChanged', currentCat);
         } else {
           setActiveCat(catData[0]);
-          await AsyncStorage.setItem('selectedCatId', catData[0].id.toString());
+          await AsyncStorage.setItem(selectedCatKey, catData[0].id.toString());
           DeviceEventEmitter.emit('catChanged', catData[0]);
         }
       }
@@ -58,12 +62,31 @@ export default function HomeHeader({
   };
 
   const selectCat = async (cat) => {
-    setActiveCat(cat);
-    setModalVisible(false);
-    await AsyncStorage.setItem('selectedCatId', cat.id.toString());
+    if (!cat?.id) return;
+    if (activeCat?.id && String(activeCat.id) === String(cat.id)) {
+      setModalVisible(false);
+      return;
+    }
+    setIsSwitchingCat(true);
+    try {
+      setActiveCat(cat);
+      setModalVisible(false);
+      const { data: { session } } = await supabase.auth.getSession();
+      const selectedCatKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
+    const scopedLastCatKey = session?.user?.id ? `last_selected_cat_id:${session.user.id}` : 'last_selected_cat_id';
+    await AsyncStorage.multiSet([
+      [selectedCatKey, cat.id.toString()],
+      ['selectedCatId', cat.id.toString()],
+      [scopedLastCatKey, cat.id.toString()],
+      ['last_selected_cat_id', cat.id.toString()],
+    ]);
 
-    // Broadcast the change to other screens!
-    DeviceEventEmitter.emit('catChanged', cat);
+      // Broadcast the change to other screens
+      DeviceEventEmitter.emit('catChanged', cat);
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    } finally {
+      setIsSwitchingCat(false);
+    }
   };
 
   return (
@@ -71,7 +94,7 @@ export default function HomeHeader({
       {/* ซ้าย: โปรไฟล์ หรือ Custom Component */}
       <View style={{ width: 44, alignItems: 'flex-start' }}>
         {leftComponent ? leftComponent : (
-          <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.catDropdownTrigger}>
+          <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.catDropdownTrigger} disabled={isSwitchingCat}>
             <View style={[styles.avatar, { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }]}>
               {activeCat?.image_url ? (
                 <Image source={{ uri: activeCat.image_url }} style={{ width: '100%', height: '100%' }} />
@@ -79,7 +102,11 @@ export default function HomeHeader({
                 <Ionicons name="paw" size={20} color="#718096" />
               )}
             </View>
-            <Ionicons name="chevron-down" size={16} color="#718096" style={{ marginLeft: 4 }} />
+            {isSwitchingCat ? (
+              <ActivityIndicator size="small" color="#26A69A" style={{ marginLeft: 6 }} />
+            ) : (
+              <Ionicons name="chevron-down" size={16} color="#718096" style={{ marginLeft: 4 }} />
+            )}
           </TouchableOpacity>
         )}
       </View>
@@ -99,15 +126,44 @@ export default function HomeHeader({
       <View style={rightComponent ? { minWidth: 44, alignItems: 'flex-end' } : { width: leftComponent ? 44 : 80, alignItems: 'flex-end' }}>
         {rightComponent ? rightComponent : (
           <View style={styles.iconGroup}>
-            <TouchableOpacity style={styles.iconBtn} onPress={onNotify}>
+            <TouchableOpacity style={styles.iconBtn} onPress={onNotify} disabled={isSwitchingCat}>
               <Ionicons name="notifications-outline" size={20} color="#718096" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn} onPress={onSetting}>
+            <TouchableOpacity style={styles.iconBtn} onPress={onSetting} disabled={isSwitchingCat}>
               <Ionicons name="settings-outline" size={20} color="#718096" />
             </TouchableOpacity>
           </View>
         )}
       </View>
+
+      {isSwitchingCat && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: -8,
+            alignItems: 'center',
+          }}
+        >
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: 'rgba(38,166,154,0.12)',
+              borderRadius: 999,
+              paddingHorizontal: 10,
+              paddingVertical: 4,
+            }}
+          >
+            <ActivityIndicator size="small" color="#26A69A" />
+            <Text style={{ marginLeft: 6, fontSize: 11, color: '#00695C', fontFamily: 'Inter-Medium' }}>
+              Switching cat...
+            </Text>
+          </View>
+        </View>
+      )}
 
       {/* Component ดรอปดาวน์สำหรับเลือกแมว */}
       <DropdownProfile

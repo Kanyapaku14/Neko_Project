@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import supabase from "./config/supabaseClient";
 import { styles } from './Style/LogDailyStyle';
+import AlertEngine from '../services/AlertEngine';
 
 // --- Shared Utilities ---
 const getLevelValue = (level) => {
@@ -532,6 +533,11 @@ export default function LogDaily(props) {
         }
     }, [session, initialDate, props.catId]);
 
+    const getLocalLogDate = () => {
+        if (!initialDate) return new Date();
+        return new Date(`${initialDate}T00:00:00`);
+    };
+
     const fetchCatIdAndLog = async () => {
         const { data: catData } = await supabase.from('cats').select('id, name').eq('owner_id', session.user.id).single();
         if (catData) {
@@ -542,10 +548,15 @@ export default function LogDaily(props) {
     };
 
     const fetchExistingLog = async (catId) => {
-        const logDate = initialDate ? new Date(initialDate) : new Date();
+        const logDate = getLocalLogDate();
         const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
+        const pickChild = (child) => {
+            if (!child) return null;
+            if (Array.isArray(child)) return child[0] || null;
+            return child;
+        };
 
-        const { data: dailyLog } = await supabase
+        const { data: dailyLogRows } = await supabase
             .from('daily_logs')
             .select(`
                 id,
@@ -555,12 +566,14 @@ export default function LogDaily(props) {
             `)
             .eq('cat_id', catId)
             .eq('log_date', logDateStr)
-            .single();
+            .order('created_at', { ascending: false })
+            .limit(1);
+        const dailyLog = Array.isArray(dailyLogRows) ? dailyLogRows[0] : dailyLogRows;
 
         if (dailyLog) {
-            if (dailyLog.normal_logs && dailyLog.normal_logs.length > 0) {
+            const normal = pickChild(dailyLog.normal_logs);
+            if (normal) {
                 setHasSavedNormalData(true);
-                const normal = dailyLog.normal_logs[0];
                 setFoodType(normal.food_type);
                 setConsumeMeals(normal.meals_per_day !== null && normal.meals_per_day !== undefined ? String(normal.meals_per_day) : '');
                 setFoodIntake(normal.total_food_grams !== null && normal.total_food_grams !== undefined ? String(normal.total_food_grams) : '');
@@ -578,8 +591,8 @@ export default function LogDaily(props) {
                 setUrineLevel(levelToNum(normal.urine_level));
                 setStoolLevel(levelToNum(normal.stool_level));
             }
-            if (dailyLog.something_off_logs && dailyLog.something_off_logs.length > 0) {
-                const off = dailyLog.something_off_logs[0];
+            const off = pickChild(dailyLog.something_off_logs);
+            if (off) {
                 setIsVomitChecked(off.has_vomit);
                 setVomitColor(off.vomit_type);
                 setIsDiarrheaChecked(off.has_diarrhea);
@@ -624,7 +637,7 @@ export default function LogDaily(props) {
         setLoading(true);
 
         try {
-            const logDate = initialDate ? new Date(initialDate) : new Date();
+            const logDate = getLocalLogDate();
             const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
 
             // วิ่งไปเช็คใน Supabase ว่า วันนี้ + แมวตัวนี้ มีข้อมูลหน้า Normal หรือยัง?
@@ -670,7 +683,7 @@ export default function LogDaily(props) {
     const saveData = async () => {
         if (!catId) return Alert.alert("Error", "No cat profile found");
         setLoading(true);
-        const logDate = initialDate ? new Date(initialDate) : new Date();
+        const logDate = getLocalLogDate();
         const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
 
         try {
@@ -732,6 +745,20 @@ export default function LogDaily(props) {
                     }, { onConflict: 'daily_log_id' });
 
                 if (offError) throw offError;
+            }
+
+            try {
+                await AlertEngine.logEvent({
+                    type: 'daily_log_saved',
+                    severity: 'success',
+                    title: 'Daily Log Saved',
+                    desc: `Saved daily log for ${catName || 'your cat'} (${logDateStr}).`,
+                    details: status === 'Something off' ? 'Includes something-off symptoms.' : 'Normal daily status recorded.',
+                    dedupeKey: `daily_log_saved:${catId}:${logDateStr}`,
+                    cooldownMs: 2 * 60 * 1000,
+                });
+            } catch (_) {
+                // keep daily save success path unchanged
             }
 
             Alert.alert('Success', 'Saved Event!', [{

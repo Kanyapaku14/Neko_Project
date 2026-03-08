@@ -61,7 +61,11 @@ export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavig
 
         const fetchActiveCat = async () => {
             try {
-                const storedCatId = await AsyncStorage.getItem('selectedCatId');
+                const { data: { session } } = await supabase.auth.getSession();
+                const scopedKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
+                const storedCatId =
+                    (await AsyncStorage.getItem(scopedKey)) ||
+                    (await AsyncStorage.getItem('selectedCatId'));
                 if (storedCatId) {
                     const { data, error } = await supabase
                         .from('cats')
@@ -109,6 +113,7 @@ export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavig
                 <HomeHeader
                     profileImage={null}
                     profileName={null}
+                    onNotify={() => onNavigate && onNavigate('Alert')}
                     onSetting={onSetting} // Link setting
                 />
 
