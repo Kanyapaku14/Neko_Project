@@ -233,21 +233,36 @@ const AlertRepository = {
             if (alertsError) throw alertsError;
 
             for (const row of (dbAlerts || [])) {
+                // Pending identity is sourced from ai_cat_identity_review below.
+                // Skip here to prevent duplicate popup entries on app relaunch.
+                if (row?.metadata?.pendingIdentityConfirm === true) continue;
                 if (localIds.has(String(row.id))) continue;
                 await AlertEngine.logEvent(mapDbAlertToLocal(row));
             }
 
             if (cameraId) {
+                const recentIso = new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString();
                 const { data: reviews, error: reviewErr } = await supabase
                     .from('ai_cat_identity_review')
                     .select('*')
                     .eq('camera_id', cameraId)
                     .eq('reviewed', false)
+                    .gte('occurred_at', recentIso)
                     .order('occurred_at', { ascending: false })
                     .limit(100);
                 if (reviewErr) throw reviewErr;
 
+                // Keep only newest row per (session + behavior) group to avoid duplicate popups on app relaunch.
+                const latestByGroup = new Map();
                 for (const row of (reviews || [])) {
+                    const gk = `${row.session_id || row.id}|${normalizeBehaviorLabel(row.behavior_label)}`;
+                    const prev = latestByGroup.get(gk);
+                    const rowTs = new Date(row.occurred_at || row.created_at || 0).getTime();
+                    const prevTs = prev ? new Date(prev.occurred_at || prev.created_at || 0).getTime() : -1;
+                    if (!prev || rowTs >= prevTs) latestByGroup.set(gk, row);
+                }
+
+                for (const row of latestByGroup.values()) {
                     if (resolvedReviewIds.has(String(row.id))) continue;
                     if (localIds.has(String(row.id))) continue;
                     if (localRemoteReviewIds.has(String(row.id))) continue;

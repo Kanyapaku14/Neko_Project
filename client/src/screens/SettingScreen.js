@@ -4,7 +4,7 @@ import { Ionicons, Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient'; // Adjusted path to existing client
 
-export default function SettingScreen({ session, onNavigate, onLogout }) {
+export default function SettingScreen({ session, onNavigate, onLogout, onBack }) {
     const [userData, setUserData] = useState(null);
     const [userCats, setUserCats] = useState([]);
 
@@ -88,7 +88,7 @@ export default function SettingScreen({ session, onNavigate, onLogout }) {
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => onNavigate('Home')} style={styles.backButton}>
+                <TouchableOpacity onPress={() => (onBack ? onBack() : onNavigate('Home'))} style={styles.backButton}>
                     <Ionicons name="chevron-back" size={28} color="#333" />
                 </TouchableOpacity>
                 <View style={{ flex: 1 }} />

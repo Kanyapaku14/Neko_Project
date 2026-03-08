@@ -9,12 +9,13 @@ import {
   ActivityIndicator,
   Image,
   DeviceEventEmitter,
+  SafeAreaView,
 } from "react-native";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BottomNav from "../components/BottomNav";
 import supabase from "./config/supabaseClient";
-import DropdownProfile from "../components/DropdownProfile";
+import HomeHeader from "../components/HomeHeader";
 
 const { width } = Dimensions.get("window");
 
@@ -39,10 +40,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
   const [dailyLog, setDailyLog] = useState(null);
   const [medicalEvents, setMedicalEvents] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [cats, setCats] = useState([]);
-  const [activeCat, setActiveCat] = useState(null);
   const [catId, setCatId] = useState(null);
-  const [modalVisible, setModalVisible] = useState(false);
   const [loggedDates, setLoggedDates] = useState([]); // To store dates that have entries
   const [photos, setPhotos] = useState([]); // To store photos for the selected date
 
@@ -57,17 +55,15 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
         .eq('owner_id', session.user.id);
 
       if (data && data.length > 0) {
-        setCats(data);
-
         // Load selected cat from storage or default to first
-        const storedCatId = await AsyncStorage.getItem('selectedCatId');
+        const scopedKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
+        const storedCatId =
+          (await AsyncStorage.getItem(scopedKey)) ||
+          (await AsyncStorage.getItem('selectedCatId'));
         if (storedCatId) {
           const found = data.find(c => c.id.toString() === storedCatId);
-          const currentCat = found || data[0];
-          setActiveCat(currentCat);
-          setCatId(currentCat.id);
+          setCatId((found || data[0]).id);
         } else {
-          setActiveCat(data[0]);
           setCatId(data[0].id);
         }
       }
@@ -76,20 +72,11 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
 
     // Sync with other screens
     const subscription = DeviceEventEmitter.addListener('catChanged', (cat) => {
-      setActiveCat(cat);
       setCatId(cat.id);
     });
 
     return () => subscription.remove();
   }, [session]);
-
-  const selectCat = async (cat) => {
-    setActiveCat(cat);
-    setCatId(cat.id);
-    setModalVisible(false);
-    await AsyncStorage.setItem('selectedCatId', cat.id.toString());
-    DeviceEventEmitter.emit('catChanged', cat);
-  };
 
   // Fetch Logs and Medical Events for selected date
   useEffect(() => {
@@ -107,9 +94,10 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
         .select('*, normal_logs(*), something_off_logs(*)')
         .eq('cat_id', catId)
         .eq('log_date', dateString)
-        .maybeSingle();
+        .order('created_at', { ascending: false })
+        .limit(1);
       if (error) console.error("Error fetching calendar log:", error);
-      setDailyLog(data || null);
+      setDailyLog((Array.isArray(data) ? data[0] : data) || null);
 
       // Fetch Medical Events
       const { data: medicalData, error: medicalError } = await supabase
@@ -121,17 +109,9 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
       if (medicalError) console.error("Error fetching medical events:", medicalError);
       setMedicalEvents(medicalData || []);
 
-      // Fetch Photos (AI Snapshots)
-      const { data: photoData, error: photoError } = await supabase
-        .from('ai_cat_identity_review')
-        .select('*')
-        .eq('camera_id', catId)
-        .eq('reviewed', true)
-        .gte('occurred_at', `${dateString}T00:00:00Z`)
-        .lte('occurred_at', `${dateString}T23:59:59Z`);
-
-      if (photoError) console.error("Error fetching photos:", photoError);
-      setPhotos(photoData || []);
+      // Disable camera/event photo linkage on Calendar for now.
+      // Keep placeholder UI but do not fetch from ai_cat_identity_review.
+      setPhotos([]);
 
       setLoading(false);
     };
@@ -249,6 +229,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
   };
 
   return (
+    <SafeAreaView style={styles.safeArea}>
     <View style={styles.container}>
       {/* Background Decorations */}
       <MaterialCommunityIcons name="paw" size={70} color="rgba(20, 124, 120, 0.12)" style={{ position: 'absolute', top: 80, left: 10, transform: [{ rotate: '15deg' }] }} />
@@ -257,34 +238,18 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
       <MaterialCommunityIcons name="paw" size={110} color="rgba(20, 124, 120, 0.07)" style={{ position: 'absolute', bottom: 150, right: 40, transform: [{ rotate: '-10deg' }] }} />
       <MaterialCommunityIcons name="paw" size={50} color="rgba(20, 124, 120, 0.09)" style={{ position: 'absolute', bottom: 400, right: 20, transform: [{ rotate: '30deg' }] }} />
 
-      {/* Cat Switcher Header */}
-      <View style={styles.topHeader}>
-        <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.catDropdownTrigger}>
-          <View style={styles.avatarContainer}>
-            {activeCat?.image_url ? (
-              <Image source={{ uri: activeCat.image_url }} style={styles.avatarImage} />
-            ) : (
-              <Ionicons name="paw" size={20} color="#718096" />
-            )}
+      {/* Header */}
+      <HomeHeader
+        onNotify={() => onNavigate('Alert')}
+        onSetting={() => onNavigate('Setting')}
+        centerComponent={
+          <View style={styles.brandContainer}>
+            <Text style={styles.brandText}>NEK</Text>
+            <Ionicons name="paw" size={14} color="#4FD1C5" />
+            <Text style={styles.brandText}>CARE</Text>
           </View>
-          <Ionicons name="chevron-down" size={16} color="#147C78" style={{ marginLeft: 4 }} />
-        </TouchableOpacity>
-
-        <View style={styles.brandContainer}>
-          <Text style={styles.brandText}>NEK</Text>
-          <Ionicons name="paw" size={14} color="#4FD1C5" />
-          <Text style={styles.brandText}>CARE</Text>
-        </View>
-
-        <View style={styles.iconGroup}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => console.log("Notify")}>
-            <Ionicons name="notifications-outline" size={22} color="#4A5568" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => onNavigate('Setting')}>
-            <Ionicons name="settings-outline" size={22} color="#4A5568" />
-          </TouchableOpacity>
-        </View>
-      </View>
+        }
+      />
 
       {/* Calendar Card */}
       <View style={styles.calendarCard}>
@@ -486,7 +451,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                 onNavigate({
                   screen: 'LogDaily',
                   initialDate: dateStr,
-                  params: { date: dateStr }
+                  params: { date: dateStr, catId, catName: null }
                 });
               }}
             >
@@ -556,7 +521,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                 onNavigate({
                   screen: 'LogDaily',
                   initialDate: dateStr,
-                  params: { date: dateStr }
+                  params: { date: dateStr, catId, catName: null }
                 });
               }}
             >
@@ -571,19 +536,16 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
       </ScrollView>
 
       <BottomNav current="Calendar" onNavigate={onNavigate} />
-
-      <DropdownProfile
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        cats={cats}
-        activeCat={activeCat}
-        onSelectCat={selectCat}
-      />
     </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#F7FEFD",
+  },
   container: {
     flex: 1,
     backgroundColor: "#F7FEFD",

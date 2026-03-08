@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, SafeAreaView, TouchableOpacity, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, SafeAreaView, TouchableOpacity, ActivityIndicator, Platform, DeviceEventEmitter } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from 'expo-linear-gradient';
 import BottomNav from "../components/BottomNav";
 import HealthTrendsChart from "../components/HealthTrendsChart";
 import HomeHeader from "../components/HomeHeader";
+import CatHealthMeter from "../components/CatHealthMeter";
 import supabase from "./config/supabaseClient";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
+import Svg, { Line, Circle, Path, Text as SvgText } from 'react-native-svg';
 
 // ==========================================
 // 🐾 Paw Progress Bar Component
@@ -18,12 +21,18 @@ const PawProgressBar = ({ label, percent, icon }) => {
 
   // Custom colors for specific labels to match CameraScreen
   const getBarColor = (label) => {
+    if (label.includes('Abnormal')) return '#EF5350';
+    if (label.includes('Rest')) return '#7E57C2';
+    if (label.includes('Eat')) return '#FFAB40';
     if (label.includes('Activity')) return '#FFAB40'; // Energy orange
     if (label.includes('Litter')) return '#64B5F6'; // Routine blue
     return '#81C784'; // Wellness green
   };
 
   const getIconColor = (label) => {
+    if (label.includes('Abnormal')) return '#C62828';
+    if (label.includes('Rest')) return '#5E35B1';
+    if (label.includes('Eat')) return '#EF6C00';
     if (label.includes('Activity')) return '#FF6D00';
     if (label.includes('Litter')) return '#0D47A1';
     return '#1B5E20';
@@ -62,12 +71,54 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState("7 DAY");
+  const [selectedTrendSeries, setSelectedTrendSeries] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
 
   const [catDetails, setCatDetails] = useState(null);
   const [rawLogs, setRawLogs] = useState([]);
   const [latestAlerts, setLatestAlerts] = useState([]);
   const [latestRedFlags, setLatestRedFlags] = useState(0);
+  const [eventSummary, setEventSummary] = useState({
+    all: { eat: 0, litter: 0, sleep: 0, activity: 0, abnormal: 0, total: 0 },
+    d7: { eat: 0, litter: 0, sleep: 0, activity: 0, abnormal: 0, total: 0 },
+    d30: { eat: 0, litter: 0, sleep: 0, activity: 0, abnormal: 0, total: 0 },
+  });
+  const [metricSummary, setMetricSummary] = useState({
+    hydration: 0,
+    digestion: 0,
+    urinary: 0,
+    overall: 0,
+  });
+  const [alertSummary, setAlertSummary] = useState({ unread: 0, critical: 0, warning: 0, info: 0 });
+  const [cameraSummary, setCameraSummary] = useState({ total: 0, online: 0, offline: 0, primaryName: '--', sourceType: '--', brand: '--' });
+  const [latestAssessment, setLatestAssessment] = useState(null);
+  const [latestAlertItem, setLatestAlertItem] = useState(null);
+  const [selectedCatId, setSelectedCatId] = useState(null);
+  const healthCacheKey = (userId, catId) => (userId && catId ? `health_status_cache:${userId}:${catId}` : null);
+
+  const getSelectedCatIdFromStorage = async () => {
+    const scopedKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
+    return (await AsyncStorage.getItem(scopedKey)) || (await AsyncStorage.getItem('selectedCatId'));
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSelectedCat = async () => {
+      if (!session?.user?.id) return;
+      const stored = await getSelectedCatIdFromStorage();
+      if (mounted) setSelectedCatId(stored || null);
+    };
+    loadSelectedCat();
+
+    const sub = DeviceEventEmitter.addListener('catChanged', (cat) => {
+      const nextId = cat?.id ? String(cat.id) : null;
+      setSelectedCatId(nextId);
+    });
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, [session?.user?.id]);
 
   useEffect(() => {
     if (session?.user) {
@@ -75,42 +126,89 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     } else {
       setLoading(false);
     }
-  }, [session, selectedPeriod]);
+  }, [session?.user?.id, selectedPeriod, selectedCatId]);
+
+  useEffect(() => {
+    const persistHealthCache = async () => {
+      try {
+        if (!session?.user?.id || !catDetails?.id || !Number.isFinite(currentScore)) return;
+        const statusNow = getHealthStatus(currentScore);
+        const key = healthCacheKey(session.user.id, catDetails.id);
+        if (!key) return;
+        await AsyncStorage.setItem(key, JSON.stringify({
+          score: currentScore,
+          color: statusNow.color,
+          label: statusNow.label,
+          text: statusNow.text,
+          at: new Date().toISOString(),
+        }));
+        await AsyncStorage.setItem(`health_status_cache_last:${session.user.id}`, JSON.stringify({
+          catId: catDetails.id,
+          score: currentScore,
+          color: statusNow.color,
+          label: statusNow.label,
+          text: statusNow.text,
+          at: new Date().toISOString(),
+        }));
+      } catch (_) { }
+    };
+    persistHealthCache();
+  }, [session?.user?.id, catDetails?.id, currentScore]);
 
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
+      const [{ data: profile }, { data: catsData, error: catsError }] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single(),
+        supabase
+          .from("cats")
+          .select("*")
+          .eq("owner_id", session.user.id)
+          .order('created_at', { ascending: true }),
+      ]);
+      setUserProfile(profile || null);
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
-      setUserProfile(profile);
-
-      const { data: catData, error: catError } = await supabase
-        .from("cats")
-        .select("*")
-        .eq("owner_id", session.user.id)
-        .limit(1)
-        .single();
-
-      if (catError || !catData) {
+      const allCats = Array.isArray(catsData) ? catsData : [];
+      if (catsError || allCats.length === 0) {
         console.log("No cat found");
+        await fetchOwnerSummaryOnly();
         setLoading(false);
         setCurrentScore(100);
         return;
       }
-      setCatDetails(catData);
+      const storedSelectedCatId = selectedCatId || await getSelectedCatIdFromStorage();
+      const effectiveCat =
+        allCats.find((c) => String(c.id) === String(storedSelectedCatId || '')) ||
+        allCats[0];
+      setCatDetails(effectiveCat);
+      if (!storedSelectedCatId || String(storedSelectedCatId) !== String(effectiveCat.id)) {
+        setSelectedCatId(String(effectiveCat.id));
+        const scopedKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
+        await AsyncStorage.setItem(scopedKey, String(effectiveCat.id));
+        await AsyncStorage.setItem('selectedCatId', String(effectiveCat.id));
+      }
 
-      let daysLimit = selectedPeriod === "1 MONTH" ? 30 : 7;
-
-      const { data: logsData, error: logsError } = await supabase
+      const daysLimit = selectedPeriod === "1 MONTH" ? 30 : 7;
+      const logsPromise = supabase
         .from("daily_logs")
         .select("*, normal_logs(*), something_off_logs(*)")
-        .eq("cat_id", catData.id)
+        .eq("cat_id", effectiveCat.id)
         .order("log_date", { ascending: false })
         .limit(daysLimit);
+
+      const [, , , , logsResult] = await Promise.all([
+        fetchAccumulatedEventSummary(effectiveCat.id),
+        fetchOwnerSummaryOnly(),
+        fetchLatestAssessment(effectiveCat.id),
+        fetchMetricSummary(effectiveCat.id),
+        logsPromise,
+      ]);
+
+      const { data: logsData, error: logsError } = logsResult || {};
 
       if (logsError) throw logsError;
 
@@ -167,10 +265,197 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       });
 
     } catch (error) {
-      console.error("Error fetching logs:", error);
+      console.warn("Dashboard fetch warning:", error?.message || error);
+      setAlertSummary({ unread: 0, critical: 0, warning: 0, info: 0 });
+      setCameraSummary((prev) => ({ ...prev, total: 0, online: 0, offline: 0, primaryName: '--', sourceType: '--' }));
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchAccumulatedEventSummary = async (catId) => {
+    const mkIsoDaysAgo = (days) => new Date(Date.now() - (days * 24 * 60 * 60 * 1000)).toISOString();
+    const behaviors = ['eat', 'litter', 'sleep', 'activity', 'abnormal'];
+    const windows = {
+      all: null,
+      d7: mkIsoDaysAgo(7),
+      d30: mkIsoDaysAgo(30),
+    };
+
+    const nextSummary = {
+      all: { eat: 0, litter: 0, sleep: 0, activity: 0, abnormal: 0, total: 0 },
+      d7: { eat: 0, litter: 0, sleep: 0, activity: 0, abnormal: 0, total: 0 },
+      d30: { eat: 0, litter: 0, sleep: 0, activity: 0, abnormal: 0, total: 0 },
+    };
+
+    await Promise.all(
+      Object.entries(windows).flatMap(([windowKey, sinceIso]) =>
+        behaviors.map(async (behavior) => {
+          let q = supabase
+            .from('ai_cat_events')
+            .select('id', { head: true, count: 'exact' })
+            .eq('cat_id', catId)
+            .eq('behavior_label', behavior);
+          if (sinceIso) q = q.gte('occurred_at', sinceIso);
+          const { count, error } = await q;
+          if (error) return;
+          const safeCount = Number.isFinite(count) ? count : 0;
+          nextSummary[windowKey][behavior] = safeCount;
+          nextSummary[windowKey].total += safeCount;
+        })
+      )
+    );
+
+    setEventSummary(nextSummary);
+  };
+
+  const fetchMetricSummary = async (catId) => {
+    const sinceIso = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+    const { data, error } = await supabase
+      .from('metrics_daily')
+      .select('hydration_score, digestion_score, urinary_score, overall_score, metric_date')
+      .eq('cat_id', catId)
+      .gte('metric_date', sinceIso)
+      .order('metric_date', { ascending: false });
+
+    if (error || !data || !data.length) {
+      // Fallback: Compute from raw daily logs if metrics_daily hasn't been synced
+      const { data: fallbackLogs } = await supabase
+        .from('daily_logs')
+        .select('*, normal_logs(*), something_off_logs(*)')
+        .eq('cat_id', catId)
+        .gte('log_date', sinceIso);
+
+      if (!fallbackLogs || !fallbackLogs.length) {
+        setMetricSummary({ hydration: 0, digestion: 0, urinary: 0, overall: 0 });
+        return;
+      }
+
+      let hSum = 0, dSum = 0, uSum = 0, oSum = 0;
+      fallbackLogs.forEach(log => {
+        let h = 100, d = 100, u = 100;
+        const norm = log.normal_logs?.[0] || log.normal_logs || {};
+        const off = log.something_off_logs?.[0] || log.something_off_logs || {};
+
+        // Custom Radar mapping algorithm natively matching healthLogic score deductions
+        const water = Number(norm.water_ml_per_day) || 0;
+        if (water < 20) h -= 50;
+        if (water === 0) h -= 30;
+
+        if (off.has_vomit || off.has_diarrhea) d -= 40;
+        if (norm.stool_level === 'very_low' || norm.stool_level === 'very_high') d -= 20;
+
+        if (norm.urine_level === 'very_low' || norm.urine_level === 'very_high') u -= 30;
+
+        const o = Math.round((h + d + u) / 3);
+        hSum += h; dSum += d; uSum += u; oSum += o;
+      });
+
+      const count = fallbackLogs.length;
+      setMetricSummary({
+        hydration: Math.max(0, Math.round(hSum / count)),
+        digestion: Math.max(0, Math.round(dSum / count)),
+        urinary: Math.max(0, Math.round(uSum / count)),
+        overall: Math.max(0, Math.round(oSum / count)),
+      });
+      return;
+    }
+
+    // Primary source
+    const avg = (arr, key) => {
+      const nums = arr.map((x) => Number(x?.[key])).filter((n) => Number.isFinite(n));
+      if (!nums.length) return 0;
+      return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
+    };
+    setMetricSummary({
+      hydration: avg(data, 'hydration_score'),
+      digestion: avg(data, 'digestion_score'),
+      urinary: avg(data, 'urinary_score'),
+      overall: avg(data, 'overall_score'),
+    });
+  };
+
+  const fetchOwnerSummaryOnly = async () => {
+    const ownerId = session?.user?.id;
+    if (!ownerId) return;
+    try {
+      const { data: cams } = await supabase
+        .from('cameras')
+        .select('id, name, brand, is_primary, ai_connection_status, stream_source_type')
+        .eq('owner_id', ownerId);
+
+      const selectedCameraId =
+        (await AsyncStorage.getItem(`camera_id:${ownerId}`)) ||
+        (await AsyncStorage.getItem('camera_id'));
+      const totalCam = (cams || []).length;
+      const onlineCam = (cams || []).filter((c) => c.ai_connection_status === 'online').length;
+      const offlineCam = Math.max(0, totalCam - onlineCam);
+      const activeCam =
+        (cams || []).find((c) => c.id === selectedCameraId) ||
+        (cams || []).find((c) => c.is_primary) ||
+        (cams || [])[0];
+      const activeCamId = activeCam?.id || null;
+      const resolvedBrand = String(activeCam?.brand || '').trim();
+      const resolvedName = String(activeCam?.name || '').trim();
+      const displayCameraName = resolvedBrand || resolvedName || '--';
+
+      const mkAlertBaseQuery = (selectColumns, options = {}) => {
+        let q = supabase
+          .from('alerts')
+          .select(selectColumns, options)
+          .eq('owner_id', ownerId)
+          .eq('is_deleted', false);
+        if (activeCamId) q = q.eq('camera_id', activeCamId);
+        return q;
+      };
+
+      const [unreadRes, criticalRes, warningRes, infoRes, latestAlertRes] = await Promise.all([
+        mkAlertBaseQuery('id', { head: true, count: 'exact' })
+          .eq('is_read', false),
+        mkAlertBaseQuery('id', { head: true, count: 'exact' })
+          .eq('severity', 'critical'),
+        mkAlertBaseQuery('id', { head: true, count: 'exact' })
+          .eq('severity', 'warning'),
+        mkAlertBaseQuery('id', { head: true, count: 'exact' })
+          .eq('severity', 'info'),
+        mkAlertBaseQuery('title, severity, timestamp, is_read')
+          .order('timestamp', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      setCameraSummary({
+        total: totalCam,
+        online: onlineCam,
+        offline: offlineCam,
+        primaryName: displayCameraName,
+        sourceType: activeCam?.stream_source_type || '--',
+        brand: resolvedBrand || '--',
+      });
+      setAlertSummary({
+        unread: Number.isFinite(unreadRes?.count) ? unreadRes.count : 0,
+        critical: Number.isFinite(criticalRes?.count) ? criticalRes.count : 0,
+        warning: Number.isFinite(warningRes?.count) ? warningRes.count : 0,
+        info: Number.isFinite(infoRes?.count) ? infoRes.count : 0,
+      });
+      setLatestAlertItem(latestAlertRes?.data || null);
+    } catch (error) {
+      console.warn('fetchOwnerSummaryOnly warning:', error?.message || error);
+      setCameraSummary({ total: 0, online: 0, offline: 0, primaryName: '--', sourceType: '--', brand: '--' });
+      setAlertSummary({ unread: 0, critical: 0, warning: 0, info: 0 });
+      setLatestAlertItem(null);
+    }
+  };
+
+  const fetchLatestAssessment = async (catId) => {
+    const { data } = await supabase
+      .from('assessments')
+      .select('assessment_date, overall_risk_level, overall_risk_score')
+      .eq('cat_id', catId)
+      .order('assessment_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setLatestAssessment(data || null);
   };
 
   const calculateAge = (birthdate) => {
@@ -363,6 +648,61 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   };
 
   const periods = ["7 DAY", "1 MONTH"];
+  const weeklyBehavior = eventSummary.d7 || { eat: 0, litter: 0, sleep: 0, abnormal: 0 };
+
+  const activityBreakdownData = [
+    { key: 'eat', label: 'Eat', icon: 'food-drumstick', value: weeklyBehavior.eat || 0, color: '#FF8F00' },
+    { key: 'litter', label: 'Litter', icon: 'emoticon-poop', value: weeklyBehavior.litter || 0, color: '#0288D1' },
+    { key: 'sleep', label: 'Resting', icon: 'sleep', value: weeklyBehavior.sleep || 0, color: '#7E57C2' },
+    { key: 'abnormal', label: 'Abnormal', icon: 'alert-circle', value: weeklyBehavior.abnormal || 0, color: '#D32F2F' },
+  ];
+  const breakdownTotal = Math.max(1, activityBreakdownData.reduce((s, x) => s + x.value, 0));
+  const breakdownWithPct = activityBreakdownData.map((x) => ({ ...x, pct: Math.round((x.value / breakdownTotal) * 100) }));
+  const riskPct = {
+    eat: breakdownWithPct.find((x) => x.key === 'eat')?.pct || 0,
+    rest: breakdownWithPct.find((x) => x.key === 'sleep')?.pct || 0,
+    abnormal: breakdownWithPct.find((x) => x.key === 'abnormal')?.pct || 0,
+  };
+  const weeklyTotalForLegacy = Math.max(
+    1,
+    (weeklyBehavior.eat || 0) + (weeklyBehavior.litter || 0) + (weeklyBehavior.sleep || 0) + (weeklyBehavior.abnormal || 0) + (eventSummary?.d7?.activity || 0)
+  );
+  const legacyRiskPct = {
+    activity: Math.round(((eventSummary?.d7?.activity || 0) / weeklyTotalForLegacy) * 100),
+    litter: breakdownWithPct.find((x) => x.key === 'litter')?.pct || 0,
+    wellness: Number.isFinite(currentScore) ? currentScore : 0,
+  };
+
+  const RADAR_SIZE = 180;
+  const RADAR_CENTER = RADAR_SIZE / 2;
+  const RADAR_R = 62;
+
+  const getMetricQual = (score, key) => {
+    if (score >= 80) return { t: 'Excellent', d: key === 'overall' ? 'Great condition' : 'Healthy levels', c: '#10B981' };
+    if (score >= 60) return { t: 'Good', d: key === 'overall' ? 'Generally fine' : 'Normal ranges', c: '#3B82F6' };
+    if (score >= 40) return { t: 'Fair', d: key === 'overall' ? 'Needs monitoring' : 'Below optimal', c: '#F59E0B' };
+    return { t: 'Attention', d: key === 'overall' ? 'Consult vet' : 'Action needed', c: '#EF4444' };
+  };
+
+  const radarAxes = [
+    { key: 'hydration', label: 'Hydration', angle: -90, value: metricSummary.hydration || 0, ...getMetricQual(metricSummary.hydration || 0, 'hydration') },
+    { key: 'digestion', label: 'Digestion', angle: 0, value: metricSummary.digestion || 0, ...getMetricQual(metricSummary.digestion || 0, 'digestion') },
+    { key: 'urinary', label: 'Urinary', angle: 90, value: metricSummary.urinary || 0, ...getMetricQual(metricSummary.urinary || 0, 'urinary') },
+    { key: 'overall', label: 'Overall', angle: 180, value: metricSummary.overall || 0, ...getMetricQual(metricSummary.overall || 0, 'overall') },
+  ];
+  const polarPoint = (deg, scale = 1) => {
+    const rad = (deg * Math.PI) / 180;
+    return {
+      x: RADAR_CENTER + Math.cos(rad) * RADAR_R * scale,
+      y: RADAR_CENTER + Math.sin(rad) * RADAR_R * scale,
+    };
+  };
+  const radarPath = radarAxes
+    .map((a, idx) => {
+      const p = polarPoint(a.angle, Math.max(0, Math.min(100, a.value)) / 100);
+      return `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`;
+    })
+    .join(' ') + ' Z';
 
   // ==========================================
   // 🎨 RENDER
@@ -374,10 +714,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
           {/* Header */}
           <HomeHeader
-            onProfile={() => onNavigate && onNavigate('Profile')}
-            onNotify={() => console.log("Notify")}
+            onNotify={() => onNavigate && onNavigate('Alert')}
             onSetting={() => onNavigate && onNavigate('Setting')}
-            userProfile={userProfile}
           />
 
           {/* ===== 🐾 Health Score Circle ===== */}
@@ -394,13 +732,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
                 <Text style={styles.scoreSectionLabel}>HEALTH STATUS</Text>
 
-                {/* Main Circle */}
-                <View style={[styles.mainCircle, { borderColor: status.color }]}>
-                  <View style={[styles.mainCircleInner, { backgroundColor: status.color + '12' }]}>
-                    <Text style={[styles.mainCircleStatus, { color: status.color }]}>{status.label}</Text>
-                    <Text style={[styles.mainCircleScore, { color: status.color }]}>{currentScore}</Text>
-                  </View>
-                </View>
+                <CatHealthMeter
+                  size={260}
+                  score={currentScore}
+                  statusText={status.label}
+                  statusColor={status.color}
+                  note={status.text}
+                />
 
                 <Text style={[styles.scoreSubtitle, { color: status.color }]}>{status.text}</Text>
 
@@ -449,70 +787,104 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                 <Ionicons name="time-outline" size={16} color="#0C5A58" style={{ marginLeft: 6 }} />
               </TouchableOpacity>
             </View>
+            {latestAssessment && (
+              <View style={styles.riskSnapshotInline}>
+                <Text style={styles.summaryCardTitle}>Latest Risk Snapshot</Text>
+                <View style={styles.inlineMetricRow}>
+                  <Text style={styles.inlineMetric}>
+                    Level {String(latestAssessment.overall_risk_level || '--').toUpperCase()}
+                  </Text>
+                  <Text style={styles.inlineMetric}>
+                    Score {Number.isFinite(latestAssessment.overall_risk_score) ? latestAssessment.overall_risk_score : '--'}
+                  </Text>
+                  <Text style={styles.inlineMetric}>
+                    Date {latestAssessment.assessment_date || '--'}
+                  </Text>
+                </View>
+              </View>
+            )}
           </View>
 
-          {/* ===== 🐾 System Risk Analysis (Paw Progress) ===== */}
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleRow}>
-              <MaterialCommunityIcons name="shield-check-outline" size={22} color="#00695C" />
-              <Text style={styles.sectionTitle}>System Risk Analysis</Text>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryCardTitle}>Health Score</Text>
+            <Text style={styles.summarySubTitle}>Based on latest hydration, digestion, urinary and overall metrics</Text>
+            <View style={styles.healthScoreWrap}>
+              <View style={styles.chartMiniSurface}>
+                <Svg width={RADAR_SIZE} height={RADAR_SIZE} viewBox={`0 0 ${RADAR_SIZE} ${RADAR_SIZE}`}>
+                  {[0.25, 0.5, 0.75, 1].map((s) => {
+                    const pts = [-90, 0, 90, 180].map((a) => polarPoint(a, s));
+                    const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
+                    return <Path key={`grid-${s}`} d={d} stroke="#D6EEFF" fill="none" strokeWidth="1" />;
+                  })}
+                  {radarAxes.map((a) => {
+                    const p = polarPoint(a.angle, 1);
+                    return <Line key={`axis-${a.key}`} x1={RADAR_CENTER} y1={RADAR_CENTER} x2={p.x} y2={p.y} stroke="#B3E5FC" strokeWidth="1" />;
+                  })}
+                  <Path d={radarPath} fill="rgba(0, 184, 255, 0.28)" stroke="#00B8FF" strokeWidth="2.6" />
+                  {radarAxes.map((a) => {
+                    const p = polarPoint(a.angle, Math.max(0, Math.min(100, a.value)) / 100);
+                    return <Circle key={`radar-dot-${a.key}`} cx={p.x} cy={p.y} r={4} fill="#00E5FF" stroke="#FFFFFF" strokeWidth={1.5} />;
+                  })}
+                </Svg>
+              </View>
+              <View style={styles.metricList}>
+                {radarAxes.map((m) => (
+                  <View key={m.key} style={styles.metricRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.metricLabel}>{m.label}</Text>
+                      <Text style={styles.metricDesc}>{m.d}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={[styles.metricValue, { color: m.c }]}>{m.t}</Text>
+                      <Text style={styles.metricScoreNum}>{m.value} / 100</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
             </View>
-            <TouchableOpacity onPress={() => console.log('View Detail pressed')}>
-              <Text style={styles.viewDetailLink}>View Detail</Text>
-            </TouchableOpacity>
           </View>
 
-          <View style={styles.riskCard}>
-            <PawProgressBar
-              label="Activity Level"
-              percent={45}
-              icon="run"
-            />
-            <PawProgressBar
-              label="Litter Box Usage"
-              percent={85}
-              icon="emoticon-poop"
-            />
-            <PawProgressBar
-              label="Wellness Balance"
-              percent={92}
-              icon="heart-pulse"
-            />
-            <View style={styles.riskFooter}>
-              <MaterialCommunityIcons name="clock-outline" size={14} color="#90A4AE" />
-              <Text style={styles.riskFooterText}>Based on the last {selectedPeriod === '1 MONTH' ? '30' : '7'} days of activity</Text>
-            </View>
-          </View>
-
-          {/* ===== 📊 Health Trends Chart ===== */}
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleRow}>
-              <MaterialCommunityIcons name="chart-line" size={22} color="#00695C" />
-              <Text style={styles.sectionTitle}>Health Trends</Text>
-            </View>
-          </View>
-
-          <View style={styles.chartCard}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryCardTitle}>Health Trends</Text>
             <View style={styles.chartHeader}>
               <View style={styles.tagsContainer}>
-                <View style={[styles.tag, styles.tagFood]}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setSelectedTrendSeries((prev) => (prev === 'food' ? null : 'food'))}
+                  style={[
+                    styles.tag,
+                    styles.tagFood,
+                    selectedTrendSeries && selectedTrendSeries !== 'food' && styles.tagInactive,
+                  ]}
+                >
                   <MaterialCommunityIcons name="food-drumstick" size={14} color="#FF8F00" style={{ marginRight: 4 }} />
                   <Text style={styles.tagText}>Food</Text>
-                </View>
-                <View style={[styles.tag, styles.tagWater]}>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setSelectedTrendSeries((prev) => (prev === 'water' ? null : 'water'))}
+                  style={[
+                    styles.tag,
+                    styles.tagWater,
+                    selectedTrendSeries && selectedTrendSeries !== 'water' && styles.tagInactive,
+                  ]}
+                >
                   <MaterialCommunityIcons name="water" size={14} color="#0288D1" style={{ marginRight: 4 }} />
                   <Text style={styles.tagText}>Water</Text>
-                </View>
+                </TouchableOpacity>
               </View>
             </View>
 
             {loading ? (
-              <ActivityIndicator size="large" color="#00695C" style={{ marginVertical: 40 }} />
+              <ActivityIndicator size="large" color="#00695C" style={{ marginVertical: 24 }} />
             ) : (
-              <HealthTrendsChart data={chartData} />
+              <HealthTrendsChart
+                data={chartData}
+                selectedSeries={selectedTrendSeries}
+                onSelectSeries={(next) => setSelectedTrendSeries((prev) => (prev === next ? null : next))}
+              />
             )}
 
-            {/* Period Selector */}
             <View style={styles.periodContainer}>
               {periods.map((period) => (
                 <TouchableOpacity
@@ -536,7 +908,93 @@ export default function Dashboard({ onBack, onNavigate, session }) {
             </View>
           </View>
 
+          {/* ===== 🐾 System Risk Analysis (Paw Progress) ===== */}
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleRow}>
+              <MaterialCommunityIcons name="shield-check-outline" size={22} color="#00695C" />
+              <Text style={styles.sectionTitle}>System Risk Analysis</Text>
+            </View>
+          </View>
+
+          <View style={styles.riskCard}>
+            <PawProgressBar
+              label="Abnormal Posture"
+              percent={riskPct.abnormal}
+              icon="alert-circle"
+            />
+            <PawProgressBar
+              label="Resting"
+              percent={riskPct.rest}
+              icon="sleep"
+            />
+            <PawProgressBar
+              label="Eating"
+              percent={riskPct.eat}
+              icon="food-drumstick"
+            />
+            <View style={styles.riskSubDivider} />
+            <PawProgressBar
+              label="Activity Level"
+              percent={legacyRiskPct.activity}
+              icon="run"
+            />
+            <PawProgressBar
+              label="Litter Box Usage"
+              percent={legacyRiskPct.litter}
+              icon="emoticon-poop"
+            />
+            <PawProgressBar
+              label="Wellness Balance"
+              percent={legacyRiskPct.wellness}
+              icon="heart-pulse"
+            />
+            <View style={styles.riskFooter}>
+              <MaterialCommunityIcons name="clock-outline" size={14} color="#90A4AE" />
+              <Text style={styles.riskFooterText}>Based on the last {selectedPeriod === '1 MONTH' ? '30' : '7'} days of activity</Text>
+            </View>
+          </View>
+
           {/* ===== 🔘 Action Buttons ===== */}
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryCardTitle}>Camera & Alerts</Text>
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Camera Online</Text>
+                <Text style={styles.summaryValue}>{cameraSummary.online}/{cameraSummary.total}</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Camera Offline</Text>
+                <Text style={[styles.summaryValue, { color: '#607D8B' }]}>{cameraSummary.offline}</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Unread Alerts</Text>
+                <Text style={styles.summaryValue}>{alertSummary.unread}</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Info</Text>
+                <Text style={[styles.summaryValue, { color: '#0288D1' }]}>{alertSummary.info}</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Critical</Text>
+                <Text style={[styles.summaryValue, { color: '#D32F2F' }]}>{alertSummary.critical}</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Warning</Text>
+                <Text style={[styles.summaryValue, { color: '#ED6C02' }]}>{alertSummary.warning}</Text>
+              </View>
+            </View>
+            <Text style={styles.summaryFootnote} numberOfLines={1}>
+              Active: {cameraSummary.primaryName} | Source: {cameraSummary.sourceType}
+            </Text>
+            <Text style={styles.summaryFootnote} numberOfLines={2}>
+              Latest Alert: {latestAlertItem?.title || '--'}
+            </Text>
+            <Text style={styles.summaryFootnote}>
+              {latestAlertItem?.timestamp ? latestAlertItem.timestamp.replace('T', ' ').substring(0, 19) : '--'}
+              {latestAlertItem?.severity ? ` | ${String(latestAlertItem.severity).toUpperCase()}` : ''}
+            </Text>
+          </View>
+
           <View style={styles.actionRow}>
             <TouchableOpacity
               style={styles.actionButtonNew}
@@ -563,6 +1021,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
             </TouchableOpacity>
           </View>
 
+
+
         </ScrollView>
 
         {/* Bottom Nav */}
@@ -579,13 +1039,14 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F4FAF9',
+    backgroundColor: '#F5F8F7',
   },
   gradientBg: {
     flex: 1,
   },
   scrollContainer: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     paddingBottom: 100,
     paddingTop: 8,
   },
@@ -593,17 +1054,17 @@ const styles = StyleSheet.create({
   // ===== Score Circle Section =====
   scoreSection: {
     alignItems: 'center',
-    marginTop: 14,
-    marginBottom: 24,
+    marginTop: 10,
+    marginBottom: 18,
     position: 'relative',
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   scoreSectionLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
-    color: '#90A4AE',
-    letterSpacing: 1.5,
-    marginBottom: 16,
+    color: '#8A9A98',
+    letterSpacing: 1.2,
+    marginBottom: 10,
     fontFamily: Platform.OS === 'ios' ? 'Inter-Bold' : 'sans-serif-medium',
   },
   mainCircle: {
@@ -619,6 +1080,26 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 14,
     elevation: 4,
+  },
+  catEarContainer: {
+    width: 170,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: -10,
+    paddingHorizontal: 20,
+    zIndex: 2,
+  },
+  catEar: {
+    width: 28,
+    height: 22,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+  },
+  catEarLeft: {
+    transform: [{ rotate: '-18deg' }],
+  },
+  catEarRight: {
+    transform: [{ rotate: '18deg' }],
   },
   mainCircleInner: {
     width: 146,
@@ -637,10 +1118,22 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginTop: 0,
   },
+  mainCirclePawBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 12,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
   scoreSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    marginTop: 14,
+    marginTop: 10,
     textAlign: 'center',
     paddingHorizontal: 20,
   },
@@ -680,16 +1173,16 @@ const styles = StyleSheet.create({
   // ===== Assessment Card =====
   assessmentCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 24,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#DCEFE9',
+    borderColor: '#E7EFEA',
     shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 1,
   },
   assessmentCardRow: {
     flexDirection: 'row',
@@ -711,11 +1204,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
+  riskSnapshotInline: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#EEF5F3',
+  },
   viewResultBtn: {
     flex: 1,
-    backgroundColor: '#0F766E',
-    paddingVertical: 12,
-    borderRadius: 14,
+    backgroundColor: '#138A7B',
+    paddingVertical: 11,
+    borderRadius: 12,
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
@@ -727,19 +1226,19 @@ const styles = StyleSheet.create({
   },
   viewHistoryBtn: {
     flex: 1,
-    backgroundColor: '#8ED5C8',
-    paddingVertical: 12,
-    borderRadius: 14,
+    backgroundColor: '#EAF4F1',
+    paddingVertical: 11,
+    borderRadius: 12,
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#D7ECE5',
+    borderColor: '#DCEAE6',
   },
   viewHistoryBtnText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#0C5A58',
+    color: '#1A6D67',
   },
 
   // ===== Section Headers =====
@@ -747,8 +1246,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-    marginTop: 4,
+    marginBottom: 10,
+    marginTop: 2,
     paddingHorizontal: 4,
   },
   sectionTitleRow: {
@@ -758,8 +1257,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#37474F',
+    fontWeight: '800',
+    color: '#1F3B37',
     fontFamily: Platform.OS === 'ios' ? 'Inter-Bold' : 'sans-serif-medium',
   },
   viewDetailLink: {
@@ -772,16 +1271,16 @@ const styles = StyleSheet.create({
   // ===== Risk Card =====
   riskCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
+    borderRadius: 20,
     padding: 16,
-    marginBottom: 24,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#E6EEF0',
+    borderColor: '#E6EFEB',
     shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowRadius: 12,
+    elevation: 1,
   },
   riskFooter: {
     flexDirection: 'row',
@@ -791,6 +1290,11 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#F5F5F5',
+  },
+  riskSubDivider: {
+    height: 1,
+    backgroundColor: '#EDF3F1',
+    marginVertical: 8,
   },
   riskFooterText: {
     fontSize: 11,
@@ -802,16 +1306,16 @@ const styles = StyleSheet.create({
   // ===== Chart =====
   chartCard: {
     backgroundColor: '#ffffffff',
-    borderRadius: 18,
+    borderRadius: 20,
     padding: 16,
-    marginBottom: 24,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#ffffffff',
+    borderColor: '#E6EFEB',
     shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowRadius: 12,
+    elevation: 1,
   },
   chartHeader: {
     flexDirection: 'row',
@@ -830,6 +1334,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#F1F8F6',
   },
+  tagInactive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3ECE9',
+    opacity: 0.6,
+  },
   tagFood: {
     borderColor: '#FFD6A8',
     borderWidth: 1,
@@ -845,26 +1354,26 @@ const styles = StyleSheet.create({
   },
   periodContainer: {
     flexDirection: 'row',
-    backgroundColor: '#EEF6F3',
-    borderRadius: 16,
+    backgroundColor: '#EEF4F2',
+    borderRadius: 12,
     padding: 4,
-    marginTop: 16,
+    marginTop: 12,
   },
   periodButton: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 8,
     alignItems: 'center',
-    borderRadius: 14,
+    borderRadius: 9,
   },
   periodButtonActive: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#D7ECE5',
+    borderColor: '#DBE9E4',
   },
   periodText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#62807B',
-    fontWeight: '700',
+    fontWeight: '800',
   },
   periodTextActive: {
     color: '#0C5A58',
@@ -873,20 +1382,20 @@ const styles = StyleSheet.create({
   // ===== Action Row =====
   actionRow: {
     flexDirection: 'column',
-    gap: 12,
-    marginBottom: 20,
+    gap: 10,
+    marginBottom: 14,
   },
   actionButtonNew: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#E6EEF0',
+    borderColor: '#E6EFEB',
     shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowRadius: 11,
+    elevation: 1,
   },
   actionInner: {
     flexDirection: 'row',
@@ -897,6 +1406,252 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#37474F',
+  },
+  summaryCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E6EFEB',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 1,
+  },
+  summaryCardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1F3B37',
+    marginBottom: 12,
+  },
+  summarySubTitle: {
+    fontSize: 11,
+    color: '#6B8B93',
+    marginTop: -6,
+    marginBottom: 10,
+    fontWeight: '600',
+  },
+  summaryCardHeadRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 8,
+  },
+  summaryItem: {
+    width: '48.5%',
+    backgroundColor: '#F7FBFA',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E4EFEB',
+    paddingVertical: 11,
+    paddingHorizontal: 11,
+  },
+  summaryLabel: {
+    fontSize: 10,
+    color: '#6E8680',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  summaryValue: {
+    marginTop: 4,
+    fontSize: 17,
+    color: '#0C5A58',
+    fontWeight: '800',
+  },
+  inlineMetricRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  inlineMetric: {
+    fontSize: 11,
+    color: '#00695C',
+    fontWeight: '700',
+    backgroundColor: '#ECF8F5',
+    borderWidth: 1,
+    borderColor: '#D7ECE5',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  summaryFootnote: {
+    marginTop: 10,
+    fontSize: 11,
+    color: '#607D8B',
+    fontWeight: '600',
+  },
+  weeklyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EDF3F1',
+  },
+  weeklyLabel: {
+    marginLeft: 8,
+    flex: 1,
+    fontSize: 12,
+    color: '#455A64',
+    fontWeight: '700',
+  },
+  weeklyValue: {
+    fontSize: 12,
+    color: '#004D40',
+    fontWeight: '800',
+  },
+  healthScoreWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  breakdownWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  metricList: {
+    flex: 1,
+    gap: 6,
+  },
+  metricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F7FBFA',
+    borderWidth: 1,
+    borderColor: '#E4EFEB',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  metricLabel: {
+    fontSize: 12,
+    color: '#37474F',
+    fontWeight: '800',
+  },
+  metricDesc: {
+    fontSize: 10,
+    color: '#8A9A98',
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  metricValue: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  metricScoreNum: {
+    fontSize: 10,
+    color: '#90A4AE',
+    marginTop: 2,
+    fontWeight: '700',
+  },
+  chartMiniSurface: {
+    borderWidth: 1,
+    borderColor: '#EDF3F1',
+    borderRadius: 14,
+    backgroundColor: '#FBFEFD',
+    padding: 4,
+  },
+  donutChartBox: {
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: '#E4EFEB',
+    borderRadius: 16,
+    backgroundColor: '#FBFEFD',
+    padding: 6,
+  },
+  donutCenterLabel: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+  },
+  donutCenterValue: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0F766E',
+    lineHeight: 18,
+  },
+  donutCenterText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#78909C',
+    marginTop: 1,
+  },
+  chipButton: {
+    backgroundColor: '#ECF8F5',
+    borderWidth: 1,
+    borderColor: '#D7ECE5',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  chipButtonActive: {
+    backgroundColor: '#0F766E',
+    borderColor: '#0F766E',
+  },
+  chipText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#0C5A58',
+  },
+  chipTextActive: {
+    color: '#FFFFFF',
+  },
+  eventBarRow: {
+    marginBottom: 10,
+  },
+  eventBarHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  eventBarLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#37474F',
+  },
+  eventBarValue: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#004D40',
+  },
+  eventBarTrack: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#ECF1F0',
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  eventBarFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  eventLineChartWrap: {
+    marginTop: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E7F1EE',
+    backgroundColor: '#FCFFFE',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
   },
 
   // Paw Progress / Behavior Insight Styles (Merged from CameraScreen)

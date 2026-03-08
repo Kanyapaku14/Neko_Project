@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CatPickerModal.js
  *
  * Modal for selecting which cat was detected in a pending identity event.
@@ -18,9 +18,13 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import { CAMERA_API_BASE } from '../../config/cameraApi';
+import supabase from '../../screens/config/supabaseClient';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
+const VIDEO_SERVER_BASE = CAMERA_API_BASE;
 
 const BEHAVIOR_ICON_MAP = {
     vomiting: { icon: 'emoticon-sick-outline', color: '#D32F2F' },
@@ -49,7 +53,12 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
     const rejectPressAnim = useRef(new Animated.Value(0)).current;
     const skipPressAnim = useRef(new Animated.Value(0)).current;
     const closePressAnim = useRef(new Animated.Value(0)).current;
+    const [selectedSnapshotIdx, setSelectedSnapshotIdx] = React.useState(null);
     const isSubmitting = submittingAction !== null;
+    const fallbackSnapshotUri = React.useMemo(
+        () => `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${encodeURIComponent(alert?.timestamp || alert?.id || 'latest')}`,
+        [alert?.timestamp, alert?.id]
+    );
 
     React.useEffect(() => {
         return () => {
@@ -98,12 +107,17 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
         }
     }, [visible, modalOpacity, modalScale]);
 
+    React.useEffect(() => {
+        if (visible) setSelectedSnapshotIdx(null);
+    }, [visible]);
+
     if (!alert) return null;
 
     const { behaviorLabel, confidence, cropSnapshot, multiSnapshots } = alert;
     const isMultiMode = Array.isArray(multiSnapshots) && multiSnapshots.length >= 2;
     const confidencePct = confidence != null ? Math.round(confidence * 100) : null;
     const { icon: behaviorIcon, color: behaviorColor } = getBehaviorIcon(behaviorLabel);
+    const previewSnapshotUri = cropSnapshot || fallbackSnapshotUri;
 
     const handlePickCat = (catId) => {
         if (isSubmitting) return;
@@ -119,15 +133,12 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
         setDropdownOpen(false);
     };
 
-    // สำหรับโหมด multi-snapshot: สลับรูปที่เลือก์ (0 หรือ 1)
-    const [selectedSnapshotIdx, setSelectedSnapshotIdx] = React.useState(null);
-    React.useEffect(() => { if (visible) setSelectedSnapshotIdx(null); }, [visible]);
-
+    // à¸ªà¸³à¸«à¸£à¸±à¸šà¹‚à¸«à¸¡à¸” multi-snapshot: à¸ªà¸¥à¸±à¸šà¸£à¸¹à¸›à¸—à¸µà¹ˆà¹€à¸¥à¸·à¸­à¸à¹Œ (0 à¸«à¸£à¸·à¸­ 1)
     const handleConfirmMulti = async () => {
         if (selectedSnapshotIdx === null || !Array.isArray(multiSnapshots)) return;
         const chosen = multiSnapshots[selectedSnapshotIdx];
-        // resolve กลับเป็น "cat ที่เป็นของเรา" คือ cat ใน selectedIds และ unknown คือตัวที่ไม่ใช่
-        // นำ cat ของ user ไปให้ onSelect (cat ที่ควรจะเป็น "ตัวที่ user เลือก")
+        // resolve à¸à¸¥à¸±à¸šà¹€à¸›à¹‡à¸™ "cat à¸—à¸µà¹ˆà¹€à¸›à¹‡à¸™à¸‚à¸­à¸‡à¹€à¸£à¸²" à¸„à¸·à¸­ cat à¹ƒà¸™ selectedIds à¹à¸¥à¸° unknown à¸„à¸·à¸­à¸•à¸±à¸§à¸—à¸µà¹ˆà¹„à¸¡à¹ˆà¹ƒà¸Šà¹ˆ
+        // à¸™à¸³ cat à¸‚à¸­à¸‡ user à¹„à¸›à¹ƒà¸«à¹‰ onSelect (cat à¸—à¸µà¹ˆà¸„à¸§à¸£à¸ˆà¸°à¹€à¸›à¹‡à¸™ "à¸•à¸±à¸§à¸—à¸µà¹ˆ user à¹€à¸¥à¸·à¸­à¸")
         const myCatId = selectedCatId || cats[0]?.id || null;
         if (!myCatId) return;
         await runAction('confirm', async () => {
@@ -169,7 +180,9 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
         if (!selectedCatId) return;
         await runAction('confirm', async () => {
             try {
-                await AsyncStorage.setItem('last_selected_cat_id', selectedCatId);
+                const { data: { session } } = await supabase.auth.getSession();
+                const scopedLastCatKey = session?.user?.id ? `last_selected_cat_id:${session.user.id}` : 'last_selected_cat_id';
+                await AsyncStorage.setItem(scopedLastCatKey, selectedCatId);
             } catch (e) {
                 // no-op
             }
@@ -255,7 +268,7 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                         {isMultiMode ? (
                             <>
                                 <Text style={[styles.instructionText, { fontWeight: '700', color: '#1E293B', marginBottom: 10 }]}>
-                                    Which of these cats is yours? 🐱
+                                    Which of these cats is yours? ðŸ±
                                 </Text>
                                 <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
                                     {multiSnapshots.slice(0, 2).map((snap, idx) => (
@@ -293,14 +306,7 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                             </>
                         ) : (
                             <View style={styles.detectionCard}>
-                                {cropSnapshot ? (
-                                    <Image source={{ uri: cropSnapshot }} style={styles.snapshot} resizeMode="cover" />
-                                ) : (
-                                    <View style={styles.snapshotPlaceholder}>
-                                        <MaterialCommunityIcons name="camera-off-outline" size={32} color="#B0BEC5" />
-                                        <Text style={styles.snapshotPlaceholderText}>No image available</Text>
-                                    </View>
-                                )}
+                                <Image source={{ uri: previewSnapshotUri }} style={styles.snapshot} resizeMode="cover" />
                                 <View style={styles.infoRow}>
                                     <View style={[styles.behaviorBadge, { backgroundColor: `${behaviorColor}20` }]}>
                                         <MaterialCommunityIcons name={behaviorIcon} size={18} color={behaviorColor} />
@@ -699,3 +705,4 @@ const styles = StyleSheet.create({
         borderRadius: 12,
     },
 });
+

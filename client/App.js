@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, ActivityIndicator, AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 // Import SafeAreaProvider here
@@ -38,6 +38,7 @@ import RankingScreen from './src/screens/RankingScreen';
 import CommunityProfile from './src/screens/CommunityProfile';
 import { GlobalAlertQueueProvider } from './src/services/GlobalAlertQueue';
 import AlertRepository from './src/services/AlertRepository';
+import NotificationService from './src/services/NotificationService';
 import AlertScreen from './src/screens/AlertScreen';
 import EventDetailScreen from './src/screens/EventDetailScreen';
 
@@ -69,6 +70,7 @@ export default function App() {
   const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
   const [profileLoading, setProfileLoading] = useState(false); // ✅ Track if checking profile
   const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null); // null until loaded
+  const notificationResponseSubRef = useRef(null);
 
   // Fix Logout: Should actually sign out
   const handleSignOut = async () => {
@@ -86,20 +88,92 @@ export default function App() {
 
   const navigateToLogDaily = () => setAuthScreen('LogDaily');
   const navigateToHome = () => setAuthScreen('Home');
+  const getCurrentAuthScreenName = () => (typeof authScreen === 'object' ? authScreen.screen : authScreen);
+  const navigateAuth = (screen, params) => {
+    const targetScreen = typeof screen === 'object' ? screen?.screen : screen;
+    const targetParams = typeof screen === 'object' ? (screen?.params || params) : params;
+    if (!targetScreen) return;
+
+    if (targetScreen === 'Alert') {
+      const current = getCurrentAuthScreenName();
+      const currentParams = typeof authScreen === 'object' ? authScreen.params : {};
+      const computedReturnTo =
+        targetParams?.returnTo ||
+        (current === 'Alert' ? currentParams?.returnTo : current) ||
+        'Camera';
+      setAuthScreen({
+        screen: 'Alert',
+        params: { ...(targetParams || {}), returnTo: computedReturnTo },
+      });
+      return;
+    }
+
+    if (targetScreen === 'Setting') {
+      const current = getCurrentAuthScreenName();
+      const currentParams = typeof authScreen === 'object' ? authScreen.params : {};
+      const computedReturnTo =
+        targetParams?.returnTo ||
+        (current === 'Setting' ? currentParams?.returnTo : current) ||
+        'Home';
+      setAuthScreen({
+        screen: 'Setting',
+        params: { ...(targetParams || {}), returnTo: computedReturnTo },
+      });
+      return;
+    }
+
+    setAuthScreen(targetParams ? { screen: targetScreen, params: targetParams } : targetScreen);
+  };
+
+  const clearStaleAuthSession = async () => {
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch (_) { }
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const staleAuthKeys = keys.filter((k) => k.includes('supabase') || k.includes('-auth-token') || k.startsWith('sb-'));
+      if (staleAuthKeys.length > 0) {
+        await AsyncStorage.multiRemove(staleAuthKeys);
+      }
+    } catch (_) { }
+    setSession(null);
+    setAuthScreen('Home');
+    setCurrentScreen('SignIn');
+  };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (error) {
-        supabase.auth.signOut();
-        setSession(null);
-      } else {
-        setSession(session);
-        if (session) checkUserProfileStatus(session); // Check if new user
+    const handleSessionBootstrap = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          const msg = String(error?.message || '');
+          if (msg.includes('Invalid Refresh Token') || msg.includes('Refresh Token Not Found')) {
+            await clearStaleAuthSession();
+          } else {
+            setSession(null);
+          }
+        } else {
+          setSession(session || null);
+          if (session) checkUserProfileStatus(session);
+        }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
+    };
+
+    handleSessionBootstrap();
+
+    const appStateSub = AppState.addEventListener('change', async (state) => {
+      if (state === 'active') {
+        supabase.auth.startAutoRefresh();
+        await NotificationService.markUserActiveNow();
+      } else {
+        supabase.auth.stopAutoRefresh();
+        await NotificationService.scheduleInactivityReminder();
+      }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       if (session) {
         checkUserProfileStatus(session);
@@ -108,8 +182,45 @@ export default function App() {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      appStateSub?.remove?.();
+    };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unsubscribeNotification = () => { };
+    const bootstrapNotifications = async () => {
+      await NotificationService.init();
+      if (session?.user?.id) {
+        await NotificationService.setScope(session.user.id);
+      } else {
+        await NotificationService.setScope('anonymous');
+      }
+      await NotificationService.markUserActiveNow();
+      await NotificationService.maybeSendCatchupReminder();
+
+      const initialTarget = await NotificationService.getInitialNotificationTarget();
+      if (!cancelled && initialTarget && session?.user?.id) {
+        navigateAuth(String(initialTarget));
+      }
+
+      unsubscribeNotification = NotificationService.registerNavigationListener((target) => {
+        if (!session?.user?.id) return;
+        navigateAuth(target);
+      });
+      notificationResponseSubRef.current = { remove: unsubscribeNotification };
+    };
+
+    bootstrapNotifications();
+    return () => {
+      cancelled = true;
+      notificationResponseSubRef.current?.remove?.();
+      notificationResponseSubRef.current = null;
+      NotificationService.dispose();
+    };
+  }, [session?.user?.id]);
 
   useEffect(() => {
     // Load camera intro status
@@ -127,7 +238,10 @@ export default function App() {
   useEffect(() => {
     AlertRepository.init();
     if (session?.user?.id) {
+      NotificationService.setScope(session.user.id);
       AlertRepository.syncFromRemote();
+    } else {
+      NotificationService.setScope('anonymous');
     }
   }, [session?.user?.id]);
 
@@ -236,18 +350,18 @@ export default function App() {
       if (currentScreenName === 'Setting') {
         return <SettingScreen
           session={session}
-          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
           onLogout={handleSignOut}
-          onBack={() => setAuthScreen('Home')}
+          onBack={() => setAuthScreen(screenParams?.returnTo || 'Home')}
         />;
       }
       if (currentScreenName === 'LogDaily') {
         return <LogDailyNormal
           session={session}
-          catId={catId}
-          catName={catName}
+          catId={screenParams?.catId || catId}
+          catName={screenParams?.catName || catName}
           onBack={() => setAuthScreen('Calendar')}
-          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
           initialDate={screenParams?.date || null}
         />;
       }
@@ -261,7 +375,7 @@ export default function App() {
       if (currentScreenName === 'Calendar') {
         return <CalendarScreen
           session={session}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
           initialDate={screenParams?.date || null}
         />;
       }
@@ -269,35 +383,35 @@ export default function App() {
         return <ResultScreen
           onBack={() => setAuthScreen('Home')}
           onSave={() => setAuthScreen('Home')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
         />;
       }
       if (currentScreenName === 'Overview') {
         return <Dashboard
           session={session}
           onBack={() => setAuthScreen('Home')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
         />;
       }
       if (currentScreenName === 'MainTabNavigator') {
         return <MainTabNavigator
           session={session}
           onBack={() => setAuthScreen('Home')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
         />;
       }
       if (currentScreenName === 'Community') {
         return <CommunityScreen
           session={session}
           onBack={() => setAuthScreen('MainTabNavigator')}
-          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
         />;
       }
       if (currentScreenName === 'Ranking') {
         return <RankingScreen
           session={session}
           onBack={() => setAuthScreen('MainTabNavigator')}
-          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
         />;
       }
       if (currentScreenName === 'CommunityProfile') {
@@ -305,17 +419,17 @@ export default function App() {
           session={session}
           userId={screenParams?.userId}
           onBack={() => setAuthScreen('MainTabNavigator')}
-          onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
         />;
       }
       if (currentScreenName === 'Camera') {
-        return <CameraScreen session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+        return <CameraScreen session={session} onNavigate={(screen, params) => navigateAuth(screen, params)} />;
       }
       if (currentScreenName === 'Gallery') {
-        return <GalleryScreen session={session} onBack={() => setAuthScreen('Camera')} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+        return <GalleryScreen session={session} onBack={() => setAuthScreen('Camera')} onNavigate={(screen, params) => navigateAuth(screen, params)} />;
       }
       if (currentScreenName === 'Setcamera') {
-        return <SetcameraScreen session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+        return <SetcameraScreen session={session} params={screenParams} onNavigate={(screen, params) => navigateAuth(screen, params)} />;
       }
       if (currentScreenName === 'PhotoCheck') {
         return <PhotoCheck session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
@@ -324,10 +438,10 @@ export default function App() {
         return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} result={screenParams?.result} />;
       }
       if (currentScreenName === 'Alert') {
-        return <AlertScreen onBack={() => setAuthScreen('Camera')} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
+        return <AlertScreen onBack={() => setAuthScreen(screenParams?.returnTo || 'Camera')} onNavigate={(screen, params) => navigateAuth(screen, params)} />;
       }
       if (currentScreenName === 'EventDetail') {
-        return <EventDetailScreen onBack={() => setAuthScreen('Alert')} alertData={screenParams?.alertData} />;
+        return <EventDetailScreen onBack={() => navigateAuth('Alert', { returnTo: screenParams?.returnTo || 'Camera' })} alertData={screenParams?.alertData} />;
       }
 
       if (currentScreenName === 'Tutorail') {
@@ -341,7 +455,7 @@ export default function App() {
           onLogDaily={() => setAuthScreen('LogDaily')}
           onAssess={() => setAuthScreen('Result')}
           onSetting={() => setAuthScreen('Setting')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
         />;
       }
 
@@ -350,7 +464,7 @@ export default function App() {
         return <Dashboard
           session={session}
           onBack={() => setAuthScreen('Home')}
-          onNavigate={(screen) => setAuthScreen(screen)}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
         />;
       }
 
@@ -368,10 +482,16 @@ export default function App() {
             session={session}
             initialStep={screenParams?.initialStep}
             brand={screenParams?.brand}
+            returnTo={screenParams?.returnTo}
+            confirmBackToPrevious={screenParams?.confirmBackToPrevious}
             mode={screenParams?.mode}
             isHideBackButton={screenParams?.isHideBackButton}
             isHideSkipButton={screenParams?.isHideSkipButton}
-            onBack={() => setAuthScreen(screenParams?.returnTo || 'Setting')}
+            onBack={() => {
+              const target = screenParams?.returnTo || 'Setting';
+              const params = screenParams?.returnParams;
+              setAuthScreen(params ? { screen: target, params } : target);
+            }}
             onConfirm={() => setAuthScreen(screenParams?.returnTo || 'Camera')}
           />
         );
@@ -383,7 +503,7 @@ export default function App() {
         onLogDaily={() => setAuthScreen('LogDaily')}
         onAssess={() => setAuthScreen('Result')}
         onSetting={() => setAuthScreen('Setting')}
-        onNavigate={(screen) => setAuthScreen(screen)}
+        onNavigate={(screen, params) => navigateAuth(screen, params)}
       />;
     }
 

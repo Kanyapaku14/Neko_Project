@@ -15,6 +15,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle } from 'react-native-svg';
 import styles from "../styles/resultStyles";
 import supabase from "./config/supabaseClient"; // 🚨 เพิ่มบรรทัดนี้เพื่อดึงฐานข้อมูล
+import AlertEngine from '../services/AlertEngine';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -139,6 +140,24 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
 
   // 🚨 สร้าง State ไว้รอรับ ID แมว
   const [catId, setCatId] = useState(route?.params?.catId || null);
+
+  const handleSaveAssessment = async () => {
+    try {
+      await AlertEngine.logEvent({
+        type: 'assessment_saved',
+        severity: 'success',
+        title: 'Assessment Saved',
+        desc: `Overall risk score: ${overallScore === 'No Data' ? '--' : overallScore}`,
+        details: summaryTitle || '',
+        dedupeKey: `assessment_saved:${catId || 'no_cat'}:${overallScore}`,
+        cooldownMs: 2 * 60 * 1000,
+      });
+    } catch (_) {
+      // keep original save flow even if alert logging fails
+    } finally {
+      if (onSave) onSave();
+    }
+  };
 
   // 🚨 Effect ที่ 1: ถ้าไม่ได้รับ catId มาจากหน้าก่อน ให้ดึงจากฐานข้อมูลเอง
   useEffect(() => {
@@ -472,7 +491,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
             marginTop: 20,
             marginBottom: 20,
           }}
-          onPress={onSave}
+          onPress={handleSaveAssessment}
           activeOpacity={0.8}
         >
           <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Save Assessment</Text>

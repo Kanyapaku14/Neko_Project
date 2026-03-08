@@ -13,7 +13,7 @@
  *   The queue automatically listens to AlertEngine via AlertEvents.IDENTITY_PENDING
  */
 
-import React, { createContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import AlertEngine, { AlertEvents } from './AlertEngine';
 import AlertRepository from './AlertRepository';
@@ -28,12 +28,26 @@ export const GlobalAlertQueueContext = createContext({
 });
 
 export function GlobalAlertQueueProvider({ children, session }) {
+    const AUTO_POPUP_COOLDOWN_MS = 45 * 1000;
+    const MAX_PENDING_QUEUE = 6;
     const [queue, setQueue] = useState([]);
     const [currentAlert, setCurrentAlert] = useState(null);
     const [catsFromDb, setCatsFromDb] = useState([]);
     const [criticalAlert, setCriticalAlert] = useState(null);
     const [dismissedCriticalIds, setDismissedCriticalIds] = useState({});
     const [autoPoppedPendingIds, setAutoPoppedPendingIds] = useState({});
+    const [snoozedGroupUntil, setSnoozedGroupUntil] = useState({});
+    const lastAutoPopupAtRef = useRef(0);
+
+    const getAlertGroupKey = useCallback((alert) => {
+        if (!alert) return null;
+        return String(
+            alert.sessionId
+            || alert.remoteReviewId
+            || alert.dedupeKey
+            || `${alert.type || 'pending'}:${alert.behaviorLabel || 'unknown'}:${alert.cameraId || 'no_camera'}`
+        );
+    }, []);
 
     useEffect(() => {
         const userScope = session?.user?.id || 'anonymous';
@@ -43,6 +57,8 @@ export function GlobalAlertQueueProvider({ children, session }) {
         setCriticalAlert(null);
         setDismissedCriticalIds({});
         setAutoPoppedPendingIds({});
+        setSnoozedGroupUntil({});
+        lastAutoPopupAtRef.current = 0;
     }, [session?.user?.id]);
 
     const findTopCritical = useCallback(() => {
@@ -102,20 +118,30 @@ export function GlobalAlertQueueProvider({ children, session }) {
                 // Already auto-popped in this app session; keep it in alert list only.
                 return;
             }
+            const groupKey = getAlertGroupKey(alert);
+            const now = Date.now();
+            if (groupKey && Number(snoozedGroupUntil[groupKey] || 0) > now) {
+                return;
+            }
+            if (now - lastAutoPopupAtRef.current < AUTO_POPUP_COOLDOWN_MS) {
+                return;
+            }
 
             setQueue((prevQueue) => {
                 // Prevent duplicate enqueuing of the exact same alert ID
                 if (prevQueue.some(a => a.id === alert.id) || currentAlert?.id === alert.id) {
                     return prevQueue;
                 }
-                return [...prevQueue, alert];
+                // Coalesce alerts by session/group so many-cat streams don't spam popups.
+                const filtered = groupKey ? prevQueue.filter((a) => getAlertGroupKey(a) !== groupKey) : prevQueue;
+                return [...filtered, alert].slice(-MAX_PENDING_QUEUE);
             });
             setAutoPoppedPendingIds((prev) => ({ ...prev, [alert.id]: true }));
         };
 
         AlertEngine.on(AlertEvents.IDENTITY_PENDING, handleNewPendingAlert);
         return () => AlertEngine.off(AlertEvents.IDENTITY_PENDING, handleNewPendingAlert);
-    }, [currentAlert, autoPoppedPendingIds]);
+    }, [currentAlert, autoPoppedPendingIds, getAlertGroupKey, snoozedGroupUntil]);
 
     // Global Critical Popup: show on every screen
     useEffect(() => {
@@ -152,6 +178,7 @@ export function GlobalAlertQueueProvider({ children, session }) {
                 const nextAlert = queue[0];
                 setCurrentAlert(nextAlert);
                 setQueue((prev) => prev.slice(1));
+                lastAutoPopupAtRef.current = Date.now();
             }, 300); // 300ms transition buffer
             return () => clearTimeout(timer);
         }
@@ -205,6 +232,13 @@ export function GlobalAlertQueueProvider({ children, session }) {
         // Just hide it, keep it un-resolved. Next time they open the app,
         // it won't auto-popup (auto-popup only happens on 'IDENTITY_PENDING' emit),
         // but they can still find it in AlertScreen.
+        const groupKey = getAlertGroupKey(currentAlert);
+        if (groupKey) {
+            setSnoozedGroupUntil((prev) => ({
+                ...prev,
+                [groupKey]: Date.now() + (5 * 60 * 1000),
+            }));
+        }
         setCurrentAlert(null);
     };
 

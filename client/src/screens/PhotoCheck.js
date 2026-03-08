@@ -164,6 +164,7 @@ export default function PhotoCheck({ onNavigate, session }) {
             <HomeHeader
                 profileImage={null}
                 profileName={null}
+                onNotify={() => onNavigate && onNavigate('Alert')}
                 onSetting={() => onNavigate('UserInfo')}
             />
 

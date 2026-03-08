@@ -18,10 +18,12 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from 'expo-image-picker';
 
 export default function AddPostScreen({ onClose, onSubmit, initialPost, userProfile, currentUserId }) {
-  const [text, setText] = useState(initialPost ? initialPost.content : "");
-  const [image, setImage] = useState(initialPost ? initialPost.image : "");
+  const [text, setText] = useState(initialPost?.content ?? "");
+  const [image, setImage] = useState(initialPost?.image ?? "");
 
   const isEditing = !!initialPost;
+  const trimmedText = String(text ?? "").trim();
+  const canSubmit = !!trimmedText || !!image;
 
   // Resolve User Data (Priority: InitialPost > UserProfile > Default)
   const displayUser = {
@@ -30,7 +32,7 @@ export default function AddPostScreen({ onClose, onSubmit, initialPost, userProf
   };
 
   const handlePost = () => {
-    if (!text.trim()) return;
+    if (!canSubmit) return;
 
     const newPost = {
       id: initialPost ? initialPost.id : Date.now().toString(), // Keep old ID if editing
@@ -39,7 +41,7 @@ export default function AddPostScreen({ onClose, onSubmit, initialPost, userProf
         name: displayUser.name,
         avatar: displayUser.avatar,
       },
-      content: text,
+      content: trimmedText,
       image: image || null,
       likes: initialPost ? initialPost.likes : [],
       comments: initialPost ? initialPost.comments : [],
@@ -72,7 +74,7 @@ export default function AddPostScreen({ onClose, onSubmit, initialPost, userProf
           <Ionicons name="close" size={24} color="#546E7A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{isEditing ? "Edit Post" : "Create Post"}</Text>
-        <TouchableOpacity onPress={handlePost} style={styles.submitBtn}>
+        <TouchableOpacity onPress={handlePost} style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]} disabled={!canSubmit}>
           <Text style={styles.submitBtnText}>{isEditing ? "Update" : "Post"}</Text>
         </TouchableOpacity>
       </View>
@@ -97,7 +99,7 @@ export default function AddPostScreen({ onClose, onSubmit, initialPost, userProf
           <TextInput
             placeholder="What's making you happy today?"
             placeholderTextColor="#B0BEC5"
-            value={text}
+            value={String(text ?? "")}
             onChangeText={setText}
             multiline
             scrollEnabled={false} // Let parent ScrollView handle scrolling
@@ -169,6 +171,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
+  },
+  submitBtnDisabled: {
+    opacity: 0.45,
   },
   submitBtnText: {
     color: "#FFFFFF",
