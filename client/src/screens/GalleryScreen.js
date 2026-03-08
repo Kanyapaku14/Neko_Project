@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, Modal, ActivityIndicator, Alert, Platform, Animated, Easing, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, Modal, ActivityIndicator, Alert, Platform, Animated, Easing, useWindowDimensions, DeviceEventEmitter } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,13 +11,15 @@ import AlertEngine, { AlertEvents } from '../services/AlertEngine';
 import supabase from './config/supabaseClient';
 import AddPostScreen from './AddPostScreen';
 import HomeHeader from '../components/HomeHeader';
+import { CAMERA_API_BASE } from '../config/cameraApi';
 
 const GRID_GAP = 10;
 const GRID_PADDING = 16;
 const LIVE_WINDOW_MS = 5 * 60 * 1000;
 const SAVED_LIMIT = 500;
 const SAVED_STORAGE_KEY = 'gallery_saved_snapshots_v1';
-const VIDEO_SERVER_BASE = 'http://192.168.1.100:5000';
+
+const VIDEO_SERVER_BASE = CAMERA_API_BASE;
 const getStartOfDayIso = () => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -72,13 +74,23 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
         };
         bootstrap();
 
-        // อ่าน selectedCat จาก AsyncStorage (sync มาจาก Camera screen)
+        // à¸­à¹ˆà¸²à¸™ selectedCat à¸ˆà¸²à¸ AsyncStorage (sync à¸¡à¸²à¸ˆà¸²à¸ Camera screen)
         const loadSelectedCat = async () => {
             try {
-                const raw = await AsyncStorage.getItem('camera_selectedCats');
-                const lastId = await AsyncStorage.getItem('last_selected_cat_id');
+                const scopedSelectedCatIdKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
+                const scopedSelectedCatsKey = session?.user?.id ? `camera_selectedCats:${session.user.id}` : 'camera_selectedCats';
+                const scopedLastCatKey = session?.user?.id ? `last_selected_cat_id:${session.user.id}` : 'last_selected_cat_id';
+                const selectedCatIdFromHeader =
+                    (await AsyncStorage.getItem(scopedSelectedCatIdKey)) ||
+                    (await AsyncStorage.getItem('selectedCatId'));
+                const raw =
+                    (await AsyncStorage.getItem(scopedSelectedCatsKey)) ||
+                    (await AsyncStorage.getItem('camera_selectedCats'));
+                const lastId =
+                    (await AsyncStorage.getItem(scopedLastCatKey)) ||
+                    (await AsyncStorage.getItem('last_selected_cat_id'));
                 const ids = raw ? JSON.parse(raw) : [];
-                const catId = ids[0] || lastId || null;
+                const catId = selectedCatIdFromHeader || ids[0] || lastId || null;
                 setSelectedCatId(catId);
                 if (catId && session?.user?.id) {
                     const { data: catRow } = await supabase
@@ -93,9 +105,15 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
             loadImages();
             fetchDailyStats();
         };
+        const catChangedSub = DeviceEventEmitter.addListener('catChanged', (cat) => {
+            const nextId = cat?.id ? String(cat.id) : null;
+            setSelectedCatId(nextId);
+            setSelectedCatName(cat?.name || null);
+        });
         AlertEngine.on(AlertEvents.UPDATED, handler);
         return () => {
             cancelled = true;
+            catChangedSub.remove();
             AlertEngine.off(AlertEvents.UPDATED, handler);
         };
     }, [session?.user?.id]);
@@ -274,7 +292,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
 
                     if (!reviewErr && Array.isArray(reviews)) {
                         reviews.forEach((r) => {
-                            // กรองตาม selectedCatId: ถ้าเลือกแมวอยู่ ให้เห็นเฉพาะของแมวนั้น
+                            // à¸à¸£à¸­à¸‡à¸•à¸²à¸¡ selectedCatId: à¸–à¹‰à¸²à¹€à¸¥à¸·à¸­à¸à¹à¸¡à¸§à¸­à¸¢à¸¹à¹ˆ à¹ƒà¸«à¹‰à¹€à¸«à¹‡à¸™à¹€à¸‰à¸žà¸²à¸°à¸‚à¸­à¸‡à¹à¸¡à¸§à¸™à¸±à¹‰à¸™
                             if (selectedCatId && r.resolved_cat_id !== selectedCatId) return;
                             const fallbackUri = `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${encodeURIComponent(r.occurred_at || r.created_at || Date.now())}`;
                             const hasSnapshot = Boolean(r.snapshot_url);
@@ -533,6 +551,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                 <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
                     {/* Header */}
                     <HomeHeader
+                        onNotify={() => onNavigate && onNavigate('Alert')}
                         leftComponent={
                             <TouchableOpacity onPress={onBack} style={styles.backButton} activeOpacity={0.85}>
                                 <Ionicons name="chevron-back" size={28} color="#333" />
@@ -550,8 +569,15 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                                         {selectedCatName ? `${selectedCatName} · ${dailyStats.total}` : `${dailyStats.total}`}
                                     </Text>
                                 </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.headerNotifyButton}
+                                    onPress={() => onNavigate && onNavigate('Alert')}
+                                    activeOpacity={0.75}
+                                >
+                                    <Ionicons name="notifications-outline" size={18} color="#0C5A58" />
+                                </TouchableOpacity>
                             </View>
-                        }
+                        } 
                     />
 
                     <View style={styles.zoneSwitchWrap}>
@@ -796,9 +822,21 @@ const styles = StyleSheet.create({
         marginHorizontal: 3,
     },
     headerRight: {
-        width: 40,
+        minWidth: 84,
         height: 40,
+        flexDirection: 'row',
+        gap: 8,
         alignItems: 'flex-end',
+        justifyContent: 'center',
+    },
+    headerNotifyButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#EAF4F4',
+        borderWidth: 1,
+        borderColor: '#D2E7E6',
+        alignItems: 'center',
         justifyContent: 'center',
     },
     headerPill: {
@@ -1210,3 +1248,6 @@ const styles = StyleSheet.create({
         fontFamily: 'Inter-SemiBold',
     },
 });
+
+
+

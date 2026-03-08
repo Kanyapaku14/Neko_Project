@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../screens/config/supabaseClient';
 import { analyzeHealthLog } from '../utils/healthLogic';
 import AlertEngine from '../services/AlertEngine';
+import { CAMERA_API_BASE } from '../config/cameraApi';
 
 const CAMERA_ID_KEY = 'camera_id';
-const VIDEO_SERVER_BASE = 'http://192.168.1.100:5000';
+const VIDEO_SERVER_BASE = CAMERA_API_BASE;
 
 const normalizeBehavior = (value) => {
   const v = String(value || '').toLowerCase();
@@ -58,15 +59,18 @@ export default function useCameraData(session, cameraStatus) {
     };
 
     try {
+      const selectedCatsScopedKey = session?.user?.id ? `camera_selectedCats:${session.user.id}` : 'camera_selectedCats';
       const [mode, savedCats, storedCameraId] = await Promise.all([
         AsyncStorage.getItem('camera_monitoringMode'),
-        AsyncStorage.getItem('camera_selectedCats'),
+        AsyncStorage.getItem(selectedCatsScopedKey),
         AsyncStorage.getItem(CAMERA_ID_KEY),
       ]);
 
+      const effectiveSavedCats = savedCats || await AsyncStorage.getItem('camera_selectedCats');
+
       newData.settings = {
         monitoringMode: mode || 'multi',
-        selectedCats: savedCats ? JSON.parse(savedCats) : []
+        selectedCats: effectiveSavedCats ? JSON.parse(effectiveSavedCats) : []
       };
 
       if (session?.user) {
@@ -117,7 +121,7 @@ export default function useCameraData(session, cameraStatus) {
                 let litterCount = 0;
                 let abnormalCount = 0;
 
-                // การนับ รูบแบบ unique cat_id ที่พบใน events
+                // à¸à¸²à¸£à¸™à¸±à¸š à¸£à¸¹à¸šà¹à¸šà¸š unique cat_id à¸—à¸µà¹ˆà¸žà¸šà¹ƒà¸™ events
                 const detectedCatIds = new Set();
                 const litterEventsByCat = {};
 
@@ -134,7 +138,7 @@ export default function useCameraData(session, cameraStatus) {
                   if (e.cat_id) detectedCatIds.add(e.cat_id);
                 });
 
-                // กรณี DB มี cat_id ที่ events บอกว่าไม่ใช่แมวของ user
+                // à¸à¸£à¸“à¸µ DB à¸¡à¸µ cat_id à¸—à¸µà¹ˆ events à¸šà¸­à¸à¸§à¹ˆà¸²à¹„à¸¡à¹ˆà¹ƒà¸Šà¹ˆà¹à¸¡à¸§à¸‚à¸­à¸‡ user
                 const unknownCatEvents = aiEventsAll.filter((e) => e.cat_id && !selectedIds.includes(e.cat_id));
                 let reviewSnaps = [];
                 if (storedCameraId) {
@@ -149,13 +153,13 @@ export default function useCameraData(session, cameraStatus) {
                 }
                 if (selectedIds.length > 0 && unknownCatEvents.length > 0) {
                   const unknownIds = [...new Set(unknownCatEvents.map((e) => e.cat_id))];
-                  // ดึง snapshot จาก ai_cat_identity_review
+                  // à¸”à¸¶à¸‡ snapshot à¸ˆà¸²à¸ ai_cat_identity_review
                   if (
                     (selectedIds.length === 1 && unknownIds.length >= 2) ||
                     (selectedIds.length >= 2 && unknownIds.length >= selectedIds.length)
                   ) {
-                    // กรณี DB มี 1 แมวแต่กล้องตรวจได้ 2+ cat_id
-                    // ขึ้น popup เดียวแสดง 2 รูปพร้อมกัน ให้เลือกว่าตัวไหนคือแมวเรา
+                    // à¸à¸£à¸“à¸µ DB à¸¡à¸µ 1 à¹à¸¡à¸§à¹à¸•à¹ˆà¸à¸¥à¹‰à¸­à¸‡à¸•à¸£à¸§à¸ˆà¹„à¸”à¹‰ 2+ cat_id
+                    // à¸‚à¸¶à¹‰à¸™ popup à¹€à¸”à¸µà¸¢à¸§à¹à¸ªà¸”à¸‡ 2 à¸£à¸¹à¸›à¸žà¸£à¹‰à¸­à¸¡à¸à¸±à¸™ à¹ƒà¸«à¹‰à¹€à¸¥à¸·à¸­à¸à¸§à¹ˆà¸²à¸•à¸±à¸§à¹„à¸«à¸™à¸„à¸·à¸­à¹à¸¡à¸§à¹€à¸£à¸²
                     const multiSnapshots = unknownIds.slice(0, 2).map((uid) => {
                       const evt = unknownCatEvents.find((e) => e.cat_id === uid);
                       const snap = reviewSnaps?.find((r) => !r.pred_cat_id || r.pred_cat_id === uid);
@@ -171,7 +175,7 @@ export default function useCameraData(session, cameraStatus) {
                       behaviorLabel: (selectedIds.length >= 2 && unknownIds.length === selectedIds.length) ? 'identity_map' : 'unknown',
                       confidence: 0.5,
                       cropSnapshot: multiSnapshots[0]?.snapshot_url || `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`,
-                      multiSnapshots,   // ← field ใหม่: array ของ 2 รูป
+                      multiSnapshots,   // â† field à¹ƒà¸«à¸¡à¹ˆ: array à¸‚à¸­à¸‡ 2 à¸£à¸¹à¸›
                       sessionId: pairDedupeKey,
                       source: (selectedIds.length >= 2 && unknownIds.length === selectedIds.length) ? 'identity_map_exact' : 'useCameraData_dual',
                       isAbnormal: false,
@@ -179,7 +183,7 @@ export default function useCameraData(session, cameraStatus) {
                       cooldownMs: 15 * 60 * 1000,
                     });
                   } else {
-                    // กรณี DB มี 2+ แมว: ขึ้น popup แยกตาม cat_id
+                    // à¸à¸£à¸“à¸µ DB à¸¡à¸µ 2+ à¹à¸¡à¸§: à¸‚à¸¶à¹‰à¸™ popup à¹à¸¢à¸à¸•à¸²à¸¡ cat_id
                     unknownIds.slice(0, 3).forEach((unknownId) => {
                       const sample = unknownCatEvents.find((e) => e.cat_id === unknownId);
                       const snap = reviewSnaps?.find((r) =>
@@ -202,14 +206,14 @@ export default function useCameraData(session, cameraStatus) {
                   }
                 }
 
-                // กรณี litter เยอะมาก (ตั้งแต่ 5 ครั้ง/วัน) → ถามว่าแมวตัวไหนใช้มากสุด
+                // à¸à¸£à¸“à¸µ litter à¹€à¸¢à¸­à¸°à¸¡à¸²à¸ (à¸•à¸±à¹‰à¸‡à¹à¸•à¹ˆ 5 à¸„à¸£à¸±à¹‰à¸‡/à¸§à¸±à¸™) â†’ à¸–à¸²à¸¡à¸§à¹ˆà¸²à¹à¸¡à¸§à¸•à¸±à¸§à¹„à¸«à¸™à¹ƒà¸Šà¹‰à¸¡à¸²à¸à¸ªà¸¸à¸”
                 const LITTER_ALERT_THRESHOLD = 5;
                 if (litterCount >= LITTER_ALERT_THRESHOLD) {
                   const top = Object.entries(litterEventsByCat).sort((a, b) => b[1] - a[1])[0];
                   const topCatId = top?.[0] || null;
                   const topCount = Number(top?.[1] || 0);
                   const topLabel = topCatId && selectedIds.includes(topCatId) ? `cat ${topCatId.slice(0, 6)}` : 'unknown cat';
-                  // ai_cat_events ไม่มี snapshot_url — ใช้ null หรือดึงจาก identity_review
+                  // ai_cat_events à¹„à¸¡à¹ˆà¸¡à¸µ snapshot_url â€” à¹ƒà¸Šà¹‰ null à¸«à¸£à¸·à¸­à¸”à¸¶à¸‡à¸ˆà¸²à¸ identity_review
                   AlertEngine.logEvent({
                     type: 'litter_summary',
                     severity: 'info',
@@ -259,7 +263,7 @@ export default function useCameraData(session, cameraStatus) {
                   totals: { feeding: totalFeed, litter: totalLitter },
                 };
 
-                // สร้าง recentActivities ด้วย icon/color ที่ถูกต้อง ครบทุก behavior
+                // à¸ªà¸£à¹‰à¸²à¸‡ recentActivities à¸”à¹‰à¸§à¸¢ icon/color à¸—à¸µà¹ˆà¸–à¸¹à¸à¸•à¹‰à¸­à¸‡ à¸„à¸£à¸šà¸—à¸¸à¸ behavior
                 const behaviorDisplay = (b) => {
                   switch (normalizeBehavior(b)) {
                     case 'eat': return { label: 'Eating', icon: 'food-apple', color: '#81C784' };
@@ -380,3 +384,4 @@ export default function useCameraData(session, cameraStatus) {
 
   return { data, lastUpdated, refetch: fetchData };
 }
+

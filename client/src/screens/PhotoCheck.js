@@ -7,6 +7,23 @@ import HomeHeader from '../components/HomeHeader';
 import BottomNav from '../components/BottomNav';
 import styles from '../styles/homeStyles';
 import { Ionicons } from '@expo/vector-icons';
+<<<<<<< HEAD
+import AlertEngine from '../services/AlertEngine';
+
+export default function PhotoCheck({ onNavigate }) {
+    const handleStartAiCheck = () => {
+        AlertEngine.logEvent({
+            type: 'photo_check_started',
+            severity: 'info',
+            title: 'Photo Check Started',
+            desc: 'User started AI photo health screening.',
+            dedupeKey: `photo_check_started:${new Date().toISOString().slice(0, 16)}`,
+            cooldownMs: 45 * 1000,
+        }).catch(() => {});
+        onNavigate('AnalysisResult');
+    };
+
+=======
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import supabase from './config/supabaseClient';
@@ -157,11 +174,13 @@ export default function PhotoCheck({ onNavigate, session }) {
     };
 
     // ── Render ────────────────────────────────────────────────────────────────
+>>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
     return (
         <SafeAreaView style={styles.container}>
             <HomeHeader
                 profileImage={null}
                 profileName={null}
+                onNotify={() => onNavigate && onNavigate('Alert')}
                 onSetting={() => onNavigate('UserInfo')}
             />
 
@@ -272,7 +291,10 @@ export default function PhotoCheck({ onNavigate, session }) {
                         elevation: phoneCameraEnabled ? 5 : 0,
                     }}
                     onPress={handleStartAiCheck}
+<<<<<<< HEAD
+=======
                     disabled={loading}
+>>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
                 >
                     {loading ? (
                         <ActivityIndicator color="#FFF" style={{ marginRight: 10 }} />

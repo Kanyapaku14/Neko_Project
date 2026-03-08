@@ -27,6 +27,12 @@ const { width } = Dimensions.get("window");
 
 // 🚨 URL ของเซิร์ฟเวอร์สตรีมภาพ (ตรวจสอบ IP ให้ตรงกับคอมพิวเตอร์ของคุณ)
 <<<<<<< HEAD
+const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed';
+
+// 🚨 ประกาศตัวแปรลิงก์กล้อง RTSP ที่นี่ (เพื่อเอาไปบันทึกลง Database)
+const CAMERA_RTSP_URL = 'r  tsp://testt1:1234test@192.168.1.102:553/stream';
+=======
+<<<<<<< HEAD
 const VIDEO_STREAM_URL = 'http://192.168.1.131:5000/api/video_feed';
 
 // 🚨 ประกาศตัวแปรลิงก์กล้อง RTSP ที่นี่ (เพื่อเอาไปบันทึกลง Database)
@@ -38,6 +44,7 @@ const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
 // 🚨 ประกาศตัวแปรลิงก์กล้อง RTSP ที่นี่ (เพื่อเอาไปบันทึกลง Database)
 const CAMERA_RTSP_URL = "rtsp://testt1:1234test@192.168.1.102:554/stream2"
 >>>>>>> 228e0ead3f779122e0f5fb5aa2df96a172abfbee
+>>>>>>> e01016a0670fdc2c582b68e3eb37ddb6010785e7
 
 const BRANDS = [
     { id: "tapo", name: "TP-Link Tapo", icon: "link-variant" },
@@ -51,8 +58,6 @@ export default function Phone({
     onConfirm,
     initialStep,
     brand,
-    returnTo,
-    confirmBackToPrevious = false,
     mode = 'new',
     isHideBackButton = false,
     isHideSkipButton = false
@@ -81,15 +86,12 @@ export default function Phone({
     const [activeZoneType, setActiveZoneType] = useState('feeding');
     const [isDrawing, setIsDrawing] = useState(false);
     const [showUpdateConfirmModal, setShowUpdateConfirmModal] = useState(false);
-    const [showAbortConnectModal, setShowAbortConnectModal] = useState(false);
     const [previewSize, setPreviewSize] = useState({ width: 1, height: 1 });
     const [inlineNotice, setInlineNotice] = useState(null);
     const startPoint = useRef({ x: 0, y: 0 });
 
     // ล็อค URL ไว้ไม่ให้ Re-render พร่ำเพรื่อ
-    const [stableStreamUrl] = useState(`${VIDEO_STREAM_URL}&t=${new Date().getTime()}`);
-    const [latestSnapshotUrl, setLatestSnapshotUrl] = useState(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
-    const [zoneStatus, setZoneStatus] = useState({ camera_moved: false, zones_configured: 0 });
+    const [stableStreamUrl] = useState(`${VIDEO_STREAM_URL}?t=${new Date().getTime()}`);
 
     // Animations
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -118,30 +120,6 @@ export default function Phone({
         loadSavedZones();
     }, []);
 
-    const refreshLatestSnapshot = async () => {
-        setLatestSnapshotUrl(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
-        try {
-            const cameraId = await AsyncStorage.getItem('camera_id');
-            const url = cameraId
-                ? `${VIDEO_SERVER_BASE}/api/zone_status?camera_id=${encodeURIComponent(cameraId)}`
-                : `${VIDEO_SERVER_BASE}/api/zone_status`;
-            const res = await fetch(url);
-            const st = await res.json();
-            setZoneStatus({
-                camera_moved: Boolean(st?.camera_moved),
-                zones_configured: Number(st?.zones_configured || 0),
-            });
-        } catch (_e) {
-            // ignore
-        }
-    };
-
-    useEffect(() => {
-        refreshLatestSnapshot();
-        const t = setInterval(refreshLatestSnapshot, 15000);
-        return () => clearInterval(t);
-    }, []);
-
     useEffect(() => {
         if (selectedBrand) {
             Animated.spring(loginRevealAnim, { toValue: 1, tension: 50, friction: 7, useNativeDriver: true }).start();
@@ -152,17 +130,35 @@ export default function Phone({
 
     // 🚨 ส่วนนี้ถูกแยกออกมาเพื่อบังคับการแสดงผลกล้องให้เหมือนกัน 100% ทุกจุด
     const LiveVideoFeed = () => {
+        const htmlContent = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                <style>
+                    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #E5E7EB; overflow: hidden; }
+                    img { width: 100%; height: 100%; object-fit: cover; }
+                </style>
+            </head>
+            <body>
+                <img src="${stableStreamUrl}" onerror="console.log('Stream Failed')" />
+            </body>
+            </html>
+        `;
+
         return (
             <WebView
-                source={{ uri: stableStreamUrl }}
+                originWhitelist={['*']}
+                source={{ html: htmlContent, baseUrl: 'http://192.168.1.159:3000' }}
                 style={{ flex: 1, width: '100%', height: '100%', backgroundColor: 'transparent' }}
                 scrollEnabled={false}
                 bounces={false}
                 showsVerticalScrollIndicator={false}
                 showsHorizontalScrollIndicator={false}
-                originWhitelist={['*']}
                 mixedContentMode="always"
                 allowsInlineMediaPlayback={true}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
             />
         );
     };
@@ -255,17 +251,6 @@ export default function Phone({
     };
 
     const handlePrevStep = () => {
-        const shouldReturnToSetcameraDirectly = returnTo === 'Setcamera';
-
-        if (shouldReturnToSetcameraDirectly) {
-            if (confirmBackToPrevious) {
-                setShowAbortConnectModal(true);
-                return;
-            }
-            onBack();
-            return;
-        }
-
         if (isUpdateMode) { onBack(); return; }
         if (currentStep === 1) onBack();
         else setCurrentStep(prev => prev - 1);
@@ -305,29 +290,11 @@ export default function Phone({
         try {
             const cameraId = await AsyncStorage.getItem('camera_id');
             if (!cameraId) return;
-            let frameSig = null;
-            let frameSigTs = null;
-            try {
-                const sigRes = await fetch(`${VIDEO_SERVER_BASE}/api/frame_signature`);
-                const sigJson = await sigRes.json();
-                frameSig = sigJson?.signature || null;
-                frameSigTs = sigJson?.frame_ts || null;
-            } catch (_e) { }
             await supabase.from('camera_zones').delete().eq('camera_id', cameraId).in('zone_type', ['food', 'litter']);
 
             const rows = [];
-            if (feedingZone.w > 0 && feedingZone.h > 0) {
-                const polygon = rectToPolygon(feedingZone, 'food');
-                polygon.frame_signature = frameSig;
-                polygon.frame_signature_ts = frameSigTs;
-                rows.push({ camera_id: cameraId, zone_type: 'food', label: 'Feeding Zone', polygon });
-            }
-            if (litterZone.w > 0 && litterZone.h > 0) {
-                const polygon = rectToPolygon(litterZone, 'litter');
-                polygon.frame_signature = frameSig;
-                polygon.frame_signature_ts = frameSigTs;
-                rows.push({ camera_id: cameraId, zone_type: 'litter', label: 'Litter Zone', polygon });
-            }
+            if (feedingZone.w > 0 && feedingZone.h > 0) rows.push({ camera_id: cameraId, zone_type: 'food', label: 'Feeding Zone', polygon: rectToPolygon(feedingZone, 'food') });
+            if (litterZone.w > 0 && litterZone.h > 0) rows.push({ camera_id: cameraId, zone_type: 'litter', label: 'Litter Zone', polygon: rectToPolygon(litterZone, 'litter') });
 
             if (rows.length > 0) await supabase.from('camera_zones').insert(rows);
         } catch (e) { console.warn('Failed to persist zones to DB:', e?.message || e); }
@@ -474,8 +441,8 @@ export default function Phone({
 
                                     </View>
                                     <TouchableOpacity style={[styles.nextButton, { marginTop: 20 }]} onPress={handleNextStep}>
-                                        <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
-                                            <Text style={[styles.nextText, styles.nextTextLight]}>Next: Set Zones</Text>
+                                        <LinearGradient colors={["#EAF7F2", "#EAF7F2"]} style={styles.gradientNext}>
+                                            <Text style={styles.nextText}>Next: Set Zones</Text>
                                         </LinearGradient>
                                     </TouchableOpacity>
                                 </View>
@@ -488,7 +455,6 @@ export default function Phone({
                                         <View style={styles.hero}>
                                             <Text style={styles.title}>Set Detection Zones</Text>
                                             <Text style={styles.subtitle}>1. Choose a label 2. Tap and drag on the screen to draw the zone.</Text>
-                                            <Text style={styles.zoneHintText}>If labels are not set, detection results may be unclear.</Text>
                                         </View>
 
                                         <View style={styles.tabContainer}>
@@ -505,18 +471,6 @@ export default function Phone({
                                         </View>
 
                                         <View style={styles.minimalWorkspace}>
-                                            <View style={styles.zoneToolbar}>
-                                                <TouchableOpacity style={styles.zoneRefreshBtn} onPress={refreshLatestSnapshot}>
-                                                    <Ionicons name="refresh" size={14} color="#0F766E" />
-                                                    <Text style={styles.zoneRefreshText}>Refresh Snapshot</Text>
-                                                </TouchableOpacity>
-                                                {zoneStatus.camera_moved && (
-                                                    <View style={styles.zoneMovedBadge}>
-                                                        <MaterialCommunityIcons name="alert" size={13} color="#B42318" />
-                                                        <Text style={styles.zoneMovedText}>Camera moved - please set zones again</Text>
-                                                    </View>
-                                                )}
-                                            </View>
                                             {/* กรอบรับ Touch */}
                                             <View
                                                 style={[styles.minimalPreviewBg, { overflow: 'hidden', position: 'relative' }]}
@@ -526,9 +480,9 @@ export default function Phone({
                                                 }}
                                                 {...drawPanResponder}
                                             >
-                                                {/* 🚨 เลเยอร์ชั้นล่าง: ใช้ภาพล่าสุดจากกล้องสำหรับ label zone ที่แม่นยำ */}
+                                                {/* 🚨 เลเยอร์ชั้นล่าง: กล้องเป็นพื้นหลัง (ห้ามรับ Touch) */}
                                                 <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-                                                    <Image source={{ uri: latestSnapshotUrl }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                                                    <LiveVideoFeed />
                                                     <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.15)' }} />
                                                 </View>
 
@@ -558,7 +512,7 @@ export default function Phone({
 
                                     <TouchableOpacity style={[styles.nextButton, { marginTop: 20 }]} onPress={isUpdateMode ? handleUpdateZones : handleNextStep}>
                                         <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
-                                            <Text style={[styles.nextText, styles.nextTextLight]}>{isUpdateMode ? 'Update Zones' : 'Next: Complete'}</Text>
+                                            <Text style={styles.nextText}>{isUpdateMode ? 'Update Zones' : 'Next: Complete'}</Text>
                                         </LinearGradient>
                                     </TouchableOpacity>
                                 </View>
@@ -579,8 +533,8 @@ export default function Phone({
                                         await AsyncStorage.setItem('camera_setup_complete', 'true');
                                         onConfirm();
                                     }}>
-                                        <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
-                                            <Text style={[styles.nextText, styles.nextTextLight]}>Start Monitoring</Text>
+                                        <LinearGradient colors={["#A5D6A7", "#4CAF50"]} style={styles.gradientNext}>
+                                            <Text style={styles.nextText}>Start Monitoring</Text>
                                         </LinearGradient>
                                     </TouchableOpacity>
                                 </View>
@@ -606,19 +560,6 @@ export default function Phone({
                             </View>
                         </View>
                     </Modal>
-
-                    <Modal transparent visible={showAbortConnectModal} animationType="fade" onRequestClose={() => setShowAbortConnectModal(false)}>
-                        <View style={styles.confirmOverlay}>
-                            <View style={styles.confirmCard}>
-                                <Text style={styles.confirmTitle}>Stop This Connection?</Text>
-                                <Text style={styles.confirmMessage}>This connection attempt will be cancelled and previous camera settings will be restored.</Text>
-                                <View style={styles.confirmActions}>
-                                    <TouchableOpacity style={styles.confirmCancelBtn} onPress={() => setShowAbortConnectModal(false)}><Text style={styles.confirmCancelText}>Keep Setup</Text></TouchableOpacity>
-                                    <TouchableOpacity style={styles.confirmPrimaryBtn} onPress={() => { setShowAbortConnectModal(false); onBack(); }}><Text style={styles.confirmPrimaryText}>Stop and Go Back</Text></TouchableOpacity>
-                                </View>
-                            </View>
-                        </View>
-                    </Modal>
                 </SafeAreaView>
             </LinearGradient>
         </View>
@@ -627,30 +568,25 @@ export default function Phone({
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f5fffdff' },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8, backgroundColor: 'transparent' },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 10, backgroundColor: 'transparent' },
     headerIconBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'flex-end' },
     backBtnStyle: { width: 40, height: 40, justifyContent: 'center', alignItems: 'flex-start' },
     titleContainer: { flex: 1 },
     titleLogo: { fontSize: 20, fontWeight: '900', color: '#004D40', marginHorizontal: 3 },
     stepBar: { flexDirection: 'row', justifyContent: 'center', gap: 8, paddingBottom: 10 },
     backButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4 },
-    headerTitle: { fontSize: 16, fontWeight: '700', color: '#2F6A62', textAlign: 'center', flex: 1 },
+    headerTitle: { fontSize: 18, fontFamily: 'Inter-Bold', color: '#2F6A62', textAlign: 'center', flex: 1 },
     stepIndicatorContainer: { flexDirection: 'row', gap: 8 },
     stepDot: { width: 12, height: 4, borderRadius: 2, backgroundColor: '#CFD8DC' },
     stepDotActive: { backgroundColor: '#00897B', width: 24 },
-    hero: { alignItems: 'center', marginTop: 14, marginBottom: 18 },
-    tabContainer: { paddingHorizontal: 14, marginBottom: 14 },
-    tabWrapper: { flexDirection: 'row', backgroundColor: "#FFFFFF", borderRadius: 15, padding: 3, borderWidth: 1, borderColor: '#E6EFF0' },
-    tabBtn: { flex: 1, paddingVertical: 9, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
+    hero: { alignItems: 'center', marginTop: 20, marginBottom: 30 },
+    tabContainer: { paddingHorizontal: 16, marginBottom: 20 },
+    tabWrapper: { flexDirection: 'row', backgroundColor: "#FFFFFF", borderRadius: 25, padding: 4, elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4 },
+    tabBtn: { flex: 1, paddingVertical: 10, borderRadius: 22, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
     tabActive: { backgroundColor: "#B2DFDB" },
-    tabText: { fontSize: 13, fontWeight: "600", color: "#90A4AE" },
+    tabText: { fontSize: 14, fontWeight: "600", color: "#90A4AE" },
     tabTextActive: { color: "#00695C" },
-    zoneToolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8, gap: 8 },
-    zoneRefreshBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
-    zoneRefreshText: { color: '#0F766E', fontSize: 11, fontWeight: '700' },
-    zoneMovedBadge: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
-    zoneMovedText: { color: '#B42318', fontSize: 11, fontWeight: '700' },
-    minimalWorkspace: { marginHorizontal: 14, borderRadius: 15, overflow: 'hidden', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E8EFF1', position: 'relative' },
+    minimalWorkspace: { marginHorizontal: 16, borderRadius: 24, overflow: 'hidden', backgroundColor: '#FFFFFF', elevation: 2, shadowOpacity: 0.08, shadowRadius: 10, borderWidth: 1, borderColor: '#F0F4F8', position: 'relative' },
     minimalPreviewBg: { height: 320, backgroundColor: '#F5FBFB', position: 'relative' },
     gridOverlay: { ...StyleSheet.absoluteFillObject, opacity: 0.05, borderWidth: 1, borderColor: '#00695C', borderStyle: 'dashed' },
     zoneFeedingMinimal: { position: 'absolute', borderWidth: 2, backgroundColor: 'rgba(38, 166, 154, 0.1)', borderRadius: 12 },
@@ -659,38 +595,36 @@ const styles = StyleSheet.create({
     zoneTagText: { color: '#fff', fontSize: 10, fontWeight: '800' },
     minimalDrawingBanner: { position: 'absolute', top: 12, alignSelf: 'center', backgroundColor: 'rgba(255, 255, 255, 0.9)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, elevation: 3, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4 },
     minimalDrawingText: { color: '#37474F', fontSize: 12, fontWeight: '700' },
-    liveBadge: { backgroundColor: '#F44336', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginBottom: 8 },
+    liveBadge: { backgroundColor: '#F44336', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12, marginBottom: 8 },
     liveText: { color: '#fff', fontSize: 10, fontWeight: '900' },
-    catIconContainer: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: '#E6EFF0' },
-    title: { fontSize: 20, fontWeight: "700", color: "#004D40", textAlign: 'center' },
-    subtitle: { marginTop: 6, fontSize: 13, color: "#546E7A", textAlign: 'center', paddingHorizontal: 20, lineHeight: 18 },
-    zoneHintText: { marginTop: 6, fontSize: 11, color: '#B45309', textAlign: 'center', paddingHorizontal: 20 },
-    cardContainer: { gap: 10 },
-    brandCard: { backgroundColor: "#fff", borderRadius: 15, padding: 13, borderWidth: 1, borderColor: "#E6EFF0" },
-    brandCardSelected: { borderColor: "#BFDCD5", backgroundColor: '#FAFEFC' },
+    catIconContainer: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', marginBottom: 16, elevation: 4, shadowColor: '#00695C', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8 },
+    title: { fontSize: 24, fontWeight: "800", color: "#004D40", textAlign: 'center' },
+    subtitle: { marginTop: 8, fontSize: 14, color: "#546E7A", textAlign: 'center', paddingHorizontal: 20 },
+    cardContainer: { gap: 16 },
+    brandCard: { backgroundColor: "#fff", borderRadius: 16, padding: 20, borderWidth: 1, borderColor: "#E5E5EA", shadowColor: "#0F172A", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 10, elevation: 3 },
+    brandCardSelected: { borderColor: "#D1D1D6", elevation: 4, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
     brandHeader: { flexDirection: 'row', alignItems: 'center' },
-    brandIconBg: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F5F7FA', justifyContent: 'center', alignItems: 'center' },
-    brandName: { fontSize: 13, fontWeight: "700", color: "#37474F" },
+    brandIconBg: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F5F7FA', justifyContent: 'center', alignItems: 'center' },
+    brandName: { fontSize: 17, fontWeight: "700", color: "#37474F" },
     loginButton: { marginTop: 20 },
     gradientBtn: { paddingVertical: 12, borderRadius: 14, alignItems: "center", flexDirection: 'row', justifyContent: 'center', backgroundColor: '#0F766E', borderColor: '#0F766E', borderWidth: 1, gap: 8, shadowColor: '#0F766E', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 6, elevation: 2 },
-    loginText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
+    loginText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
     inlineNotice: { marginTop: 10, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', width: '100%' },
     inlineNoticeWarning: { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1 },
     inlineNoticeDanger: { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1 },
     inlineNoticeText: { marginLeft: 8, fontSize: 12, flex: 1, lineHeight: 16 },
     inlineNoticeTextWarning: { color: '#0F766E' },
     inlineNoticeTextDanger: { color: '#B42318' },
-    skipButtonText: { color: "#90A4AE", fontSize: 13, fontWeight: "600", textDecorationLine: "underline" },
-    previewCard: { marginTop: 10, height: 300, borderRadius: 24, backgroundColor: "#E5E7EB", overflow: "hidden", position: 'relative' },
+    skipButtonText: { color: "#90A4AE", fontSize: 14, fontWeight: "600", textDecorationLine: "underline" },
+    previewCard: { marginTop: 10, height: 200, borderRadius: 30, backgroundColor: "#E5E7EB", overflow: "hidden", position: 'relative' },
     nextButton: { marginTop: 20 },
-    gradientNext: { paddingVertical: 12, borderRadius: 14, alignItems: "center", flexDirection: 'row', justifyContent: 'center', borderColor: '#0F766E', borderWidth: 1, shadowColor: '#0F766E', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 1 },
-    nextText: { fontSize: 13, fontWeight: "700" },
-    nextTextLight: { color: "#FFFFFF" },
+    gradientNext: { paddingVertical: 14, borderRadius: 14, alignItems: "center", flexDirection: 'row', justifyContent: 'center', borderColor: '#BFE7DA', borderWidth: 1 },
+    nextText: { color: "#0F766E", fontSize: 15, fontWeight: "700" },
     fixedBottomButton: { position: 'absolute', bottom: 40, left: 20, right: 20, paddingVertical: 10, alignItems: "center", zIndex: 10 },
     confirmOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.28)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
     confirmCard: { width: '100%', backgroundColor: '#FFFFFF', borderRadius: 20, paddingHorizontal: 18, paddingTop: 18, paddingBottom: 14 },
-    confirmTitle: { fontSize: 15, fontWeight: '700', color: '#1C1C1E', marginBottom: 8 },
-    confirmMessage: { fontSize: 12, color: '#4B5563', lineHeight: 17, marginBottom: 16 },
+    confirmTitle: { fontSize: 17, fontWeight: '700', color: '#1C1C1E', marginBottom: 8 },
+    confirmMessage: { fontSize: 13, color: '#4B5563', lineHeight: 19, marginBottom: 16 },
     confirmActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
     confirmCancelBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: '#F5F5F5' },
     confirmCancelText: { color: '#374151', fontSize: 13, fontWeight: '600' },

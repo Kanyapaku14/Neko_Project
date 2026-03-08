@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CatPickerModal.js
  *
  * Modal for selecting which cat was detected in a pending identity event.
@@ -18,10 +18,13 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import { CAMERA_API_BASE } from '../../config/cameraApi';
+import supabase from '../../screens/config/supabaseClient';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
-const VIDEO_SERVER_BASE = 'http://192.168.1.100:5000';
+
+const VIDEO_SERVER_BASE = CAMERA_API_BASE;
 
 const BEHAVIOR_ICON_MAP = {
     vomiting: { icon: 'emoticon-sick-outline', color: '#D32F2F' },
@@ -110,7 +113,10 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
     const isMultiMode = Array.isArray(multiSnapshots) && multiSnapshots.length >= 2;
     const confidencePct = confidence != null ? Math.round(confidence * 100) : null;
     const { icon: behaviorIcon, color: behaviorColor } = getBehaviorIcon(behaviorLabel);
-    const fallbackSnapshotUri = `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${encodeURIComponent(alert?.timestamp || Date.now())}`;
+    const fallbackSnapshotUri = React.useMemo(
+        () => `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${encodeURIComponent(alert?.timestamp || alert?.id || 'latest')}`,
+        [alert?.timestamp, alert?.id]
+    );
     const previewSnapshotUri = cropSnapshot || fallbackSnapshotUri;
 
     const handlePickCat = (catId) => {
@@ -127,12 +133,12 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
         setDropdownOpen(false);
     };
 
-    // สำหรับโหมด multi-snapshot: สลับรูปที่เลือก์ (0 หรือ 1)
+    // à¸ªà¸³à¸«à¸£à¸±à¸šà¹‚à¸«à¸¡à¸” multi-snapshot: à¸ªà¸¥à¸±à¸šà¸£à¸¹à¸›à¸—à¸µà¹ˆà¹€à¸¥à¸·à¸­à¸à¹Œ (0 à¸«à¸£à¸·à¸­ 1)
     const handleConfirmMulti = async () => {
         if (selectedSnapshotIdx === null || !Array.isArray(multiSnapshots)) return;
         const chosen = multiSnapshots[selectedSnapshotIdx];
-        // resolve กลับเป็น "cat ที่เป็นของเรา" คือ cat ใน selectedIds และ unknown คือตัวที่ไม่ใช่
-        // นำ cat ของ user ไปให้ onSelect (cat ที่ควรจะเป็น "ตัวที่ user เลือก")
+        // resolve à¸à¸¥à¸±à¸šà¹€à¸›à¹‡à¸™ "cat à¸—à¸µà¹ˆà¹€à¸›à¹‡à¸™à¸‚à¸­à¸‡à¹€à¸£à¸²" à¸„à¸·à¸­ cat à¹ƒà¸™ selectedIds à¹à¸¥à¸° unknown à¸„à¸·à¸­à¸•à¸±à¸§à¸—à¸µà¹ˆà¹„à¸¡à¹ˆà¹ƒà¸Šà¹ˆ
+        // à¸™à¸³ cat à¸‚à¸­à¸‡ user à¹„à¸›à¹ƒà¸«à¹‰ onSelect (cat à¸—à¸µà¹ˆà¸„à¸§à¸£à¸ˆà¸°à¹€à¸›à¹‡à¸™ "à¸•à¸±à¸§à¸—à¸µà¹ˆ user à¹€à¸¥à¸·à¸­à¸")
         const myCatId = selectedCatId || cats[0]?.id || null;
         if (!myCatId) return;
         await runAction('confirm', async () => {
@@ -174,7 +180,9 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
         if (!selectedCatId) return;
         await runAction('confirm', async () => {
             try {
-                await AsyncStorage.setItem('last_selected_cat_id', selectedCatId);
+                const { data: { session } } = await supabase.auth.getSession();
+                const scopedLastCatKey = session?.user?.id ? `last_selected_cat_id:${session.user.id}` : 'last_selected_cat_id';
+                await AsyncStorage.setItem(scopedLastCatKey, selectedCatId);
             } catch (e) {
                 // no-op
             }
@@ -260,7 +268,7 @@ export default function CatPickerModal({ visible, alert, cats = [], onSelect, on
                         {isMultiMode ? (
                             <>
                                 <Text style={[styles.instructionText, { fontWeight: '700', color: '#1E293B', marginBottom: 10 }]}>
-                                    Which of these cats is yours? 🐱
+                                    Which of these cats is yours? ðŸ±
                                 </Text>
                                 <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
                                     {multiSnapshots.slice(0, 2).map((snap, idx) => (
@@ -697,3 +705,4 @@ const styles = StyleSheet.create({
         borderRadius: 12,
     },
 });
+

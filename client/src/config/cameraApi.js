@@ -1,0 +1,11 @@
+const DEFAULT_CAMERA_API_BASE = 'http://192.168.1.100:5000';
+
+const normalizeBase = (raw) => String(raw || '').trim().replace(/\/+$/, '');
+
+export const CAMERA_API_BASE = normalizeBase(
+  process.env.EXPO_PUBLIC_CAMERA_API_BASE || DEFAULT_CAMERA_API_BASE
+);
+
+export const CAMERA_STREAM_QUERY = 'fps=12&quality=52&width=720';
+export const CAMERA_STREAM_URL = `${CAMERA_API_BASE}/api/video_feed_raw`;
+

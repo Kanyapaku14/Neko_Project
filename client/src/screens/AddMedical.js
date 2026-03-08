@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import supabase from './config/supabaseClient';
+import AlertEngine from '../services/AlertEngine';
 
 const { width } = Dimensions.get('window');
 
@@ -35,13 +36,16 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
     // Fetch Cat ID first
     useEffect(() => {
         const fetchInitialCat = async () => {
-            const storedCatId = await AsyncStorage.getItem('selectedCatId');
+            const { data: { user } } = await supabase.auth.getUser();
+            const scopedKey = user?.id ? `selectedCatId:${user.id}` : 'selectedCatId';
+            const storedCatId =
+                (await AsyncStorage.getItem(scopedKey)) ||
+                (await AsyncStorage.getItem('selectedCatId'));
             if (storedCatId) {
                 setCatId(storedCatId);
             } else {
                 // If not in storage, fetch the first one from DB
                 try {
-                    const { data: { user } } = await supabase.auth.getUser();
                     if (!user) return;
                     const { data } = await supabase
                         .from('cats')
@@ -162,6 +166,20 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
                 });
 
             if (insertError) throw insertError;
+
+            try {
+                await AlertEngine.logEvent({
+                    type: 'medical_event_saved',
+                    severity: 'info',
+                    title: 'Medical Event Added',
+                    desc: `${eventType.replace('_', ' ')} saved for ${eventDate.toISOString().split('T')[0]}.`,
+                    details: notes ? notes.slice(0, 120) : '',
+                    dedupeKey: `medical_event_saved:${catId}:${eventDate.toISOString().split('T')[0]}:${eventType}`,
+                    cooldownMs: 2 * 60 * 1000,
+                });
+            } catch (_) {
+                // keep medical save success path unchanged
+            }
 
             Alert.alert('Success', 'Medical event saved successfully!', [
                 { text: 'OK', onPress: () => handleBack() }
