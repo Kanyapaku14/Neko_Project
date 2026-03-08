@@ -7,7 +7,7 @@ import {
     Modal,
     PanResponder,
     Platform,
-      ScrollView,
+    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -35,6 +35,37 @@ const formatTime = (isoString) => {
         return `${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${date.toLocaleDateString()}`;
     } catch {
         return 'Just now';
+    }
+};
+
+const getAlertVisuals = (alert) => {
+    const type = String(alert?.type || '').toLowerCase();
+    const severity = String(alert?.severity || 'info').toLowerCase();
+
+    if (alert.pendingIdentityConfirm) {
+        return { icon: 'help-rhombus-outline', color: '#E65100', bg: '#FFF8E1', text: 'Pending Identity' };
+    }
+    if (type === 'pending_identity' && alert.resolvedBy === 'skipped') {
+        return { icon: 'cat-off', color: '#B42318', bg: '#FFE4E6', text: 'Identity Skipped' };
+    }
+
+    switch (type) {
+        case 'litter_summary':
+            return { icon: 'emoticon-poop-outline', color: '#0288D1', bg: '#E1F5FE', text: 'Litter Summary' };
+        case 'camera_moved':
+            return { icon: 'video-off-outline', color: '#E65100', bg: '#FFF3E0', text: 'Camera Moved' };
+        case 'assessment_saved':
+            return { icon: 'clipboard-check-outline', color: '#2E7D32', bg: '#E8F5E9', text: 'Assessment Saved' };
+    }
+
+    // Fallback to severity
+    switch (severity) {
+        case 'critical':
+            return { icon: 'alert-circle-outline', color: '#D32F2F', bg: '#FFEBEE', text: 'Critical Alert' };
+        case 'warning':
+            return { icon: 'alert-outline', color: '#F57C00', bg: '#FFF3E0', text: 'Warning' };
+        default:
+            return { icon: 'information-outline', color: '#0277BD', bg: '#E1F5FE', text: 'Information' };
     }
 };
 
@@ -85,13 +116,7 @@ const SwipeableNotificationCard = ({
     const [isExpanded, setIsExpanded] = useState(false);
     const HARD_SWIPE_THRESHOLD_X = -(Dimensions.get('window').width * 0.5);
     const SWIPE_OPEN_X = -122;
-    const HARD_SWIPE_X = -144;
     const SWIPE_TRIGGER_X = -34;
-    const SWIPE_OVERSHOOT_RESISTANCE = 0.22;
-    const isPending = alert.pendingIdentityConfirm === true;
-    const isCritical = alert.severity === 'critical';
-    const isIdentityResolved = alert.type === 'pending_identity' && !isPending && alert.resolvedBy && alert.resolvedBy !== 'skipped';
-    const isRejectedIdentity = alert.type === 'pending_identity' && !isPending && alert.resolvedBy === 'skipped';
     const shortDetail = getShortDetail(alert);
     const deleteOpacity = pan.x.interpolate({
         inputRange: [SWIPE_OPEN_X, -36, 0],
@@ -99,8 +124,8 @@ const SwipeableNotificationCard = ({
         extrapolate: 'clamp',
     });
     const deleteScale = pan.x.interpolate({
-        inputRange: [HARD_SWIPE_X, SWIPE_OPEN_X, -36, 0],
-        outputRange: [1.12, 1, 0.94, 0.9],
+        inputRange: [SWIPE_OPEN_X, 0],
+        outputRange: [1, 0.8],
         extrapolate: 'clamp',
     });
     const deleteTranslateX = pan.x.interpolate({
@@ -132,17 +157,10 @@ const SwipeableNotificationCard = ({
         }).start();
     const performDelete = () => {
         if (isDeletingRef.current) return;
-        isDeletingRef.current = true;
-        if (setActiveSwipeId) setActiveSwipeId(null);
-        Animated.timing(deleteProgress, {
-            toValue: 1,
-            duration: 190,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-        }).start(() => {
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            onDelete(alert.id);
-        });
+        isDeletingRef.current = true; // Prevent double-taps
+        if (setActiveSwipeId) setActiveSwipeId(null); // Close other cards
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); // Animate layout change
+        onDelete(alert.id); // Trigger parent delete
     };
     const showDeleteConfirm = (onCancel) => {
         if (typeof onRequestDeleteConfirm === 'function') {
@@ -196,23 +214,11 @@ const SwipeableNotificationCard = ({
             onPanResponderMove: (evt, gestureState) => {
                 if (gestureState.dx < 0) {
                     const rawX = gestureState.dx;
-                    const nextX = rawX < SWIPE_OPEN_X
-                        ? SWIPE_OPEN_X + (rawX - SWIPE_OPEN_X) * SWIPE_OVERSHOOT_RESISTANCE
-                        : rawX;
-                    pan.setValue({ x: nextX, y: 0 });
+                    pan.setValue({ x: rawX, y: 0 });
                 }
             },
             onPanResponderRelease: (evt, gestureState) => {
-                const isHardSwipe = gestureState.dx < HARD_SWIPE_THRESHOLD_X;
-                if (isHardSwipe) {
-                    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch (e) { }
-                    animateToX(HARD_SWIPE_X, gestureState.vx);
-                    if (setActiveSwipeId) setActiveSwipeId(alert.id);
-                    showDeleteConfirm(() => {
-                        if (setActiveSwipeId) setActiveSwipeId(null);
-                        animateToX(0, gestureState.vx);
-                    });
-                } else if (gestureState.dx < SWIPE_TRIGGER_X) {
+                if (gestureState.dx < SWIPE_TRIGGER_X) {
                     animateToX(SWIPE_OPEN_X, gestureState.vx);
                     if (setActiveSwipeId) setActiveSwipeId(alert.id);
                 } else {
@@ -234,6 +240,12 @@ const SwipeableNotificationCard = ({
             onMarkRead(alert.id);
         }
     };
+
+    const visuals = getAlertVisuals(alert);
+    const isPending = alert.pendingIdentityConfirm === true;
+    const isIdentityResolved = alert.type === 'pending_identity' && !isPending && alert.resolvedBy && alert.resolvedBy !== 'skipped';
+    const isRejectedIdentity = alert.type === 'pending_identity' && !isPending && alert.resolvedBy === 'skipped';
+
 
     return (
         <View style={styles.cardWrapper}>
@@ -257,7 +269,7 @@ const SwipeableNotificationCard = ({
                             },
                         ]}
                     >
-                        <Text style={styles.deleteCapsuleText}>Delete</Text>
+                        <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
                     </Animated.View>
                 </TouchableOpacity>
             </View>
@@ -265,7 +277,7 @@ const SwipeableNotificationCard = ({
             <Animated.View
                 style={[
                     styles.alertCard,
-                    !alert.isRead && styles.unreadCard,
+                    !alert.isRead && styles.unreadCard, // This will now use borderLeft
                     {
                         opacity: cardOpacity,
                         transform: [{ translateX: pan.x }, { translateY: cardTranslateY }, { scale: cardScale }],
@@ -357,36 +369,13 @@ const SwipeableNotificationCard = ({
 
                     <View
                         style={[
-                            styles.iconContainer,
-                            isRejectedIdentity
-                                ? styles.iconRejectedBg
-                                : isPending
-                                ? styles.pendingIconContainer
-                                : isCritical
-                                    ? styles.iconCriticalBg
-                                    : styles.iconSuccessBg,
+                            styles.iconContainer, { backgroundColor: visuals.bg }
                         ]}
                     >
                         <MaterialCommunityIcons
-                            name={
-                                isRejectedIdentity
-                                    ? 'cat-off'
-                                    : isPending
-                                    ? 'help-rhombus-outline'
-                                    : isCritical
-                                        ? 'alert-circle-outline'
-                                        : 'check-circle-outline'
-                            }
+                            name={visuals.icon}
                             size={26}
-                            color={
-                                isRejectedIdentity
-                                    ? '#B42318'
-                                    : isPending
-                                    ? '#E65100'
-                                    : isCritical
-                                        ? '#D32F2F'
-                                        : '#2E7D32'
-                            }
+                            color={visuals.color}
                         />
                     </View>
 
@@ -454,6 +443,15 @@ export default function AlertScreen({ onBack, onNavigate }) {
     useEffect(() => {
         AlertRepository.init();
         // syncFromRemote is already handled by GlobalAlertQueueProvider.
+        // TODO: For out-of-app (push) notifications, this is where you would register the device token.
+        // 1. Import * as Notifications from 'expo-notifications';
+        // 2. Ask for permissions: Notifications.requestPermissionsAsync();
+        // 3. Get token: Notifications.getPushTokenAsync();
+        // 4. Send token to your backend and save it against the user ID in a 'push_tokens' table.
+        // 5. Your backend (e.g., Supabase Edge Function) would listen to inserts on the 'alerts' table
+        //    and send a push notification to the user's registered tokens.
+
+
         // Avoid re-sync on every AlertScreen mount which can re-trigger auto-popup.
     }, []);
 
@@ -812,10 +810,10 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        justifyContent: 'space-between', // Keep this
         paddingHorizontal: 16,
         paddingTop: 8,
-        paddingBottom: 8,
+        paddingBottom: 12, // More space
         backgroundColor: '#f5fffdff',
     },
     backButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'flex-start' },
@@ -823,7 +821,7 @@ const styles = StyleSheet.create({
     content: { paddingHorizontal: 12, paddingTop: 2, paddingBottom: 24 },
 
     menuOverlay: { flex: 1, backgroundColor: 'rgba(28,28,30,0.12)' },
-    menuContainer: {
+    menuContainer: { // Simplified menu
         position: 'absolute',
         top: Platform.OS === 'ios' ? 88 : 64,
         right: 14,
@@ -832,11 +830,11 @@ const styles = StyleSheet.create({
         borderRadius: 26,
         paddingVertical: 10,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.14)',
-        shadowColor: '#202124',
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.18,
-        shadowRadius: 18,
+        borderColor: '#E5E5EA',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
         elevation: 7,
     },
     menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, marginHorizontal: 8 },
@@ -844,10 +842,10 @@ const styles = StyleSheet.create({
     menuItemActive: { backgroundColor: 'rgba(255,255,255,0.14)' },
     menuItemText: { fontSize: 15, color: '#ECEDEF', marginLeft: 11, fontFamily: 'Inter-Medium' },
     menuItemTextActive: { color: '#FFFFFF', fontFamily: 'Inter-Bold' },
-    menuDeletePill: {
+    menuDeletePill: { // Simplified delete button in menu
         marginHorizontal: 10,
         marginTop: 10,
-        marginBottom: 2,
+        marginBottom: 4,
         borderRadius: 999,
         backgroundColor: '#FF4458',
         minHeight: 46,
@@ -859,9 +857,9 @@ const styles = StyleSheet.create({
     },
     menuDeletePillPressed: { opacity: 0.86, transform: [{ scale: 0.98 }] },
     menuDeletePillText: { color: '#FFFFFF', fontSize: 15, fontFamily: 'Inter-Bold' },
-    menuDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.16)', marginVertical: 6, marginHorizontal: 14 },
+    menuDivider: { height: 1, backgroundColor: '#E5E5EA', marginVertical: 6, marginHorizontal: 14 },
     menuSectionHeader: { paddingHorizontal: 16, paddingVertical: 8, paddingBottom: 4 },
-    menuSectionHeaderText: { fontSize: 12, color: '#D0D2D8', fontFamily: 'Inter-Bold', textTransform: 'uppercase' },
+    menuSectionHeaderText: { fontSize: 12, color: '#8E8E93', fontFamily: 'Inter-Bold', textTransform: 'uppercase' },
 
     selectionBar: {
         flexDirection: 'row',
@@ -896,57 +894,46 @@ const styles = StyleSheet.create({
     iosDeleteBarBtnText: { color: '#1A56C5' },
 
     cardWrapper: {
-        marginBottom: 10,
+        marginBottom: 8, // Tighter list
         borderRadius: 14,
-        backgroundColor: '#f5fffdff',
         position: 'relative',
         overflow: 'hidden',
     },
     deleteBackground: {
         ...StyleSheet.absoluteFillObject,
         justifyContent: 'center',
-        alignItems: 'flex-end',
-        paddingRight: 12,
-        backgroundColor: '#f5fffdff',
-        borderRadius: 16,
+        alignItems: 'flex-end', // Align to the right
     },
-    deleteButton: { height: '100%', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 0 },
-    deleteCapsule: {
-        width: 108,
-        height: 36,
-        borderRadius: 999,
-        backgroundColor: '#FF3B30',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.16)',
+    deleteButton: {
+        width: 60,
+        height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#B00020',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.18,
-        shadowRadius: 6,
-        elevation: 2,
+        backgroundColor: '#FF3B30',
     },
-    deleteCapsuleText: { color: '#FFFFFF', fontSize: 13, fontFamily: 'Inter-Bold' },
+    deleteCapsule: { // This view is now just for the icon animation
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
 
     alertCard: {
         backgroundColor: '#FFFFFF',
         borderRadius: 14,
         borderWidth: 1,
         borderColor: '#E5E5EA',
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
+        // Minimalist: remove shadow
+        // shadowColor: '#0F172A',
+        // shadowOffset: { width: 0, height: 2 },
+        // shadowOpacity: 0.05,
+        // shadowRadius: 8,
+        // elevation: 2,
     },
     unreadCard: {
-        backgroundColor: '#FFFFFF',
-        borderColor: '#D1D1D6',
-        shadowColor: '#000',
-        shadowOpacity: 0.06,
-        shadowRadius: 6,
-        elevation: 2,
-        shadowOffset: { width: 0, height: 2 },
+        borderLeftWidth: 3,
+        borderLeftColor: '#0A84FF',
+        borderTopColor: '#E5E5EA',
+        borderRightColor: '#E5E5EA',
+        borderBottomColor: '#E5E5EA',
     },
     cardMainContent: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 10 },
     selectIconWrap: { marginRight: 12 },
@@ -979,10 +966,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#0A84FF',
     },
     iconContainer: { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-    iconCriticalBg: { backgroundColor: '#FFF0F0' },
-    iconSuccessBg: { backgroundColor: '#E8F5E9' },
-    iconRejectedBg: { backgroundColor: '#FFE4E6' },
-    pendingIconContainer: { backgroundColor: '#FFF8E1' },
     alertTextContainer: { flex: 1 },
     titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' },
     alertTitle: { fontSize: 13, fontFamily: 'Inter-Bold', color: '#1C1C1E' },
@@ -995,7 +978,6 @@ const styles = StyleSheet.create({
     resolvedBadgeText: { color: '#1A56C5', fontSize: 10, fontFamily: 'Inter-Bold' },
     rejectedBadge: { backgroundColor: '#FFE4E6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
     rejectedBadgeText: { color: '#B42318', fontSize: 10, fontFamily: 'Inter-Bold' },
-    alertDesc: { fontSize: 14, color: '#5C706B', lineHeight: 20, fontFamily: 'Inter-Regular' },
     timeText: { fontSize: 10, color: '#8E8E93', fontFamily: 'Inter-Medium', marginTop: 2 },
     chevronButton: { paddingLeft: 8, paddingVertical: 8 },
     expandedContent: {
@@ -1025,7 +1007,7 @@ const styles = StyleSheet.create({
         color: '#6D6D72',
         fontFamily: 'Inter-Regular',
         lineHeight: 18,
-    },
+    }, // Minimalist empty state
     emptyState: { alignItems: 'center', justifyContent: 'center', marginTop: 100 },
     emptyTitle: { fontSize: 20, fontFamily: 'Inter-Bold', color: '#B0BEC5', marginTop: 16 },
     emptyDesc: { fontSize: 14, color: '#78909C', marginTop: 8, fontFamily: 'Inter-Medium' },

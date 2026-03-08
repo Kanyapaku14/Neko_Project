@@ -60,16 +60,22 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
 
     try {
       const selectedCatsScopedKey = session?.user?.id ? `camera_selectedCats:${session.user.id}` : 'camera_selectedCats';
+      const scopedModeKey = session?.user?.id ? `camera_monitoringMode:${session.user.id}` : 'camera_monitoringMode';
       const [mode, savedCats, storedCameraId] = await Promise.all([
-        AsyncStorage.getItem('camera_monitoringMode'),
+        AsyncStorage.getItem(scopedModeKey),
         AsyncStorage.getItem(selectedCatsScopedKey),
         AsyncStorage.getItem(CAMERA_ID_KEY),
       ]);
 
-      const effectiveSavedCats = savedCats || await AsyncStorage.getItem('camera_selectedCats');
+      const [legacyMode, legacySavedCats] = await Promise.all([
+        AsyncStorage.getItem('camera_monitoringMode'),
+        AsyncStorage.getItem('camera_selectedCats'),
+      ]);
+      const effectiveMode = mode || legacyMode;
+      const effectiveSavedCats = savedCats || legacySavedCats;
 
       newData.settings = {
-        monitoringMode: mode || 'multi',
+        monitoringMode: effectiveMode || 'multi',
         selectedCats: effectiveSavedCats ? JSON.parse(effectiveSavedCats) : []
       };
 
@@ -82,6 +88,10 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
         if (!catError && Array.isArray(catsData)) {
           const catIds = catsData.map((c) => c.id);
           newData.cats = catIds.length;
+          if (catIds.length === 1) {
+            newData.settings.monitoringMode = 'single';
+            newData.settings.selectedCats = [catIds[0]];
+          }
 
           const selectedIds = selectedCatId
             ? [selectedCatId].filter((id) => catIds.includes(id))
