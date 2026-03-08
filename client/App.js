@@ -108,6 +108,20 @@ export default function App() {
       return;
     }
 
+    if (targetScreen === 'Setting') {
+      const current = getCurrentAuthScreenName();
+      const currentParams = typeof authScreen === 'object' ? authScreen.params : {};
+      const computedReturnTo =
+        targetParams?.returnTo ||
+        (current === 'Setting' ? currentParams?.returnTo : current) ||
+        'Home';
+      setAuthScreen({
+        screen: 'Setting',
+        params: { ...(targetParams || {}), returnTo: computedReturnTo },
+      });
+      return;
+    }
+
     setAuthScreen(targetParams ? { screen: targetScreen, params: targetParams } : targetScreen);
   };
 
@@ -176,7 +190,7 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    let unsubscribeNotification = () => {};
+    let unsubscribeNotification = () => { };
     const bootstrapNotifications = async () => {
       await NotificationService.init();
       if (session?.user?.id) {
@@ -338,7 +352,7 @@ export default function App() {
           session={session}
           onNavigate={(screen, params) => navigateAuth(screen, params)}
           onLogout={handleSignOut}
-          onBack={() => setAuthScreen('Home')}
+          onBack={() => setAuthScreen(screenParams?.returnTo || 'Home')}
         />;
       }
       if (currentScreenName === 'LogDaily') {

@@ -1,5 +1,5 @@
 ﻿// ==============================================
-// 1. à¸ªà¹ˆà¸§à¸™à¸à¸²à¸£à¸™à¸³à¹€à¸‚à¹‰à¸² Libraries à¹à¸¥à¸° Components
+// 1. ส่วนการนำเข้า Libraries และ Components
 // ==============================================
 import React, { useState, useRef, useEffect } from 'react';
 import {
@@ -15,8 +15,6 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AlertEngine from '../services/AlertEngine';
 import { WebView } from 'react-native-webview';
-import HomeHeader from '../components/HomeHeader';
-import { CAMERA_API_BASE, CAMERA_STREAM_QUERY, CAMERA_STREAM_URL } from '../config/cameraApi';
 
 const CAMERA_BRANDS = [
     { id: 'tapo', label: 'TP-Link Tapo', icon: 'link-variant', api: 'Tapo Cloud API' },
@@ -25,8 +23,11 @@ const CAMERA_BRANDS = [
     { id: 'custom', label: 'Other (Manual)', icon: 'cog-outline', api: 'Manual API setup' },
 ];
 
-const VIDEO_STREAM_URL = `${CAMERA_STREAM_URL}?${CAMERA_STREAM_QUERY}`;
-const VIDEO_SERVER_BASE = CAMERA_API_BASE;
+const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+// 🚨 กำหนด URL ของ Camera Server (Port 5000)
+const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed_raw?fps=15&quality=62&width=960';
+const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
+const CAMERA_RTSP_URL = 'rtsp://testt1:1234test@192.168.1.102:554/stream2';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -40,44 +41,29 @@ const DecorativeCatEars = () => (
 );
 
 // ==============================================
-// ðŸš¨ Component à¸à¸¥à¹‰à¸­à¸‡: à¹‚à¸„à¸£à¸‡à¸ªà¸£à¹‰à¸²à¸‡à¹€à¸”à¸µà¸¢à¸§à¸à¸±à¸š CameraScreen à¹€à¸›à¹Šà¸°à¹†
+// 🚨 Component กล้อง: โครงสร้างเดียวกับ CameraScreen เป๊ะๆ
 // ==============================================
-// à¹ƒà¸Šà¹‰ React.memo à¸„à¸¹à¹ˆà¸à¸±à¸š () => true à¹€à¸žà¸·à¹ˆà¸­ "à¸¥à¹‡à¸­à¸„à¸•à¸²à¸¢" à¹„à¸¡à¹ˆà¹ƒà¸«à¹‰ Component à¸™à¸µà¹‰à¹‚à¸«à¸¥à¸”à¹ƒà¸«à¸¡à¹ˆà¹€à¸”à¹‡à¸”à¸‚à¸²à¸” (à¹à¸à¹‰à¸à¸£à¸°à¸žà¸£à¸´à¸š 100%)
+// ใช้ React.memo คู่กับ () => true เพื่อ "ล็อคตาย" ไม่ให้ Component นี้โหลดใหม่เด็ดขาด (แก้กระพริบ 100%)
 const LiveCameraStream = React.memo(({ streamUrl }) => {
-    const htmlContent = `<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <style>
-    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #E5E7EB; overflow: hidden; }
-    img { width: 100%; height: 100%; object-fit: cover; }
-  </style>
-</head>
-<body>
-  <img src="${streamUrl}" onerror="console.log('Stream Failed')" />
-</body>
-</html>`;
-
     return (
         <View style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#E5E7EB', overflow: 'hidden' }}>
             <WebView
-                source={{ uri: streamUrl }} // à¸¢à¸´à¸‡à¸•à¸£à¸‡à¹„à¸›à¸—à¸µà¹ˆ URL à¹€à¸¥à¸¢ à¹à¸à¹‰à¸›à¸±à¸à¸«à¸²à¸ˆà¸­à¹€à¸—à¸²à¸ˆà¸²à¸ HTML
+                source={{ uri: streamUrl }} // ยิงตรงไปที่ URL เลย แก้ปัญหาจอเทาจาก HTML
                 style={{ flex: 1, backgroundColor: 'transparent' }}
                 scrollEnabled={false}
                 bounces={false}
                 showsVerticalScrollIndicator={false}
                 showsHorizontalScrollIndicator={false}
+                originWhitelist={['*']}
                 mixedContentMode="always"
                 allowsInlineMediaPlayback={true}
-                javaScriptEnabled={true}
-                domStorageEnabled={true}
             />
         </View>
     );
-}, () => true); // <-- à¹„à¸¡à¹‰à¸•à¸²à¸¢: à¸„à¸·à¸™à¸„à¹ˆà¸² true à¹€à¸ªà¸¡à¸­ à¹€à¸žà¸·à¹ˆà¸­à¸šà¸­à¸ React à¸§à¹ˆà¸² "à¸«à¹‰à¸²à¸¡ Re-render à¸à¸¥à¹‰à¸­à¸‡à¸™à¸µà¹‰à¸­à¸µà¸à¸•à¹ˆà¸­à¹„à¸›"
+}, () => true); // <-- ไม้ตาย: คืนค่า true เสมอ เพื่อบอก React ว่า "ห้าม Re-render กล้องนี้อีกต่อไป"
 
 // ==============================================
-// 2. Main Component (à¸«à¸™à¹‰à¸²à¸ˆà¸­à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²)
+// 2. Main Component (หน้าจอตั้งค่า)
 // ==============================================
 export default function SetcameraScreen({ onNavigate, session, params }) {
     const defaultZoneLabel = 'Litter Box Zone';
@@ -88,8 +74,8 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
     const [latestSnapshotUrl, setLatestSnapshotUrl] = useState(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
     const [zoneStatus, setZoneStatus] = useState({ camera_moved: false, zones_configured: 0 });
 
-    // à¸¥à¹‡à¸­à¸„ URL à¹„à¸§à¹‰à¹ƒà¸«à¹‰à¹‚à¸«à¸¥à¸”à¹à¸„à¹ˆà¸„à¸£à¸±à¹‰à¸‡à¹€à¸”à¸µà¸¢à¸§
-    const streamUrlRef = useRef(`${VIDEO_STREAM_URL}?t=${new Date().getTime()}`);
+    // ล็อค URL ไว้ให้โหลดแค่ครั้งเดียว
+    const streamUrlRef = useRef(`${VIDEO_STREAM_URL}&t=${new Date().getTime()}`);
 
     const [monitoringMode, setMonitoringMode] = useState('multi');
     const [myCats, setMyCats] = useState([]);
@@ -112,8 +98,6 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
 
     const successAnim = useRef(new Animated.Value(0)).current;
     const brandScales = useRef({ tapo: new Animated.Value(1), xiaomi: new Animated.Value(1), ezviz: new Animated.Value(1), custom: new Animated.Value(1) }).current;
-    const selectedCatsKey = session?.user?.id ? `camera_selectedCats:${session.user.id}` : 'camera_selectedCats';
-    const camKey = (base) => (session?.user?.id ? `${base}:${session.user.id}` : base);
 
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -127,11 +111,11 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
         const load = async () => {
             try {
                 await AlertEngine.setScope(session?.user?.id || 'anonymous');
-                const mode = (await AsyncStorage.getItem(camKey('camera_monitoringMode'))) || (await AsyncStorage.getItem('camera_monitoringMode'));
-                const savedCatsJson = (await AsyncStorage.getItem(selectedCatsKey)) || (await AsyncStorage.getItem('camera_selectedCats'));
-                const savedStatus = (await AsyncStorage.getItem(camKey('camera_status'))) || (await AsyncStorage.getItem('camera_status'));
-                const savedBrand = (await AsyncStorage.getItem(camKey('camera_brand'))) || (await AsyncStorage.getItem('camera_brand'));
-                const savedCameraId = (await AsyncStorage.getItem(camKey('camera_id'))) || (await AsyncStorage.getItem('camera_id'));
+                const mode = await AsyncStorage.getItem('camera_monitoringMode');
+                const savedCatsJson = await AsyncStorage.getItem('camera_selectedCats');
+                const savedStatus = await AsyncStorage.getItem('camera_status');
+                const savedBrand = await AsyncStorage.getItem('camera_brand');
+                const savedCameraId = await AsyncStorage.getItem('camera_id');
                 const savedZoneLabel = await AsyncStorage.getItem('camera_zone_summary');
 
                 if (mode) setMonitoringMode(mode);
@@ -161,8 +145,8 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
                         const onlyCat = [cats[0].id];
                         setMonitoringMode('single');
                         setSelectedCats(onlyCat);
-                        await AsyncStorage.setItem(camKey('camera_monitoringMode'), 'single');
-                        await AsyncStorage.setItem(selectedCatsKey, JSON.stringify(onlyCat));
+                        await AsyncStorage.setItem('camera_monitoringMode', 'single');
+                        await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(onlyCat));
                     } else if (savedCatsJson) {
                         setSelectedCats(JSON.parse(savedCatsJson));
                     } else if (cats && cats.length > 0) {
@@ -206,7 +190,7 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
     const refreshLatestSnapshot = async () => {
         setLatestSnapshotUrl(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
         try {
-            const targetCameraId = cameraId || (await AsyncStorage.getItem(camKey('camera_id'))) || (await AsyncStorage.getItem('camera_id'));
+            const targetCameraId = cameraId || await AsyncStorage.getItem('camera_id');
             const url = targetCameraId
                 ? `${VIDEO_SERVER_BASE}/api/zone_status?camera_id=${encodeURIComponent(targetCameraId)}`
                 : `${VIDEO_SERVER_BASE}/api/zone_status`;
@@ -279,7 +263,7 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
 
             if (resolvedCameraId) {
                 setCameraId(resolvedCameraId);
-                await AsyncStorage.setItem(camKey('camera_id'), resolvedCameraId);
+                await AsyncStorage.setItem('camera_id', resolvedCameraId);
                 await syncCameraCatsAssignment(resolvedCameraId, selectedCats);
             }
             return resolvedCameraId;
@@ -288,7 +272,7 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
 
     const updateCameraStatus = async (status) => {
         setCameraStatus(status);
-        await AsyncStorage.setItem(camKey('camera_status'), status);
+        await AsyncStorage.setItem('camera_status', status);
         if (session?.user?.id && cameraId) {
             const aiConnectionStatus = status === 'connected' ? 'online' : 'offline';
             try { await supabase.from('cameras').update({ ai_connection_status: aiConnectionStatus }).eq('id', cameraId); } catch (err) { }
@@ -359,13 +343,13 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
             } else {
                 await upsertCameraConfig({ brand: selectedCameraPreset, aiConnectionStatus: 'online' });
                 await updateCameraStatus('connected');
-                await AsyncStorage.setItem(camKey('camera_brand'), selectedCameraPreset);
-                await AsyncStorage.setItem(camKey('camera_setup_complete'), 'true');
+                await AsyncStorage.setItem('camera_brand', selectedCameraPreset);
+                await AsyncStorage.setItem('camera_setup_complete', 'true');
                 setCommittedCameraBrand(selectedCameraPreset);
                 setIsUpdateMode(true);
             }
 
-            // à¸«à¸¥à¸±à¸‡à¸¢à¸·à¸™à¸¢à¸±à¸™à¹€à¸Šà¸·à¹ˆà¸­à¸¡/à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™à¸à¸¥à¹‰à¸­à¸‡ à¸žà¸²à¹„à¸›à¸«à¸™à¹‰à¸² Phone à¸—à¸µà¹ˆà¸‚à¸±à¹‰à¸™à¹€à¸Šà¸·à¹ˆà¸­à¸¡à¸ªà¸³à¹€à¸£à¹‡à¸ˆà¸—à¸±à¸™à¸—à¸µ
+            // หลังยืนยันเชื่อม/เปลี่ยนกล้อง พาไปหน้า Phone ที่ขั้นเชื่อมสำเร็จทันที
             onNavigate('Phone', {
                 initialStep: 'live',
                 brand: selectedCameraPreset,
@@ -396,7 +380,7 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
             animateSelection(committedCameraBrand);
             return;
         }
-        // à¸œà¸¹à¹‰à¹ƒà¸Šà¹‰à¸—à¸µà¹ˆà¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¹€à¸„à¸¢à¹€à¸Šà¸·à¹ˆà¸­à¸¡: à¸–à¹‰à¸² Cancel à¹ƒà¸«à¹‰à¹„à¸¡à¹ˆà¸„à¹‰à¸²à¸‡à¹„à¸®à¹„à¸¥à¸—à¹Œà¹„à¸§à¹‰
+        // ผู้ใช้ที่ยังไม่เคยเชื่อม: ถ้า Cancel ให้ไม่ค้างไฮไลท์ไว้
         if (!committedCameraBrand) {
             setSelectedCameraPreset(null);
             animateSelection('');
@@ -407,13 +391,13 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
         animateSelection(brandId);
         successAnim.setValue(0);
         await updateCameraStatus("disconnected");
-        await AsyncStorage.multiRemove(['camera_monitoringMode', camKey('camera_monitoringMode'), 'camera_selectedCats', selectedCatsKey, 'camera_setup_complete', camKey('camera_setup_complete'), 'camera_zone_summary', 'camera_zone_feeding', 'camera_zone_litter']);
+        await AsyncStorage.multiRemove(['camera_monitoringMode', 'camera_selectedCats', 'camera_setup_complete', 'camera_zone_summary', 'camera_zone_feeding', 'camera_zone_litter']);
         if (cameraId) { await clearCameraZonesInDb(cameraId); }
         setMonitoringMode('multi');
         setSelectedCats(myCats.map((cat) => cat.id));
         setZoneLabel(defaultZoneLabel);
         setIsUpdateMode(false);
-        await AsyncStorage.removeItem(camKey('camera_brand'));
+        await AsyncStorage.removeItem('camera_brand');
         setCommittedCameraBrand(null);
         await upsertCameraConfig({ brand: brandId, aiConnectionStatus: 'offline' });
     };
@@ -442,7 +426,7 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
             }
         }
         setSelectedCats(newSelected);
-        await AsyncStorage.setItem(selectedCatsKey, JSON.stringify(newSelected));
+        await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(newSelected));
         if (cameraStatus === 'connected' && cameraId) {
             await syncCameraCatsAssignment(cameraId, newSelected);
         }
@@ -454,13 +438,13 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
             return;
         }
         setMonitoringMode(mode);
-        await AsyncStorage.setItem(camKey('camera_monitoringMode'), mode);
+        await AsyncStorage.setItem('camera_monitoringMode', mode);
         if (cameraStatus === 'connected') await upsertCameraConfig({ mode });
         if (mode === 'single') {
             if (myCats && myCats.length > 0) {
                 const first = [myCats[0].id];
                 setSelectedCats(first);
-                await AsyncStorage.setItem(selectedCatsKey, JSON.stringify(first));
+                await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(first));
                 if (cameraStatus === 'connected' && cameraId) await syncCameraCatsAssignment(cameraId, first);
             } else {
                 setSelectedCats([]);
@@ -485,15 +469,15 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
             <LinearGradient colors={['#f5fffdff', '#f5fffdff']} style={{ flex: 1 }}>
                 <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
                     {/* Header */}
-                    <HomeHeader
-                        leftComponent={
-                            <TouchableOpacity onPress={() => onNavigate('Camera')} style={styles.backBtnStyle} activeOpacity={0.85}>
-                                <Ionicons name="chevron-back" size={28} color="#333" />
-                            </TouchableOpacity>
-                        }
-                        onNotify={() => onNavigate('Alert')}
-                        onSetting={() => onNavigate('Setcamera')}
-                    />
+                    <View style={styles.header}>
+                        <TouchableOpacity onPress={() => onNavigate('Camera')} style={styles.backBtnStyle} activeOpacity={0.85}>
+                            <Ionicons name="chevron-back" size={28} color="#333" />
+                        </TouchableOpacity>
+                        <View style={styles.titleContainer}>
+                            <Text style={styles.headerTitle}>Camera Settings</Text>
+                        </View>
+                        <View style={styles.headerIconBtn} />
+                    </View>
 
                     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
                         {/* 1. Connection Status Banner */}
@@ -548,7 +532,7 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
                                         <View style={styles.zoneMarkerFixed} pointerEvents="none">
                                             <Text style={styles.zoneMarkerText}>{zoneLabel}</Text>
                                         </View>
-                                        {/* à¸¥à¸šà¸•à¸±à¸§à¸­à¸±à¸›à¹€à¸”à¸•à¹€à¸§à¸¥à¸²à¸­à¸­à¸ à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™à¹€à¸›à¹‡à¸™à¸‚à¹‰à¸­à¸„à¸§à¸²à¸¡à¸„à¸‡à¸—à¸µà¹ˆ */}
+                                        {/* ลบตัวอัปเดตเวลาออก เปลี่ยนเป็นข้อความคงที่ */}
                                         <Text style={styles.scanUpdateText} pointerEvents="none">
                                             Latest Snapshot
                                         </Text>
@@ -791,4 +775,3 @@ const styles = StyleSheet.create({
     earLeft: { transform: [{ rotate: '-15deg' }] },
     earRight: { transform: [{ rotate: '15deg' }] },
 });
-

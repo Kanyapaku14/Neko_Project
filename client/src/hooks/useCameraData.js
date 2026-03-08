@@ -86,6 +86,7 @@ export default function useCameraData(session, cameraStatus) {
           const selectedIds = newData.settings.selectedCats?.length
             ? newData.settings.selectedCats.filter((id) => catIds.includes(id))
             : catIds;
+          const alertCatIds = catIds;
 
           const today = toLocalDate();
           const dayStartIso = startOfDayIso();
@@ -139,7 +140,7 @@ export default function useCameraData(session, cameraStatus) {
                 });
 
                 // à¸à¸£à¸“à¸µ DB à¸¡à¸µ cat_id à¸—à¸µà¹ˆ events à¸šà¸­à¸à¸§à¹ˆà¸²à¹„à¸¡à¹ˆà¹ƒà¸Šà¹ˆà¹à¸¡à¸§à¸‚à¸­à¸‡ user
-                const unknownCatEvents = aiEventsAll.filter((e) => e.cat_id && !selectedIds.includes(e.cat_id));
+                const unknownCatEvents = aiEventsAll.filter((e) => e.cat_id && !alertCatIds.includes(e.cat_id));
                 let reviewSnaps = [];
                 if (storedCameraId) {
                   const { data } = await supabase
@@ -151,12 +152,12 @@ export default function useCameraData(session, cameraStatus) {
                     .limit(20);
                   reviewSnaps = Array.isArray(data) ? data : [];
                 }
-                if (selectedIds.length > 0 && unknownCatEvents.length > 0) {
+                if (alertCatIds.length > 0 && unknownCatEvents.length > 0) {
                   const unknownIds = [...new Set(unknownCatEvents.map((e) => e.cat_id))];
                   // à¸”à¸¶à¸‡ snapshot à¸ˆà¸²à¸ ai_cat_identity_review
                   if (
-                    (selectedIds.length === 1 && unknownIds.length >= 2) ||
-                    (selectedIds.length >= 2 && unknownIds.length >= selectedIds.length)
+                    (alertCatIds.length === 1 && unknownIds.length >= 2) ||
+                    (alertCatIds.length >= 2 && unknownIds.length >= alertCatIds.length)
                   ) {
                     // à¸à¸£à¸“à¸µ DB à¸¡à¸µ 1 à¹à¸¡à¸§à¹à¸•à¹ˆà¸à¸¥à¹‰à¸­à¸‡à¸•à¸£à¸§à¸ˆà¹„à¸”à¹‰ 2+ cat_id
                     // à¸‚à¸¶à¹‰à¸™ popup à¹€à¸”à¸µà¸¢à¸§à¹à¸ªà¸”à¸‡ 2 à¸£à¸¹à¸›à¸žà¸£à¹‰à¸­à¸¡à¸à¸±à¸™ à¹ƒà¸«à¹‰à¹€à¸¥à¸·à¸­à¸à¸§à¹ˆà¸²à¸•à¸±à¸§à¹„à¸«à¸™à¸„à¸·à¸­à¹à¸¡à¸§à¹€à¸£à¸²
@@ -170,14 +171,14 @@ export default function useCameraData(session, cameraStatus) {
                         snapshot_url: snap?.snapshot_url || null,
                       };
                     });
-                    const pairDedupeKey = `identity_pair:${storedCameraId}:${unknownIds.slice(0, 4).sort().join('|')}:${selectedIds.length}`;
+                    const pairDedupeKey = `identity_pair:${storedCameraId}:${unknownIds.slice(0, 4).sort().join('|')}:${alertCatIds.length}`;
                     AlertEngine.logPendingIdentity({
-                      behaviorLabel: (selectedIds.length >= 2 && unknownIds.length === selectedIds.length) ? 'identity_map' : 'unknown',
+                      behaviorLabel: (alertCatIds.length >= 2 && unknownIds.length === alertCatIds.length) ? 'identity_map' : 'unknown',
                       confidence: 0.5,
                       cropSnapshot: multiSnapshots[0]?.snapshot_url || `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`,
                       multiSnapshots,   // â† field à¹ƒà¸«à¸¡à¹ˆ: array à¸‚à¸­à¸‡ 2 à¸£à¸¹à¸›
                       sessionId: pairDedupeKey,
-                      source: (selectedIds.length >= 2 && unknownIds.length === selectedIds.length) ? 'identity_map_exact' : 'useCameraData_dual',
+                      source: (alertCatIds.length >= 2 && unknownIds.length === alertCatIds.length) ? 'identity_map_exact' : 'useCameraData_dual',
                       isAbnormal: false,
                       dedupeKey: pairDedupeKey,
                       cooldownMs: 15 * 60 * 1000,
@@ -187,7 +188,7 @@ export default function useCameraData(session, cameraStatus) {
                     unknownIds.slice(0, 3).forEach((unknownId) => {
                       const sample = unknownCatEvents.find((e) => e.cat_id === unknownId);
                       const snap = reviewSnaps?.find((r) =>
-                        !r.pred_cat_id || !selectedIds.includes(r.pred_cat_id)
+                        !r.pred_cat_id || !alertCatIds.includes(r.pred_cat_id)
                       );
                       const behaviorNorm = normalizeBehavior(sample?.behavior_label);
                       const isAbnormalUnknown = behaviorNorm === 'abnormal';
@@ -204,6 +205,63 @@ export default function useCameraData(session, cameraStatus) {
                       });
                     });
                   }
+                }
+
+                // Multi-cat zone/session confirm:
+                // If 2+ cats have eat/litter events in the same recent session window,
+                // raise one confirmation alert (with the top 2 cats by count).
+                if (alertCatIds.length >= 2) {
+                  const SESSION_WINDOW_MIN = 10;
+                  const MIN_SESSION_EVENTS = 3;
+                  const windowStartMs = Date.now() - (SESSION_WINDOW_MIN * 60 * 1000);
+
+                  ['eat', 'litter'].forEach((targetBehavior) => {
+                    const sessionEvents = aiEventsAll.filter((e) => {
+                      const cid = e?.cat_id;
+                      if (!cid || !alertCatIds.includes(cid)) return false;
+                      if (normalizeBehavior(e?.behavior_label) !== targetBehavior) return false;
+                      const ts = new Date(e?.occurred_at || 0).getTime();
+                      return Number.isFinite(ts) && ts >= windowStartMs;
+                    });
+
+                    if (sessionEvents.length < MIN_SESSION_EVENTS) return;
+
+                    const byCat = {};
+                    sessionEvents.forEach((e) => {
+                      byCat[e.cat_id] = (byCat[e.cat_id] || 0) + 1;
+                    });
+                    const ranked = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+                    if (ranked.length < 2) return;
+
+                    const topTwo = ranked.slice(0, 2).map(([cid, count]) => ({ cid, count }));
+                    const latestTs = Math.max(...sessionEvents.map((e) => new Date(e.occurred_at || 0).getTime()));
+                    const sessionBucket = Math.floor(latestTs / (SESSION_WINDOW_MIN * 60 * 1000));
+                    const dedupeKey = `identity_zone_session:${storedCameraId}:${targetBehavior}:${sessionBucket}`;
+
+                    const multiSnapshots = topTwo.map(({ cid, count }) => {
+                      const evt = sessionEvents.find((e) => e?.cat_id === cid);
+                      const snap = reviewSnaps?.find((r) => !r.pred_cat_id || r.pred_cat_id === cid);
+                      return {
+                        unknownCatId: cid,
+                        behaviorLabel: targetBehavior,
+                        confidence: evt?.confidence ?? 0.5,
+                        snapshot_url: snap?.snapshot_url || null,
+                        metadata: { session_count: count },
+                      };
+                    });
+
+                    AlertEngine.logPendingIdentity({
+                      behaviorLabel: targetBehavior === 'eat' ? 'feeding_session' : 'litter_session',
+                      confidence: 0.5,
+                      cropSnapshot: multiSnapshots[0]?.snapshot_url || `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`,
+                      multiSnapshots,
+                      sessionId: dedupeKey,
+                      source: 'useCameraData_zone_session',
+                      isAbnormal: false,
+                      dedupeKey,
+                      cooldownMs: SESSION_WINDOW_MIN * 60 * 1000,
+                    });
+                  });
                 }
 
                 // à¸à¸£à¸“à¸µ litter à¹€à¸¢à¸­à¸°à¸¡à¸²à¸ (à¸•à¸±à¹‰à¸‡à¹à¸•à¹ˆ 5 à¸„à¸£à¸±à¹‰à¸‡/à¸§à¸±à¸™) â†’ à¸–à¸²à¸¡à¸§à¹ˆà¸²à¹à¸¡à¸§à¸•à¸±à¸§à¹„à¸«à¸™à¹ƒà¸Šà¹‰à¸¡à¸²à¸à¸ªà¸¸à¸”
