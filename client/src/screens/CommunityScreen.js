@@ -133,36 +133,48 @@ export default function CommunityScreen({ onBack, session, onNavigate }) {
   const [optionPost, setOptionPost] = useState(null); // Post ที่กำลังกดปุ่ม 3 จุด
   const [editingPost, setEditingPost] = useState(null); // Post ที่กำลังจะแก้ไข
 
-  const uploadImage = async (uri) => {
-    if (!uri || uri.startsWith('http')) return uri; // Already uploaded or empty
+  const uploadImage = async (imageString) => {
+    if (!imageString) return null;
 
-    try {
-      const fileName = `${session.user.id}_${Date.now()}.jpg`;
+    const uris = imageString.split(',');
+    const uploadedUrls = [];
 
-      // ใช้ ArrayBuffer แทน Blob เพื่อความเสถียรใน React Native (แก้ปัญหา 0 bytes)
-      const response = await fetch(uri);
-      const arrayBuffer = await response.arrayBuffer();
+    for (let uri of uris) {
+      if (!uri) continue;
+      if (uri.startsWith('http')) {
+        uploadedUrls.push(uri); // Already uploaded
+        continue;
+      }
 
-      const { data, error: uploadError } = await supabase.storage
-        .from('posts')
-        .upload(fileName, arrayBuffer, {
-          contentType: 'image/jpeg',
-          upsert: true
-        });
+      try {
+        const fileName = `${session.user.id}_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
 
-      if (uploadError) throw uploadError;
-      if (!data) throw new Error("Storage upload failed - no data returned");
+        // ใช้ ArrayBuffer แทน Blob เพื่อความเสถียรใน React Native (แก้ปัญหา 0 bytes)
+        const response = await fetch(uri);
+        const arrayBuffer = await response.arrayBuffer();
 
-      const { data: urlData } = supabase.storage
-        .from('posts')
-        .getPublicUrl(fileName);
+        const { data, error: uploadError } = await supabase.storage
+          .from('posts')
+          .upload(fileName, arrayBuffer, {
+            contentType: 'image/jpeg',
+            upsert: true
+          });
 
-      return urlData.publicUrl;
-    } catch (e) {
-      console.log("Upload error:", e);
-      Alert.alert("Upload Error", e.message || "Failed to upload image. Please check your internet or bucket settings.");
-      return null;
+        if (uploadError) throw uploadError;
+        if (!data) throw new Error("Storage upload failed - no data returned");
+
+        const { data: urlData } = supabase.storage
+          .from('posts')
+          .getPublicUrl(fileName);
+
+        uploadedUrls.push(urlData.publicUrl);
+      } catch (e) {
+        console.log("Upload error for uri", uri, e);
+        // Continue uploading remaining images even if one fails
+      }
     }
+
+    return uploadedUrls.length > 0 ? uploadedUrls.join(',') : null;
   };
 
   // ➕ Save Post to Database

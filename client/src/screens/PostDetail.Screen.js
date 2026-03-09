@@ -12,9 +12,12 @@ import {
   Platform,
   SafeAreaView,
   StatusBar,
+  ScrollView,
+  Dimensions,
   Alert
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+const { width: screenWidth } = Dimensions.get('window');
 // import { currentUser } from "../utils/auth"; // ❌ Removed
 
 const formatTime = (time) => {
@@ -42,6 +45,19 @@ export default function PostDetailScreen({
   const myProfile = {
     name: userProfile?.name || "Neko User", // Default if missing
     avatar: userProfile?.avatar_url || "https://placekitten.com/80/80"
+  };
+
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+  const images = post.image ? post.image.split(',').filter(Boolean) : [];
+
+  const handleScroll = (event) => {
+    const slideSize = event.nativeEvent.layoutMeasurement.width;
+    const index = event.nativeEvent.contentOffset.x / slideSize;
+    const roundIndex = Math.round(index);
+    if (roundIndex !== currentImageIndex) {
+      setCurrentImageIndex(roundIndex);
+    }
   };
 
   useEffect(() => {
@@ -165,12 +181,38 @@ export default function PostDetailScreen({
                     {!!String(post.content || '').trim() && (
                       <Text style={styles.contentText}>{post.content}</Text>
                     )}
-                    {post.image && (
-                      <Image
-                        source={{ uri: post.image }}
-                        style={styles.postImage}
-                        resizeMode="cover"
-                      />
+
+                    {images.length > 0 && (
+                      <View>
+                        <ScrollView
+                          horizontal
+                          pagingEnabled
+                          showsHorizontalScrollIndicator={false}
+                          onMomentumScrollEnd={handleScroll}
+                          style={styles.carouselContainer}
+                        >
+                          {images.map((imgUri, index) => (
+                            <View key={index} style={styles.slide}>
+                              <Image source={{ uri: imgUri }} style={styles.postImage} resizeMode="cover" />
+                            </View>
+                          ))}
+                        </ScrollView>
+
+                        {/* Pagination Dots */}
+                        {images.length > 1 && (
+                          <View style={styles.paginationContainer}>
+                            {images.map((_, index) => (
+                              <View
+                                key={index}
+                                style={[
+                                  styles.dot,
+                                  currentImageIndex === index ? styles.activeDot : styles.inactiveDot
+                                ]}
+                              />
+                            ))}
+                          </View>
+                        )}
+                      </View>
                     )}
                   </View>
                 </View>
@@ -372,11 +414,39 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 12,
   },
+  carouselContainer: {
+    width: '100%',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  slide: {
+    width: screenWidth - 64, // Same calculation as PostCard
+    alignItems: 'center',
+  },
   postImage: {
     width: "100%",
     height: 220,
     borderRadius: 16,
     backgroundColor: "#F5F5F5",
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginHorizontal: 3,
+  },
+  activeDot: {
+    backgroundColor: "#26A69A",
+    width: 16,
+  },
+  inactiveDot: {
+    backgroundColor: "#E0E0E0",
   },
   footer: {
     flexDirection: "row",
