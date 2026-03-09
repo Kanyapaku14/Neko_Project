@@ -229,7 +229,7 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
 
             // Success
             Alert.alert('Success', 'Cat Profile Saved!', [
-                { text: 'OK', onPress: () => (onBack ? onBack() : onNavigateToHome && onNavigateToHome(resultCatId)) }
+                { text: 'OK', onPress: () => { if (onNavigateToHome) onNavigateToHome(resultCatId); } }
             ]);
 
         } catch (error) {
@@ -420,13 +420,14 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
                             <TouchableOpacity
                                 activeOpacity={0.8}
                                 onPress={() => setIsBreedDropdownOpen(!isBreedDropdownOpen)}
-                                style={[styles.input, { 
+                                style={[styles.input, {
                                     flexDirection: 'row',
-                                     justifyContent: 'space-between',
-                                      alignItems: 'center',
-                                       width: '80%',
-                                    paddingHorizontal: 15, 
-                                    height: 50 }]}
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    width: '80%',
+                                    paddingHorizontal: 15,
+                                    height: 50
+                                }]}
                             >
                                 <Text
                                     style={{ fontSize: 16, color: breed ? '#333' : '#999', flexShrink: 1, paddingRight: 8 }}

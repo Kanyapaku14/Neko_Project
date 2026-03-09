@@ -246,7 +246,7 @@ export default function App() {
   }, [session?.user?.id]);
 
   // Check if user has profile and cat
-  const checkUserProfileStatus = async (session) => {
+  const checkUserProfileStatus = async (session, skipNavigation = false) => {
     if (!session?.user) return;
 
     try {
@@ -259,7 +259,7 @@ export default function App() {
         .single();
 
       if (profileError || !profile || !profile.name) {
-        setAuthScreen({ screen: 'Profile', params: { isFirstTime: true } }); // Go to Profile fill first
+        if (!skipNavigation) setAuthScreen({ screen: 'Profile', params: { isFirstTime: true } }); // Go to Profile fill first
         return;
       }
 
@@ -272,15 +272,15 @@ export default function App() {
         .single();
 
       if (catError || !cat) {
-        setAuthScreen({ screen: 'CatProfile', params: { isFirstTime: true } }); // Go to Cat Profile
+        if (!skipNavigation) setAuthScreen({ screen: 'CatProfile', params: { isFirstTime: true } }); // Go to Cat Profile
         return;
       }
 
       setCatId(cat.id); // ✅ Save catId
       setCatName(cat.name); // ✅ Save catName
 
-      // If all good, explicitly set to Home
-      setAuthScreen('Home');
+      // If all good, explicitly set to Home, unless skipping
+      if (!skipNavigation) setAuthScreen('Home');
     } catch (err) {
       console.log("Check status error:", err);
     } finally {
@@ -310,8 +310,13 @@ export default function App() {
           <CatProfile
             session={session}
             catId={screenParams?.catId || null}
-            onBack={isFirstTime ? undefined : () => setAuthScreen('Setting')}
-            onNavigateToHome={() => {
+            onBack={isFirstTime ? () => setAuthScreen({ screen: 'Profile', params: { isFirstTime: true } }) : () => setAuthScreen('Setting')}
+            onNavigateToHome={async (newCatId) => {
+              // Update local state early so checkUserProfileStatus doesn't fail later
+              if (newCatId) setCatId(newCatId);
+              // Run the check without navigation to update other local state
+              await checkUserProfileStatus(session, true);
+
               if (isFirstTime) {
                 setAuthScreen('Tutorail');
               } else {

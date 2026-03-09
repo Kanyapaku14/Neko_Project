@@ -31,7 +31,7 @@ const TUTORIAL_SLIDES = [
         id: "3",
         image: require('../../assets/Tutorial/welcome2.png'),
         title: "Photo Health Check",
-        description: "Simply snap a photo to screen for skin\nissues, coat health, and visual signs of\ndistress. AI-powered peace of mind.\n\nⓘ Screening tool, not a medical diagnosis.",
+        description: "Simply snap a photo to screen for pain\nthrough facial cues, body condition, and\nstool health. AI-powered peace of mind.\n\nⓘ Screening tool, not a medical diagnosis.",
 
     },
     {
@@ -39,8 +39,9 @@ const TUTORIAL_SLIDES = [
         image: require('../../assets/Tutorial/welcome3.jpg'),
         title: "Photo Health Check",
         description: "Simply snap a photo to screen for skin\nissues, coat health, and visual signs of\ndistress. AI-powered peace of mind.\n\nⓘ Screening tool, not a medical diagnosis.",
-        customWidth: width * 0.70,
-        customHeight: width * 0.65 // Snug fit for landscape camera
+        customWidth: width * 0.55,
+        customHeight: width * 0.80
+        // Snug fit for landscape camera
     },
     {
         id: "5",
