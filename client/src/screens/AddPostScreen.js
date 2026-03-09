@@ -13,17 +13,17 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-// import { currentUser } from "../utils/auth"; // ❌ Removed
+// import { currentUser } from "../utils/auth"; //
 
 import * as ImagePicker from 'expo-image-picker';
 
 export default function AddPostScreen({ onClose, onSubmit, initialPost, userProfile, currentUserId }) {
   const [text, setText] = useState(initialPost?.content ?? "");
-  const [image, setImage] = useState(initialPost?.image ?? "");
+  const [images, setImages] = useState(initialPost?.image ? initialPost.image.split(',') : []);
 
   const isEditing = !!initialPost;
   const trimmedText = String(text ?? "").trim();
-  const canSubmit = !!trimmedText || !!image;
+  const canSubmit = !!trimmedText || images.length > 0;
 
   // Resolve User Data (Priority: InitialPost > UserProfile > Default)
   const displayUser = {
@@ -42,7 +42,7 @@ export default function AddPostScreen({ onClose, onSubmit, initialPost, userProf
         avatar: displayUser.avatar,
       },
       content: trimmedText,
-      image: image || null,
+      image: images.length > 0 ? images.join(',') : null,
       likes: initialPost ? initialPost.likes : [],
       comments: initialPost ? initialPost.comments : [],
       createdAt: initialPost ? initialPost.createdAt : Date.now(),
@@ -56,14 +56,18 @@ export default function AddPostScreen({ onClose, onSubmit, initialPost, userProf
     // No permissions request is necessary for launching the image library
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
+      allowsMultipleSelection: true,
       quality: 1,
     });
 
     if (!result.canceled) {
-      setImage(result.assets[0].uri);
+      const selectedUris = result.assets.map(asset => asset.uri);
+      setImages(prev => [...prev, ...selectedUris]);
     }
+  };
+
+  const removeImage = (indexToRemove) => {
+    setImages(prev => prev.filter((_, index) => index !== indexToRemove));
   };
 
   return (
@@ -107,14 +111,18 @@ export default function AddPostScreen({ onClose, onSubmit, initialPost, userProf
           />
 
           {/* Image Preview Area */}
-          {image ? (
-            <View style={styles.imagePreviewContainer}>
-              <Image source={{ uri: image }} style={styles.imagePreview} />
-              <TouchableOpacity style={styles.removeImageBtn} onPress={() => setImage("")}>
-                <Ionicons name="close-circle" size={24} color="#FFF" />
-              </TouchableOpacity>
-            </View>
-          ) : null}
+          {images.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagePreviewScroll}>
+              {images.map((imgUri, index) => (
+                <View key={index} style={styles.imagePreviewContainer}>
+                  <Image source={{ uri: imgUri }} style={styles.imagePreview} />
+                  <TouchableOpacity style={styles.removeImageBtn} onPress={() => removeImage(index)}>
+                    <Ionicons name="close-circle" size={24} color="#FFF" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          )}
 
           {/* Added spacer for bottom toolbar visibility when scrolling */}
           <View style={{ height: 100 }} />
@@ -218,9 +226,13 @@ const styles = StyleSheet.create({
   },
 
   // Image Preview
-  imagePreviewContainer: {
+  imagePreviewScroll: {
     marginTop: 16,
+    flexDirection: 'row',
+  },
+  imagePreviewContainer: {
     position: 'relative',
+    marginRight: 12,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -228,8 +240,8 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   imagePreview: {
-    width: '100%',
-    height: 220, // Reduced from 280
+    width: 200, // Fixed width for horizontal scroll
+    height: 220,
     borderRadius: 16,
     backgroundColor: "#E0F2F1",
     resizeMode: 'cover',

@@ -484,7 +484,7 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                 allowsEditing: true,
                 aspect: [1, 1],
                 quality: 0.8,
-                base64: true, // เพิ่มตัวนี้!!
+                base64: true,
             });
 
             if (!result.canceled) {
@@ -599,9 +599,19 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
             setLoading(true);
 
             // Re-using exiting uploadImage from CommunityProfile, but 'posts' bucket
-            let uploadedImageUrl = postData.image;
-            if (postData.image && !postData.image.startsWith('http')) {
-                uploadedImageUrl = await uploadImage(postData.image, 'posts');
+            let uploadedImageUrl = null;
+            if (postData.image) {
+                const uris = postData.image.split(',').filter(Boolean);
+                const newUrls = [];
+                for (let uri of uris) {
+                    if (!uri.startsWith('http')) {
+                        const newUrl = await uploadImage(uri, 'posts');
+                        if (newUrl) newUrls.push(newUrl);
+                    } else {
+                        newUrls.push(uri);
+                    }
+                }
+                uploadedImageUrl = newUrls.length > 0 ? newUrls.join(',') : null;
             }
 
             const payload = {
