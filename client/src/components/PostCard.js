@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
   },
   postImage: {
     width: "100%",
-    height: 220,
+    aspectRatio: 1, // Forces 1:1 Square Ratio
     borderRadius: 16,
     backgroundColor: "#F5F5F5",
   },

@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
   },
   imagePreview: {
     width: 200, // Fixed width for horizontal scroll
-    height: 220,
+    aspectRatio: 1,
     borderRadius: 16,
     backgroundColor: "#E0F2F1",
     resizeMode: 'cover',
