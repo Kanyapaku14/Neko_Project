@@ -471,7 +471,7 @@ const styles = StyleSheet.create({
     color: "#546E7A",
   },
 
-  // ─── Comment Divider ───
+  // ─── Comment Divider 
   commentDivider: {
     flexDirection: "row",
     alignItems: "center",

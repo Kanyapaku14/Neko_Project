@@ -13,7 +13,7 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-// import { currentUser } from "../utils/auth"; // ❌ Removed
+// import { currentUser } from "../utils/auth"; //
 
 import * as ImagePicker from 'expo-image-picker';
 

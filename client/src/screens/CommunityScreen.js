@@ -142,7 +142,7 @@ export default function CommunityScreen({ onBack, session, onNavigate }) {
     for (let uri of uris) {
       if (!uri) continue;
       if (uri.startsWith('http')) {
-        uploadedUrls.push(uri); // Already uploaded
+        uploadedUrls.push(uri);
         continue;
       }
 

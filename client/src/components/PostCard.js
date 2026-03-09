@@ -17,7 +17,7 @@ export default function PostCard({ post, onLike, onOpen, onMore, currentUserId }
   const isLiked = post.likes.includes(currentUserId);
   const timeAgo = new Date(post.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
-  // Parse images
+
   const images = post.image ? post.image.split(',').filter(Boolean) : [];
 
   const handleScroll = (event) => {

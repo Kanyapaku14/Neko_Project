@@ -484,7 +484,7 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                 allowsEditing: true,
                 aspect: [1, 1],
                 quality: 0.8,
-                base64: true, // เพิ่มตัวนี้!!
+                base64: true,
             });
 
             if (!result.canceled) {
