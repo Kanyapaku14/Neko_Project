@@ -39,6 +39,7 @@ export default function RankingScreen({ session, onBack }) {
   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
   const [checkinHistory, setCheckinHistory] = useState([]); // List of dates checked in this week
   const [currentCheckinStreak, setCurrentCheckinStreak] = useState(0);
+  const [isCheckingIn, setIsCheckingIn] = useState(false); // Fix duplicate trigger
 
   // Mission State
   const [myLogStreak, setMyLogStreak] = useState(0);
@@ -60,7 +61,7 @@ export default function RankingScreen({ session, onBack }) {
     setRefreshing(true);
     await loadAll();
     setRefreshing(false);
-  }, [loadAll]);
+  }, [session]); // Removed 'loadAll' dependency to prevent stale closure loop if loadAll changes
 
   // ─── Load Data ───
   useEffect(() => {
@@ -440,7 +441,7 @@ export default function RankingScreen({ session, onBack }) {
         score += (assessCount || 0) * 2;
       } catch { }
 
-      // 4) Count assessments with image (3pt each) — ถ้ามี table
+      // 4) Count assessments with image (1pt each)
       try {
         const { count: photoCount } = await supabase
           .from("assessments")
@@ -448,7 +449,7 @@ export default function RankingScreen({ session, onBack }) {
           .eq("user_id", userId)
           .not("image_url", "is", null);
 
-        score += (photoCount || 0) * 3;
+        score += (photoCount || 0) * 1;
       } catch { }
     } catch (e) {
       console.log("Score calc error:", e);
@@ -478,7 +479,7 @@ export default function RankingScreen({ session, onBack }) {
           checkinScore += streak; // Day 1 = +1
 
           const [y, m, d] = uniqueDates[0].split('-');
-              let checkDate = new Date(y, m - 1, d);
+          let checkDate = new Date(y, m - 1, d);
           for (let i = 1; i < uniqueDates.length; i++) {
             checkDate.setDate(checkDate.getDate() - 1);
             if (uniqueDates[i] === getLocalDateString(checkDate)) {
@@ -545,7 +546,7 @@ export default function RankingScreen({ session, onBack }) {
         if (uniqueDates[0] === today || uniqueDates[0] === yesterdayStr) {
           currentStreak = 1;
           const [y, m, d] = uniqueDates[0].split('-');
-              let checkDate = new Date(y, m - 1, d);
+          let checkDate = new Date(y, m - 1, d);
           for (let i = 1; i < uniqueDates.length; i++) {
             checkDate.setDate(checkDate.getDate() - 1);
             if (uniqueDates[i] === getLocalDateString(checkDate)) {
@@ -558,22 +559,27 @@ export default function RankingScreen({ session, onBack }) {
       }
 
       setCurrentCheckinStreak(currentStreak);
+
+      // --- AUTO CHECK-IN LOGIC ---
+      if (!alreadyCheckedInToday && session?.user?.id && !isCheckingIn) {
+        // Safe to call handleCheckIn here without setting state loops 
+        // because hasCheckedInToday will become true
+        await performAutoCheckIn(session.user.id, currentStreak, alreadyCheckedInToday);
+      }
     } catch (e) {
       console.log("Check status error:", e);
     }
   };
 
-  const handleCheckIn = async () => {
-    if (hasCheckedInToday || !session?.user?.id) return;
-
+  const performAutoCheckIn = async (userId, currentStreakParam, isAlreadyCheckedIn) => {
+    if (isAlreadyCheckedIn || isCheckingIn) return;
+    setIsCheckingIn(true);
     try {
-      // 1. Determine streak to know how many points to award
       let pointsToAward = 1;
-
       const { data: previousCheckins } = await supabase
         .from("daily_checkins")
         .select("checkin_date")
-        .eq("user_id", session.user.id)
+        .eq("user_id", userId)
         .order("checkin_date", { ascending: false });
 
       if (previousCheckins && previousCheckins.length > 0) {
@@ -583,9 +589,9 @@ export default function RankingScreen({ session, onBack }) {
         const yesterdayStr = getLocalDateString(yesterday);
 
         if (uniqueDates[0] === yesterdayStr) {
-          let streak = 1; // Yesterday is day 1 of history
+          let streak = 1;
           const [y, m, d] = uniqueDates[0].split('-');
-              let checkDate = new Date(y, m - 1, d);
+          let checkDate = new Date(y, m - 1, d);
           for (let i = 1; i < uniqueDates.length; i++) {
             checkDate.setDate(checkDate.getDate() - 1);
             if (uniqueDates[i] === getLocalDateString(checkDate)) {
@@ -594,15 +600,14 @@ export default function RankingScreen({ session, onBack }) {
               break;
             }
           }
-          pointsToAward = streak + 1; // Today's points = yesterday's streak + 1
+          pointsToAward = streak + 1;
         }
       }
 
-      // 2. Insert the check-in
       const { error } = await supabase
         .from("daily_checkins")
         .insert({
-          user_id: session.user.id,
+          user_id: userId,
           checkin_date: getLocalDateString(new Date())
         });
 
@@ -610,12 +615,14 @@ export default function RankingScreen({ session, onBack }) {
 
       setHasCheckedInToday(true);
 
-      // 3. Update permanent score column if exists
+      // Update the running streak locally so UI shows immediately
+      setCurrentCheckinStreak(prev => prev + 1);
+
       try {
         const { data: currentProfile } = await supabase
           .from("profiles")
           .select("score")
-          .eq("id", session.user.id)
+          .eq("id", userId)
           .single();
 
         if (currentProfile) {
@@ -623,18 +630,30 @@ export default function RankingScreen({ session, onBack }) {
           await supabase
             .from("profiles")
             .update({ score: newScore })
-            .eq("id", session.user.id);
+            .eq("id", userId);
         }
-      } catch (scoreEx) {
-        console.log("Failed to update permanent score column:", scoreEx);
+      } catch (scoreEx) { }
+
+      // Optionally reload the score in the background to sync UI without a loading spinner
+      loadMyProfile();
+      if (viewMode === "friends") {
+        loadFriends();
+      } else {
+        loadGlobalRankings();
       }
 
+      // Notify User
       Alert.alert("สำเร็จ! 🎉", `เช็คอินต่อเนื่องรับ ${pointsToAward} คะแนน`);
-      loadAll(); // Refresh score and ranking
+
     } catch (e) {
-      console.log("Check-in error:", e);
-      Alert.alert("Error", "ไม่สามารถเช็คอินได้ในขณะนี้ (กรุณาตรวจสอบว่ามีตาราง daily_checkins หรือยัง)");
+      console.log("Auto check-in error:", e);
+    } finally {
+      setIsCheckingIn(false);
     }
+  };
+
+  const handleCheckIn = async () => {
+    // Deprecated for Auto Check-in but kept for safety if previously referenced
   };
 
   // ─── Combined Ranking ───
@@ -1003,21 +1022,6 @@ export default function RankingScreen({ session, onBack }) {
                     );
                   })}
                 </View>
-
-                <TouchableOpacity
-                  style={[styles.checkInBtn, hasCheckedInToday && styles.checkInBtnDisabled]}
-                  onPress={handleCheckIn}
-                  disabled={hasCheckedInToday}
-                >
-                  <LinearGradient
-                    colors={hasCheckedInToday ? ["#CFD8DC", "#B0BEC5"] : ["#4DB6AC", "#26A69A"]}
-                    style={styles.checkInBtnGradient}
-                  >
-                    <Text style={styles.checkInBtnText}>
-                      {hasCheckedInToday ? "Already Checked In" : "Check-in Now"}
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
               </View>
 
               {/* My Profile Card */}
