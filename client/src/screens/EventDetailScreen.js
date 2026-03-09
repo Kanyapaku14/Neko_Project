@@ -62,20 +62,37 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
     }
 
     // 3 Severity Levels Config
-    const getSeverityConfig = (sev) => {
-        switch (sev) {
+    const getAlertVisuals = (alert) => {
+        const type = String(alert?.type || '').toLowerCase();
+        const severity = String(alert?.severity || 'info').toLowerCase();
+
+        if (alert.pendingIdentityConfirm) {
+            return { icon: 'help-rhombus-outline', color: '#E65100', bg: '#FFF8E1', text: 'Pending Identity' };
+        }
+        if (type === 'pending_identity' && alert.resolvedBy === 'skipped') {
+            return { icon: 'cat-off', color: '#B42318', bg: '#FFE4E6', text: 'Identity Skipped' };
+        }
+
+        switch (type) {
+            case 'litter_summary':
+                return { icon: 'emoticon-poop-outline', color: '#0288D1', bg: '#E1F5FE', text: 'Litter Summary' };
+            case 'camera_moved':
+                return { icon: 'video-off-outline', color: '#E65100', bg: '#FFF3E0', text: 'Camera Moved' };
+            case 'assessment_saved':
+                return { icon: 'clipboard-check-outline', color: '#2E7D32', bg: '#E8F5E9', text: 'Assessment Saved' };
+        }
+
+        // Fallback to severity
+        switch (severity) {
             case 'critical':
-                return { color: '#B71C1C', bg: '#FFCDD2', icon: 'alert-circle', text: 'Critical Alert' };
+                return { icon: 'alert-circle-outline', color: '#D32F2F', bg: '#FFEBEE', text: 'Critical Alert' };
             case 'warning':
-                return { color: '#E65100', bg: '#FFE0B2', icon: 'alert', text: 'Warning' };
-            case 'success':
-            case 'info':
+                return { icon: 'alert-outline', color: '#F57C00', bg: '#FFF3E0', text: 'Warning' };
             default:
-                return { color: '#1B5E20', bg: '#C8E6C9', icon: 'check-circle', text: 'System Info' };
+                return { icon: 'information-outline', color: '#0277BD', bg: '#E1F5FE', text: 'Information' };
         }
     };
-    const normalizedSeverity = (alertView.severity || '').toLowerCase();
-    const sevConfig = getSeverityConfig(normalizedSeverity);
+    const sevConfig = getAlertVisuals(alertView);
     const isIdentityAlert = alertView.type === 'pending_identity';
     const isPending = alertView.pendingIdentityConfirm === true;
     const isRejectedIdentity = isIdentityAlert && !isPending && alertView.resolvedBy === 'skipped';

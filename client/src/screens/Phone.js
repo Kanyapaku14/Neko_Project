@@ -50,6 +50,15 @@ export default function Phone({
     isHideBackButton = false,
     isHideSkipButton = false
 }) {
+    const previewFrameHeight = Math.max(220, Math.min(340, Math.round((width - 40) * 9 / 16)));
+    const scopedStatusKey = session?.user?.id ? `camera_status:${session.user.id}` : 'camera_status';
+    const scopedBrandKey = session?.user?.id ? `camera_brand:${session.user.id}` : 'camera_brand';
+    const scopedCameraIdKey = session?.user?.id ? `camera_id:${session.user.id}` : 'camera_id';
+    const scopedSetupKey = session?.user?.id ? `camera_setup_complete:${session.user.id}` : 'camera_setup_complete';
+    const scopedZoneFeedingKey = session?.user?.id ? `camera_zone_feeding:${session.user.id}` : 'camera_zone_feeding';
+    const scopedZoneLitterKey = session?.user?.id ? `camera_zone_litter:${session.user.id}` : 'camera_zone_litter';
+    const scopedZoneSummaryKey = session?.user?.id ? `camera_zone_summary:${session.user.id}` : 'camera_zone_summary';
+
     const getStepNumber = (step) => {
         if (typeof step === 'number') return step;
         switch (step) {
@@ -83,6 +92,8 @@ export default function Phone({
     const [stableStreamUrl] = useState(`${VIDEO_STREAM_URL}&t=${new Date().getTime()}`);
     const [latestSnapshotUrl, setLatestSnapshotUrl] = useState(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
     const [zoneStatus, setZoneStatus] = useState({ camera_moved: false, zones_configured: 0 });
+    const [hasDbCameraSource, setHasDbCameraSource] = useState(false);
+    const [cameraGateChecked, setCameraGateChecked] = useState(false);
 
     // Animations
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -101,20 +112,83 @@ export default function Phone({
     }, []);
 
     useEffect(() => {
+        // Reset transient UI state when switching account
+        setCurrentStep(isUpdateMode ? 3 : getStepNumber(initialStep));
+        setSelectedBrand(brand || null);
+        setConnected(Boolean(brand));
+        setInlineNotice(null);
+        setHasDbCameraSource(false);
+        setCameraGateChecked(false);
+    }, [session?.user?.id]);
+
+    const resolveOwnerCamera = async () => {
+        if (!session?.user?.id) return { camera: null, hasSource: false };
+        const { data: dbCameras, error } = await supabase
+            .from('cameras')
+            .select('id, brand, mode, stream_source, is_primary')
+            .eq('owner_id', session.user.id)
+            .order('is_primary', { ascending: false })
+            .order('created_at', { ascending: true });
+        if (error) throw error;
+
+        const storedCameraId = (await AsyncStorage.getItem(scopedCameraIdKey)) || (await AsyncStorage.getItem('camera_id'));
+        const ownedStored = (dbCameras || []).find((c) => c.id === storedCameraId) || null;
+        const activeCamera = ownedStored || (dbCameras || [])[0] || null;
+        const hasSource = Boolean(String(activeCamera?.stream_source || '').trim());
+        return { camera: activeCamera, hasSource };
+    };
+
+    const enforceDbCameraSourceGate = async ({ silent = false } = {}) => {
+        try {
+            const { camera, hasSource } = await resolveOwnerCamera();
+            setHasDbCameraSource(hasSource);
+            setCameraGateChecked(true);
+            if (hasSource) {
+                if (camera?.id) {
+                    await AsyncStorage.setItem(scopedCameraIdKey, camera.id);
+                    await AsyncStorage.setItem('camera_id', camera.id);
+                }
+                return true;
+            }
+
+            setConnected(false);
+            setCurrentStep(1);
+            await AsyncStorage.setItem(scopedStatusKey, 'disconnected');
+            await AsyncStorage.setItem('camera_status', 'disconnected');
+            await AsyncStorage.setItem(scopedSetupKey, 'false');
+            await AsyncStorage.setItem('camera_setup_complete', 'false');
+            if (!silent) {
+                showNotice('No camera source in DB. Please complete setup in Setcamera before continuing.', 'warning');
+            }
+            return false;
+        } catch (e) {
+            console.warn('Failed to validate camera source gate:', e);
+            setHasDbCameraSource(false);
+            setCameraGateChecked(true);
+            if (!silent) showNotice('Unable to validate camera source.', 'danger');
+            return false;
+        }
+    };
+
+    useEffect(() => {
+        enforceDbCameraSourceGate({ silent: true });
+    }, [session?.user?.id]);
+
+    useEffect(() => {
         const loadSavedZones = async () => {
             try {
-                const [savedFeeding, savedLitter] = await AsyncStorage.multiGet(['camera_zone_feeding', 'camera_zone_litter']);
+                const [savedFeeding, savedLitter] = await AsyncStorage.multiGet([scopedZoneFeedingKey, scopedZoneLitterKey]);
                 if (savedFeeding?.[1]) setFeedingZone(JSON.parse(savedFeeding[1]));
                 if (savedLitter?.[1]) setLitterZone(JSON.parse(savedLitter[1]));
             } catch (e) { console.error('Failed to load saved zones', e); }
         };
         loadSavedZones();
-    }, []);
+    }, [session?.user?.id, scopedZoneFeedingKey, scopedZoneLitterKey]);
 
     const refreshLatestSnapshot = async () => {
         setLatestSnapshotUrl(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
         try {
-            const cameraId = await AsyncStorage.getItem('camera_id');
+            const cameraId = (await AsyncStorage.getItem(scopedCameraIdKey)) || (await AsyncStorage.getItem('camera_id'));
             const url = cameraId
                 ? `${VIDEO_SERVER_BASE}/api/zone_status?camera_id=${encodeURIComponent(cameraId)}`
                 : `${VIDEO_SERVER_BASE}/api/zone_status`;
@@ -133,7 +207,7 @@ export default function Phone({
         refreshLatestSnapshot();
         const t = setInterval(refreshLatestSnapshot, 15000);
         return () => clearInterval(t);
-    }, []);
+    }, [session?.user?.id, scopedCameraIdKey]);
 
     useEffect(() => {
         if (selectedBrand) {
@@ -178,33 +252,33 @@ export default function Phone({
         };
 
         try {
-            const { data: existingCamera, error: fetchErr } = await supabase
+            const { data: existingCameras, error: fetchErr } = await supabase
                 .from('cameras')
-                .select('id')
+                .select('id, stream_source, is_primary')
                 .eq('owner_id', session.user.id)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
+                .order('is_primary', { ascending: false })
+                .order('created_at', { ascending: true });
+            if (fetchErr) throw fetchErr;
+
+            const activeCamera = (existingCameras || []).find((c) => String(c.stream_source || '').trim()) || null;
 
             let resolvedCameraId = null;
 
-            if (existingCamera && existingCamera.id) {
-                resolvedCameraId = existingCamera.id;
+            if (activeCamera && activeCamera.id) {
+                resolvedCameraId = activeCamera.id;
                 const { error: updateErr } = await supabase.from('cameras').update(payload).eq('id', resolvedCameraId);
                 if (updateErr) throw updateErr;
             } else {
-                const insertPayload = {
-                    ...payload,
-                    stream_source: CAMERA_RTSP_URL,
-                    stream_source_type: 'rtsp',
-                };
-                const { data: inserted, error: insertErr } = await supabase.from('cameras').insert(insertPayload).select('id').single();
-                if (insertErr) throw insertErr;
-                resolvedCameraId = inserted?.id || null;
+                // Do not auto-create a connected camera/source for brand new accounts.
+                showNotice('No camera configured yet. Please connect camera source in Setcamera first.', 'warning');
+                setHasDbCameraSource(false);
+                return null;
             }
 
             if (!resolvedCameraId) return null;
+            await AsyncStorage.setItem(scopedCameraIdKey, resolvedCameraId);
             await AsyncStorage.setItem('camera_id', resolvedCameraId);
+            setHasDbCameraSource(true);
             setInlineNotice(null);
             return resolvedCameraId;
         } catch (e) {
@@ -215,13 +289,28 @@ export default function Phone({
     };
 
     const handleLogin = async () => {
+        const gateOk = await enforceDbCameraSourceGate();
+        if (!gateOk) {
+            setConnected(false);
+            return;
+        }
         setIsConnecting(true);
         setTimeout(async () => {
-            await ensureCameraWithSource(selectedBrand, 'online');
+            const resolvedCameraId = await ensureCameraWithSource(selectedBrand, 'online');
+            if (!resolvedCameraId) {
+                setIsConnecting(false);
+                setConnected(false);
+                return;
+            }
             setIsConnecting(false);
             setConnected(true);
-            await AsyncStorage.setItem('camera_status', 'connected');
-            await AsyncStorage.setItem('camera_brand', selectedBrand);
+            // Connection established but not completed setup flow yet.
+            await AsyncStorage.setItem(scopedStatusKey, 'disconnected');
+            await AsyncStorage.setItem('camera_status', 'disconnected');
+            await AsyncStorage.setItem(scopedBrandKey, selectedBrand || '');
+            await AsyncStorage.setItem('camera_brand', selectedBrand || '');
+            await AsyncStorage.setItem(scopedSetupKey, 'false');
+            await AsyncStorage.setItem('camera_setup_complete', 'false');
             setCurrentStep(2);
             Animated.sequence([
                 Animated.spring(successAnim, { toValue: 1, tension: 50, friction: 7, useNativeDriver: true }),
@@ -233,14 +322,24 @@ export default function Phone({
     };
 
     const handleSkip = async () => {
+        await AsyncStorage.setItem(scopedStatusKey, 'disconnected');
         await AsyncStorage.setItem('camera_status', 'disconnected');
+        await AsyncStorage.setItem(scopedBrandKey, '');
         await AsyncStorage.setItem('camera_brand', '');
+        await AsyncStorage.setItem(scopedSetupKey, 'true');
         await AsyncStorage.setItem('camera_setup_complete', 'true');
         onConfirm();
     };
 
     const handleNextStep = async () => {
-        if (currentStep === 2) await ensureCameraWithSource(selectedBrand, connected ? 'online' : 'offline');
+        if (currentStep >= 2) {
+            const gateOk = await enforceDbCameraSourceGate();
+            if (!gateOk) return;
+        }
+        if (currentStep === 2) {
+            const resolved = await ensureCameraWithSource(selectedBrand, connected ? 'online' : 'offline');
+            if (!resolved) return;
+        }
         Animated.timing(stepAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start(() => {
             setCurrentStep(prev => Math.min(prev + 1, 4));
             stepAnim.setValue(0);
@@ -291,12 +390,15 @@ export default function Phone({
 
     const persistZones = async () => {
         await AsyncStorage.multiSet([
+            [scopedZoneFeedingKey, JSON.stringify(feedingZone)],
+            [scopedZoneLitterKey, JSON.stringify(litterZone)],
+            [scopedZoneSummaryKey, 'Feeding + Litter'],
             ['camera_zone_feeding', JSON.stringify(feedingZone)],
             ['camera_zone_litter', JSON.stringify(litterZone)],
             ['camera_zone_summary', 'Feeding + Litter'],
         ]);
         try {
-            const cameraId = await AsyncStorage.getItem('camera_id');
+            const cameraId = (await AsyncStorage.getItem(scopedCameraIdKey)) || (await AsyncStorage.getItem('camera_id'));
             if (!cameraId) return;
             let frameSig = null;
             let frameSigTs = null;
@@ -372,11 +474,7 @@ export default function Phone({
                 <SafeAreaView style={styles.container}>
                     {/* Header */}
                     <View style={styles.header}>
-                        {!isHideBackButton && currentStep === 1 ? (
-                            <TouchableOpacity onPress={onBack} style={styles.backBtnStyle} activeOpacity={0.85}>
-                                <Ionicons name="chevron-back" size={28} color="#333" />
-                            </TouchableOpacity>
-                        ) : !isHideBackButton || currentStep > 1 ? (
+                        {!isHideBackButton || currentStep > 1 ? (
                             <TouchableOpacity onPress={handlePrevStep} style={styles.backBtnStyle} activeOpacity={0.85}>
                                 <Ionicons name="chevron-back" size={28} color="#333" />
                             </TouchableOpacity>
@@ -411,6 +509,14 @@ export default function Phone({
                                                 <Text style={[styles.inlineNoticeText, inlineNotice.tone === 'danger' ? styles.inlineNoticeTextDanger : styles.inlineNoticeTextWarning]}>{inlineNotice.message}</Text>
                                             </View>
                                         )}
+                                        {cameraGateChecked && !hasDbCameraSource && (
+                                            <View style={[styles.inlineNotice, styles.inlineNoticeWarning]}>
+                                                <MaterialCommunityIcons name="link-off" size={16} color="#0F766E" />
+                                                <Text style={[styles.inlineNoticeText, styles.inlineNoticeTextWarning]}>
+                                                    This account has no camera link/video in DB yet. Please set camera source first.
+                                                </Text>
+                                            </View>
+                                        )}
                                     </View>
                                     <View style={styles.cardContainer}>
                                         {BRANDS.map((brand) => {
@@ -432,10 +538,10 @@ export default function Phone({
                                         {selectedBrand && !isConnecting && (
                                             <View style={{ marginTop: 30 }}>
                                                 <Text style={[styles.subtitle, { marginBottom: 12 }]}>Log in to {BRANDS.find(b => b.id === selectedBrand)?.name} to link your camera feed.</Text>
-                                                <TouchableOpacity style={styles.loginButton} onPress={handleLogin} disabled={isConnecting}>
+                                                <TouchableOpacity style={[styles.loginButton, (!hasDbCameraSource || isConnecting) && { opacity: 0.55 }]} onPress={handleLogin} disabled={isConnecting || !hasDbCameraSource}>
                                                     <View style={styles.gradientBtn}>
                                                         <MaterialCommunityIcons name="link-variant-plus" size={18} color="#FFFFFF" />
-                                                        <Text style={styles.loginText}>Connect Now</Text>
+                                                        <Text style={styles.loginText}>{hasDbCameraSource ? 'Connect Now' : 'No DB Source'}</Text>
                                                     </View>
                                                 </TouchableOpacity>
                                             </View>
@@ -458,15 +564,33 @@ export default function Phone({
                                             <View style={styles.liveBadge}><Text style={styles.liveText}>LIVE STREAM</Text></View>
                                             <Text style={styles.title}>Test Live Feed</Text>
                                             <Text style={styles.subtitle}>Verify the camera feed is working correctly.</Text>
+                                            {!hasDbCameraSource && (
+                                                <Text style={[styles.subtitle, { marginTop: 8, color: '#B42318', fontWeight: '600' }]}>
+                                                    No camera source in DB. Please connect in Setcamera first.
+                                                </Text>
+                                            )}
                                         </View>
 
                                         {/* 🚨 แสดงกล้องผ่าน Component ย่อย */}
-                                        <View style={[styles.previewCard, { overflow: 'hidden' }]}>
-                                            <LiveVideoFeed />
+                                        <View style={[styles.previewCard, { overflow: 'hidden', height: previewFrameHeight }]}>
+                                            {hasDbCameraSource ? (
+                                                <LiveVideoFeed />
+                                            ) : (
+                                                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 }}>
+                                                    <MaterialCommunityIcons name="camera-off-outline" size={28} color="#94A3B8" />
+                                                    <Text style={[styles.subtitle, { marginTop: 8, textAlign: 'center' }]}>
+                                                        No camera source in DB for this account.
+                                                    </Text>
+                                                </View>
+                                            )}
                                         </View>
 
                                     </View>
-                                    <TouchableOpacity style={[styles.nextButton, { marginTop: 20 }]} onPress={handleNextStep}>
+                                    <TouchableOpacity
+                                        style={[styles.nextButton, { marginTop: 20 }, !hasDbCameraSource && { opacity: 0.55 }]}
+                                        onPress={handleNextStep}
+                                        disabled={!hasDbCameraSource}
+                                    >
                                         <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
                                             <Text style={[styles.nextText, styles.nextTextLight]}>Next: Set Zones</Text>
                                         </LinearGradient>
@@ -569,7 +693,10 @@ export default function Phone({
                                     </View>
                                     <TouchableOpacity style={[styles.nextButton, { width: '100%' }]} onPress={async () => {
                                         await persistZones();
+                                        await AsyncStorage.setItem(scopedSetupKey, 'true');
                                         await AsyncStorage.setItem('camera_setup_complete', 'true');
+                                        await AsyncStorage.setItem(scopedStatusKey, 'connected');
+                                        await AsyncStorage.setItem('camera_status', 'connected');
                                         onConfirm();
                                     }}>
                                         <LinearGradient colors={["#00897B", "#00695C"]} style={styles.gradientNext}>
@@ -674,7 +801,7 @@ const styles = StyleSheet.create({
     inlineNoticeTextWarning: { color: '#0F766E' },
     inlineNoticeTextDanger: { color: '#B42318' },
     skipButtonText: { color: "#90A4AE", fontSize: 13, fontWeight: "600", textDecorationLine: "underline" },
-    previewCard: { marginTop: 10, height: 300, borderRadius: 24, backgroundColor: "#E5E7EB", overflow: "hidden", position: 'relative' },
+    previewCard: { marginTop: 10, borderRadius: 24, backgroundColor: "#E5E7EB", overflow: "hidden", position: 'relative' },
     nextButton: { marginTop: 20 },
     gradientNext: { paddingVertical: 12, borderRadius: 14, alignItems: "center", flexDirection: 'row', justifyContent: 'center', borderColor: '#0F766E', borderWidth: 1, shadowColor: '#0F766E', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 1 },
     nextText: { fontSize: 13, fontWeight: "700" },

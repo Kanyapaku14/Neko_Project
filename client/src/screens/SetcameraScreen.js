@@ -27,7 +27,6 @@ const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 // 🚨 กำหนด URL ของ Camera Server (Port 5000)
 const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed_raw?fps=15&quality=62&width=960';
 const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
-const CAMERA_RTSP_URL = 'rtsp://testt1:1234test@192.168.1.102:554/stream2';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -102,6 +101,10 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const scopedModeKey = session?.user?.id ? `camera_monitoringMode:${session.user.id}` : 'camera_monitoringMode';
     const scopedCatsKey = session?.user?.id ? `camera_selectedCats:${session.user.id}` : 'camera_selectedCats';
+    const scopedSetupKey = session?.user?.id ? `camera_setup_complete:${session.user.id}` : 'camera_setup_complete';
+    const scopedStatusKey = session?.user?.id ? `camera_status:${session.user.id}` : 'camera_status';
+    const scopedBrandKey = session?.user?.id ? `camera_brand:${session.user.id}` : 'camera_brand';
+    const scopedCameraIdKey = session?.user?.id ? `camera_id:${session.user.id}` : 'camera_id';
     const persistSelectedCats = async (catIds) => {
         const unique = [...new Set((catIds || []).filter(Boolean))];
         await AsyncStorage.setItem(scopedCatsKey, JSON.stringify(unique));
@@ -121,30 +124,79 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
                 await AlertEngine.setScope(session?.user?.id || 'anonymous');
                 const mode = (await AsyncStorage.getItem(scopedModeKey)) || (await AsyncStorage.getItem('camera_monitoringMode'));
                 const savedCatsJson = (await AsyncStorage.getItem(scopedCatsKey)) || (await AsyncStorage.getItem('camera_selectedCats'));
-                const savedStatus = await AsyncStorage.getItem('camera_status');
-                const savedBrand = await AsyncStorage.getItem('camera_brand');
-                const savedCameraId = await AsyncStorage.getItem('camera_id');
+                const savedStatus = await AsyncStorage.getItem(scopedStatusKey);
+                const savedBrand = await AsyncStorage.getItem(scopedBrandKey);
+                const savedCameraId = await AsyncStorage.getItem(scopedCameraIdKey);
                 const savedZoneLabel = await AsyncStorage.getItem('camera_zone_summary');
 
                 if (mode) setMonitoringMode(mode);
-                if (savedStatus) setCameraStatus(savedStatus);
-                if (savedBrand && savedStatus === 'connected') {
-                    setSelectedCameraPreset(savedBrand);
-                    setCommittedCameraBrand(savedBrand);
-                    animateSelection(savedBrand);
-                    setIsUpdateMode(true);
-                    successAnim.setValue(1);
-                } else {
-                    setSelectedCameraPreset(null);
-                    setCommittedCameraBrand(null);
-                    animateSelection('');
-                }
-                if (savedCameraId) setCameraId(savedCameraId);
                 if (savedZoneLabel) {
                     setZoneLabel(savedZoneLabel);
                 }
 
                 if (session?.user?.id) {
+                    const { data: dbCameras } = await supabase
+                        .from('cameras')
+                        .select('id, brand, mode, stream_source, is_primary, ai_connection_status')
+                        .eq('owner_id', session.user.id)
+                        .order('is_primary', { ascending: false })
+                        .order('created_at', { ascending: true });
+
+                    const ownedStored = (dbCameras || []).find((c) => c.id === savedCameraId);
+                    const activeDbCam = ownedStored || (dbCameras || [])[0] || null;
+                    const hasDbSource = Boolean(String(activeDbCam?.stream_source || '').trim());
+
+                    const setupCompleteRaw =
+                        (await AsyncStorage.getItem(scopedSetupKey)) ||
+                        (await AsyncStorage.getItem('camera_setup_complete'));
+                    const isSetupComplete = String(setupCompleteRaw || '').toLowerCase() === 'true';
+
+                    if (hasDbSource && isSetupComplete) {
+                        const dbBrand = String(activeDbCam?.brand || savedBrand || '').trim() || null;
+                        const dbMode = String(activeDbCam?.mode || '').toLowerCase().includes('single') ? 'single' : 'multi';
+                        const dbStatus = activeDbCam?.ai_connection_status === 'online' ? 'connected' : (savedStatus || 'connected');
+
+                        setCameraStatus(dbStatus);
+                        setCameraId(activeDbCam.id);
+                        await AsyncStorage.setItem(scopedCameraIdKey, activeDbCam.id);
+                        await AsyncStorage.setItem('camera_id', activeDbCam.id);
+
+                        if (dbBrand) {
+                            setSelectedCameraPreset(dbBrand);
+                            setCommittedCameraBrand(dbBrand);
+                            animateSelection(dbBrand);
+                            setIsUpdateMode(true);
+                            successAnim.setValue(1);
+                            await AsyncStorage.setItem(scopedBrandKey, dbBrand);
+                            await AsyncStorage.setItem('camera_brand', dbBrand);
+                        }
+
+                        setMonitoringMode(dbMode);
+                        await AsyncStorage.setItem(scopedModeKey, dbMode);
+                        await AsyncStorage.setItem('camera_monitoringMode', dbMode);
+                    } else {
+                        // DB ยังไม่มีลิงก์/วิดีโอ: หน้า Setcamera ต้องไม่โชว์ข้อมูลเชื่อมต่อค้าง
+                        setCameraStatus('disconnected');
+                        setSelectedCameraPreset(null);
+                        setCommittedCameraBrand(null);
+                        setCameraId(null);
+                        setIsUpdateMode(false);
+                        successAnim.setValue(0);
+                        animateSelection('');
+                        setZoneLabel(defaultZoneLabel);
+
+                        await AsyncStorage.multiRemove([
+                            scopedStatusKey,
+                            scopedBrandKey,
+                            scopedCameraIdKey,
+                            scopedSetupKey,
+                            'camera_status',
+                            'camera_brand',
+                            'camera_id',
+                            'camera_setup_complete',
+                        ]);
+                    }
+
                     const { data: cats, error } = await supabase.from('cats').select('*').eq('owner_id', session.user.id);
                     if (error) throw error;
                     setMyCats(cats || []);
@@ -211,7 +263,7 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
     const refreshLatestSnapshot = async () => {
         setLatestSnapshotUrl(`${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`);
         try {
-            const targetCameraId = cameraId || await AsyncStorage.getItem('camera_id');
+            const targetCameraId = cameraId || await AsyncStorage.getItem(scopedCameraIdKey);
             const url = targetCameraId
                 ? `${VIDEO_SERVER_BASE}/api/zone_status?camera_id=${encodeURIComponent(targetCameraId)}`
                 : `${VIDEO_SERVER_BASE}/api/zone_status`;
@@ -221,6 +273,18 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
                 camera_moved: Boolean(st?.camera_moved),
                 zones_configured: Number(st?.zones_configured || 0),
             });
+            if (st?.camera_moved) {
+                AlertEngine.logEvent({
+                    type: 'camera_moved',
+                    severity: 'warning',
+                    title: 'Camera Position Changed',
+                    desc: 'The camera has been moved. Please re-configure your detection zones to ensure accurate monitoring.',
+                    details: 'AI monitoring is paused until zones are re-confirmed.',
+                    source: 'camera_system',
+                    dedupeKey: `camera_moved:${cameraId || 'unknown'}:${new Date().toISOString().slice(0, 13)}`, // Dedupe per hour
+                    cooldownMs: 60 * 60 * 1000,
+                });
+            }
         } catch (_e) {
             // ignore
         }
@@ -273,17 +337,14 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
             if (resolvedCameraId) {
                 await supabase.from('cameras').update(payload).eq('id', resolvedCameraId);
             } else {
-                const insertPayload = {
-                    ...payload,
-                    stream_source: CAMERA_RTSP_URL,
-                    stream_source_type: 'rtsp',
-                };
-                const { data: inserted } = await supabase.from('cameras').insert(insertPayload).select('id').single();
-                resolvedCameraId = inserted?.id || null;
+                // Do not auto-create camera with default source.
+                // User must already have camera + stream_source in DB.
+                return null;
             }
 
             if (resolvedCameraId) {
                 setCameraId(resolvedCameraId);
+                await AsyncStorage.setItem(scopedCameraIdKey, resolvedCameraId);
                 await AsyncStorage.setItem('camera_id', resolvedCameraId);
                 await syncCameraCatsAssignment(resolvedCameraId, selectedCats);
             }
@@ -293,6 +354,7 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
 
     const updateCameraStatus = async (status) => {
         setCameraStatus(status);
+        await AsyncStorage.setItem(scopedStatusKey, status);
         await AsyncStorage.setItem('camera_status', status);
         if (session?.user?.id && cameraId) {
             const aiConnectionStatus = status === 'connected' ? 'online' : 'offline';
@@ -301,6 +363,13 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
     };
 
     const refreshSignalStatus = async () => {
+        // Guard: never mark connected from serverCam alone.
+        // Must have an account-bound connected camera first.
+        if (!cameraId || !isUpdateMode) {
+            await updateCameraStatus('disconnected');
+            setSignalInfo((prev) => ({ ...prev, lastCheckedAt: new Date().toISOString() }));
+            return;
+        }
         const startedAt = Date.now();
         try {
             const res = await fetch(`${VIDEO_SERVER_BASE}/api/health`);
@@ -347,7 +416,7 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
         try {
             await wait(900);
             if (isChangingConnectedBrand) {
-                const keys = ['camera_status', 'camera_brand', 'camera_monitoringMode', 'camera_selectedCats', 'camera_setup_complete', 'camera_zone_summary', 'camera_zone_feeding', 'camera_zone_litter', 'camera_id'];
+                const keys = [scopedStatusKey, scopedBrandKey, scopedModeKey, scopedCatsKey, scopedSetupKey, 'camera_zone_summary', 'camera_zone_feeding', 'camera_zone_litter', scopedCameraIdKey];
                 const pairs = await AsyncStorage.multiGet(keys);
                 const storage = {};
                 pairs.forEach(([k, v]) => { if (typeof v === 'string') storage[k] = v; });
@@ -362,10 +431,20 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
                 }));
                 await applyBrandChange(selectedCameraPreset);
             } else {
-                await upsertCameraConfig({ brand: selectedCameraPreset, aiConnectionStatus: 'online' });
-                await updateCameraStatus('connected');
+                const resolvedCameraId = await upsertCameraConfig({ brand: selectedCameraPreset, aiConnectionStatus: 'online' });
+                if (!resolvedCameraId) {
+                    Alert.alert(
+                        'Cannot Connect',
+                        'No camera source found in database for this account. Please add camera link/video first.'
+                    );
+                    return;
+                }
+                // Mark as pending until Phone setup flow is completed.
+                await updateCameraStatus('disconnected');
+                await AsyncStorage.setItem(scopedBrandKey, selectedCameraPreset);
                 await AsyncStorage.setItem('camera_brand', selectedCameraPreset);
-                await AsyncStorage.setItem('camera_setup_complete', 'true');
+                await AsyncStorage.setItem(scopedSetupKey, 'false');
+                await AsyncStorage.setItem('camera_setup_complete', 'false');
                 setCommittedCameraBrand(selectedCameraPreset);
                 setIsUpdateMode(true);
             }
@@ -412,12 +491,13 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
         animateSelection(brandId);
         successAnim.setValue(0);
         await updateCameraStatus("disconnected");
-        await AsyncStorage.multiRemove(['camera_monitoringMode', 'camera_selectedCats', 'camera_setup_complete', 'camera_zone_summary', 'camera_zone_feeding', 'camera_zone_litter']);
+        await AsyncStorage.multiRemove([scopedStatusKey, scopedBrandKey, scopedCameraIdKey, scopedModeKey, scopedCatsKey, scopedSetupKey, 'camera_monitoringMode', 'camera_selectedCats', 'camera_setup_complete', 'camera_zone_summary', 'camera_zone_feeding', 'camera_zone_litter']);
         if (cameraId) { await clearCameraZonesInDb(cameraId); }
         setMonitoringMode('multi');
         setSelectedCats(myCats.map((cat) => cat.id));
         setZoneLabel(defaultZoneLabel);
         setIsUpdateMode(false);
+        await AsyncStorage.removeItem(scopedBrandKey);
         await AsyncStorage.removeItem('camera_brand');
         setCommittedCameraBrand(null);
         await upsertCameraConfig({ brand: brandId, aiConnectionStatus: 'offline' });
