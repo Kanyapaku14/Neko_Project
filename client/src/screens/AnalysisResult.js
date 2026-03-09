@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     View, Text, SafeAreaView, ScrollView,
-    TouchableOpacity, StyleSheet,
+    TouchableOpacity, StyleSheet, Animated, Dimensions, Image
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomNav from '../components/BottomNav';
+import supabase from './config/supabaseClient';
+
+const { width: windowWidth } = Dimensions.get('window');
 
 // ── ค่า config ตาม slot ──────────────────────────────────────────────────────
 const SLOT_CONFIG = {
@@ -27,7 +30,45 @@ const STATUS_CONFIG = {
 };
 
 // ── AnalysisResult Screen ────────────────────────────────────────────────────
-export default function AnalysisResult({ onNavigate, result }) {
+export default function AnalysisResult({ onNavigate, result, recordId }) {
+    const [images, setImages] = useState([]);
+    const [showImages, setShowImages] = useState(false);
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const fadeAnim = useRef(new Animated.Value(1)).current; // 1 = text, 0 = images
+
+    // Fetch images when recordId is known
+    useEffect(() => {
+        if (!recordId) return;
+        const fetchImages = async () => {
+            const { data, error } = await supabase
+                .from('ai_photo_checks')
+                .select('image_face_url, image_body_url, image_poop_url, image_vomit_url')
+                .eq('id', recordId)
+                .single();
+            if (data && !error) {
+                // Get ordered list, filter out nulls
+                const imgList = [
+                    { key: 'face', url: data.image_face_url },
+                    { key: 'body', url: data.image_body_url },
+                    { key: 'poop', url: data.image_poop_url },
+                    { key: 'vomit', url: data.image_vomit_url },
+                ].filter(item => item.url);
+                setImages(imgList);
+            }
+        };
+        fetchImages();
+    }, [recordId]);
+
+    const toggleImages = () => {
+        if (images.length === 0) return; // Don't flip if no images
+        Animated.timing(fadeAnim, {
+            toValue: showImages ? 1 : 0,
+            duration: 300,
+            useNativeDriver: true,
+        }).start(() => {
+            setShowImages(!showImages);
+        });
+    };
 
     // ── กรณีไม่มีผล (ยังโหลดไม่เสร็จหรือมีข้อผิดพลาด) ─────────────────────
     if (!result) {
@@ -77,16 +118,90 @@ export default function AnalysisResult({ onNavigate, result }) {
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
             >
-                {/* Overall Status Card */}
-                <View style={[styles.overallCard, { backgroundColor: statusCfg.bg }]}>
-                    <Ionicons name={statusCfg.icon} size={36} color={statusCfg.text} />
-                    <Text style={[styles.overallStatus, { color: statusCfg.text }]}>
-                        {overallStatus}
-                    </Text>
-                    <Text style={[styles.overallDesc, { color: statusCfg.text }]}>
-                        {overallDesc}
-                    </Text>
-                </View>
+                {/* Overall Status Card / Image Carousel */}
+                <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => {
+                        if (showImages) return; // ไม่ให้สลับกลับถ้าแสดงรูปอยู่แล้ว
+                        if (images.length === 0) return;
+                        setShowImages(true);
+                        Animated.timing(fadeAnim, {
+                            toValue: 0,
+                            duration: 300,
+                            useNativeDriver: true,
+                        }).start();
+                    }}
+                >
+                    <View style={[styles.overallCard, {
+                        backgroundColor: showImages ? '#000' : statusCfg.bg,
+                        minHeight: 240,
+                        justifyContent: 'center',
+                        padding: showImages ? 0 : 20,
+                        overflow: 'hidden'
+                    }]}>
+                        <Animated.View style={{ opacity: fadeAnim, width: '100%', alignItems: 'center', display: showImages ? 'none' : 'flex' }}>
+                            <Ionicons name={statusCfg.icon} size={36} color={statusCfg.text} />
+                            <Text style={[styles.overallStatus, { color: statusCfg.text }]}>
+                                {overallStatus}
+                            </Text>
+                            <Text style={[styles.overallDesc, { color: statusCfg.text }]}>
+                                {overallDesc}
+                            </Text>
+                        </Animated.View>
+
+                        {images.length > 0 && (
+                            <Animated.View style={{
+                                opacity: fadeAnim.interpolate({
+                                    inputRange: [0, 1],
+                                    outputRange: [1, 0]
+                                }),
+                                width: '100%',
+                                display: showImages ? 'flex' : 'none'
+                            }}>
+                                <ScrollView
+                                    horizontal
+                                    pagingEnabled
+                                    showsHorizontalScrollIndicator={false}
+                                    scrollEventThrottle={16}
+                                    onScroll={(event) => {
+                                        const slideSize = event.nativeEvent.layoutMeasurement.width;
+                                        const index = event.nativeEvent.contentOffset.x / slideSize;
+                                        const roundIndex = Math.round(index);
+                                        if (roundIndex !== currentIndex && roundIndex >= 0 && roundIndex < images.length) {
+                                            setCurrentIndex(roundIndex);
+                                        }
+                                    }}
+                                >
+                                    {images.map((img, i) => (
+                                        <View key={img.key} style={{ width: windowWidth - 32, height: 240, alignItems: 'center', justifyContent: 'center' }}>
+                                            <Image
+                                                source={{ uri: img.url }}
+                                                style={{ width: '100%', height: '100%' }}
+                                                resizeMode="cover"
+                                            />
+                                        </View>
+                                    ))}
+                                </ScrollView>
+
+                                {/* Pagination Dots */}
+                                {images.length > 1 && (
+                                    <View style={{ flexDirection: 'row', justifyContent: 'center', position: 'absolute', bottom: 12, width: '100%' }}>
+                                        {images.map((_, i) => (
+                                            <View
+                                                key={i}
+                                                style={{
+                                                    width: 8, height: 8, borderRadius: 4,
+                                                    backgroundColor: i === currentIndex ? '#FFF' : 'rgba(255,255,255,0.4)',
+                                                    marginHorizontal: 4
+                                                }}
+                                            />
+                                        ))}
+                                    </View>
+                                )}
+                            </Animated.View>
+                        )}
+                    </View>
+                </TouchableOpacity>
 
                 {/* Per-slot cards */}
                 <Text style={styles.sectionTitle}>ผลวิเคราะห์แต่ละรูป</Text>
