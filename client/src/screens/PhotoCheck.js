@@ -112,40 +112,55 @@ export default function PhotoCheck({ onNavigate, session }) {
         setLoading(true);
         try {
             // 1. อัปโหลดรูปไป Storage
-            const urls = await Promise.all(
-                PHOTO_SLOTS.map(async (slot, i) => {
-                    if (!images[i]) return null;
-                    return await uploadImage(images[i], slot.key);
-                })
-            );
+            let urls;
+            try {
+                urls = await Promise.all(
+                    PHOTO_SLOTS.map(async (slot, i) => {
+                        if (!images[i]) return null;
+                        return await uploadImage(images[i], slot.key);
+                    })
+                );
+            } catch (uploadErr) {
+                throw new Error(`[Step 1 - Upload รูป] ${uploadErr.message}`);
+            }
 
-            // 2. Insert record ลง public.ai_photo_checks → รับ id กลับมา
+            // 2. Insert record ลง ai_photo_checks → รับ id กลับมา
             const userId = session?.user?.id ?? null;
-            const { data: inserted, error: dbError } = await supabase
-                .from('public.ai_photo_checks')
-                .insert([{
-                    user_id: userId,
-                    image_face_url: urls[0] ?? null,
-                    image_body_url: urls[1] ?? null,
-                    image_poop_url: urls[2] ?? null,
-                    image_vomit_url: urls[3] ?? null,
-                    status: 'pending',
-                }])
-                .select('id')
-                .single();
-
-            if (dbError) throw new Error(dbError.message);
-            const recordId = inserted.id;
+            let recordId;
+            try {
+                const { data: inserted, error: dbError } = await supabase
+                    .from('ai_photo_checks')
+                    .insert([{
+                        user_id: userId,
+                        image_face_url: urls[0] ?? null,
+                        image_body_url: urls[1] ?? null,
+                        image_poop_url: urls[2] ?? null,
+                        image_vomit_url: urls[3] ?? null,
+                        status: 'pending',
+                    }])
+                    .select('id')
+                    .single();
+                if (dbError) throw new Error(dbError.message);
+                recordId = inserted.id;
+            } catch (dbErr) {
+                throw new Error(`[Step 2 - บันทึก DB] ${dbErr.message}`);
+            }
 
             // 3. เรียก serverApi.py ให้ Gemini วิเคราะห์
-            const apiRes = await fetch('http://192.168.1.131:3000/api/photo-check', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ recordId }),
-            });
-            const apiJson = await apiRes.json();
-
-            if (!apiRes.ok) throw new Error(apiJson.error || 'AI analysis failed');
+            let apiJson;
+            try {
+                const serverUrl = process.env.EXPO_PUBLIC_SERVER_URL;
+                console.log('🔗 Calling server:', serverUrl);
+                const apiRes = await fetch(`${serverUrl}/api/photo-check`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ recordId }),
+                });
+                apiJson = await apiRes.json();
+                if (!apiRes.ok) throw new Error(apiJson.error || 'AI analysis failed');
+            } catch (apiErr) {
+                throw new Error(`[Step 3 - Flask API] ${apiErr.message}`);
+            }
 
             // 4. Navigate พร้อมส่งผล AI ไปหน้า AnalysisResult
             onNavigate('AnalysisResult', { result: apiJson.result, recordId });
@@ -156,6 +171,7 @@ export default function PhotoCheck({ onNavigate, session }) {
             setLoading(false);
         }
     };
+
 
 
     // ── Render ────────────────────────────────────────────────────────────────

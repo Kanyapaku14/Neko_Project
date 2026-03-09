@@ -328,7 +328,7 @@ def get_guidance():
 @app.route('/api/photo-check', methods=['POST'])
 def photo_check():
     """
-    รับ recordId ของ public.ai_photo_checks → ดึง URL รูป → วิเคราะห์ด้วย Gemini Vision
+    รับ recordId ของ ai_photo_checks → ดึง URL รูป → วิเคราะห์ด้วย Gemini Vision
     → บันทึกผลกลับ Supabase → คืน JSON ให้ app
     """
     try:
@@ -338,7 +338,7 @@ def photo_check():
             return jsonify({"error": "recordId is required"}), 400
 
         # 1. ดึง record จาก Supabase
-        res = supabase.table('public.ai_photo_checks').select(
+        res = supabase.table('ai_photo_checks').select(
             'id, image_face_url, image_body_url, image_poop_url, image_vomit_url'
         ).eq('id', record_id).single().execute()
 
@@ -413,7 +413,7 @@ def photo_check():
         ai_result = json.loads(response.text)
 
         # 4. บันทึกผลกลับ Supabase
-        supabase.table('public.ai_photo_checks').update({
+        supabase.table('ai_photo_checks').update({
             'status': 'done',
             'ai_result': ai_result
         }).eq('id', record_id).execute()
@@ -426,7 +426,7 @@ def photo_check():
         # อัปเดตสถานะเป็น error ใน Supabase
         try:
             if record_id:
-                supabase.table('public.ai_photo_checks').update({
+                supabase.table('ai_photo_checks').update({
                     'status': 'error'
                 }).eq('id', record_id).execute()
         except:
