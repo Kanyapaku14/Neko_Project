@@ -24,7 +24,7 @@ import styles from "../styles/homeStylesOld";
 
 export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavigate }) {
     const [activeCat, setActiveCat] = useState(null);
-    const [lastCheckText, setLastCheckText] = useState("Not assessed yet");
+    const [lastCheckText, setLastCheckText] = useState("Active now");
 
     useEffect(() => {
         const fetchLastAssessment = async (catId) => {
@@ -41,21 +41,28 @@ export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavig
                     const lastDate = new Date(data[0].created_at);
                     const today = new Date();
                     const diffTime = Math.abs(today - lastDate);
+
+                    const diffMinutes = Math.floor(diffTime / (1000 * 60));
+                    const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
                     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-                    if (diffDays === 0) {
-                        setLastCheckText("Last check today");
+                    if (diffMinutes < 5) {
+                        setLastCheckText("Active now");
+                    } else if (diffMinutes < 60) {
+                        setLastCheckText(`Active ${diffMinutes} minutes ago`);
+                    } else if (diffHours < 24) {
+                        setLastCheckText(`Active ${diffHours} ${diffHours === 1 ? 'hour' : 'hours'} ago`);
                     } else if (diffDays === 1) {
-                        setLastCheckText("Last check 1 day ago");
+                        setLastCheckText("Active yesterday");
                     } else {
-                        setLastCheckText(`Last check ${diffDays} days ago`);
+                        setLastCheckText(`Active ${diffDays} days ago`);
                     }
                 } else {
-                    setLastCheckText("Not assessed yet");
+                    setLastCheckText("Active now");
                 }
             } catch (err) {
                 console.log("Error fetching last assessment:", err);
-                setLastCheckText("Not assessed yet");
+                setLastCheckText("Active now");
             }
         };
 
@@ -90,7 +97,7 @@ export default function HomeScreenNew({ onAssess, onLogDaily, onSetting, onNavig
             if (cat && cat.id) {
                 fetchLastAssessment(cat.id);
             } else {
-                setLastCheckText("Not assessed yet");
+                setLastCheckText("Active now");
             }
         });
 
