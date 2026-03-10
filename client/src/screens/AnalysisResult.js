@@ -30,10 +30,11 @@ const STATUS_CONFIG = {
 };
 
 // ── AnalysisResult Screen ────────────────────────────────────────────────────
-export default function AnalysisResult({ onNavigate, result, recordId }) {
+export default function AnalysisResult({ onNavigate, result, recordId, isHistory }) {
     const [images, setImages] = useState([]);
     const [showImages, setShowImages] = useState(false);
     const [currentIndex, setCurrentIndex] = useState(0);
+    const [createdAt, setCreatedAt] = useState(null);
     const fadeAnim = useRef(new Animated.Value(1)).current; // 1 = text, 0 = images
 
     // Fetch images when recordId is known
@@ -42,7 +43,7 @@ export default function AnalysisResult({ onNavigate, result, recordId }) {
         const fetchImages = async () => {
             const { data, error } = await supabase
                 .from('ai_photo_checks')
-                .select('image_face_url, image_body_url, image_poop_url, image_vomit_url')
+                .select('image_face_url, image_body_url, image_poop_url, image_vomit_url, created_at')
                 .eq('id', recordId)
                 .single();
             if (data && !error) {
@@ -54,6 +55,7 @@ export default function AnalysisResult({ onNavigate, result, recordId }) {
                     { key: 'vomit', url: data.image_vomit_url },
                 ].filter(item => item.url);
                 setImages(imgList);
+                setCreatedAt(data.created_at);
             }
         };
         fetchImages();
@@ -75,8 +77,8 @@ export default function AnalysisResult({ onNavigate, result, recordId }) {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.header}>
-                    <TouchableOpacity onPress={() => onNavigate('PhotoCheck')} style={styles.backBtn}>
-                        <Ionicons name="chevron-back" size={28} color="#2D3748" />
+                    <TouchableOpacity onPress={() => onNavigate(isHistory ? 'Calendar' : 'PhotoCheck')} style={styles.backBtn}>
+                        <Ionicons name={isHistory ? "close" : "chevron-back"} size={28} color="#2D3748" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>AI Analysis Result</Text>
                     <View style={{ width: 38 }} />
@@ -106,8 +108,8 @@ export default function AnalysisResult({ onNavigate, result, recordId }) {
         <SafeAreaView style={styles.container}>
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => onNavigate('PhotoCheck')} style={styles.backBtn}>
-                    <Ionicons name="chevron-back" size={28} color="#2D3748" />
+                <TouchableOpacity onPress={() => onNavigate(isHistory ? 'Calendar' : 'PhotoCheck')} style={styles.backBtn}>
+                    <Ionicons name={isHistory ? "close" : "chevron-back"} size={28} color="#2D3748" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>AI Analysis Result</Text>
                 <View style={{ width: 38 }} />
@@ -262,12 +264,16 @@ export default function AnalysisResult({ onNavigate, result, recordId }) {
                 )}
 
                 {/* Back Button */}
-                <TouchableOpacity
-                    style={styles.backButton}
-                    onPress={() => onNavigate('PhotoCheck')}
-                >
-                    <Text style={styles.backButtonText}>ตรวจสอบอีกครั้ง</Text>
-                </TouchableOpacity>
+                {!isHistory && (
+                    <TouchableOpacity
+                        style={styles.backButton}
+                        onPress={() => onNavigate('Calendar')}
+                    >
+                        <Text style={styles.backButtonText}>
+                            บันทึกผลลัพธ์
+                        </Text>
+                    </TouchableOpacity>
+                )}
 
                 <View style={{ height: 80 }} />
             </ScrollView>
