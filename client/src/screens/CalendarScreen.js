@@ -215,7 +215,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
 
     return (
       <View style={{
-        marginBottom: 20,
+        marginBottom: 45,
         backgroundColor: '#ffffff',
         borderRadius: 16,
         padding: 16,
@@ -294,8 +294,8 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
           <TouchableOpacity
             style={{
               position: 'absolute',
-              bottom: -15,
-              left: -5,
+              bottom: -25,
+              left: -15,
               flexDirection: 'row',
               alignItems: 'flex-end'
             }}
@@ -307,7 +307,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
               style={{
                 width: 70,
                 height: 70,
-                shadowColor: '#FFFFFF',
+                shadowColor: '#decefaff',
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 1,
                 shadowRadius: 10,
@@ -315,7 +315,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
               resizeMode="contain"
             />
             <View style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              backgroundColor: 'rgba(224, 205, 240, 0.9)',
               paddingHorizontal: 8,
               paddingVertical: 4,
               borderRadius: 12,
