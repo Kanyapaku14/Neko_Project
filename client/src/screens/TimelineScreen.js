@@ -32,7 +32,8 @@ const getGroupLabel = (dateString) => {
 };
 
 const summarizeLog = (log, analysis) => {
-  const food = log.total_food_grams ?? 0;
+  const mealLogs = log.meal_logs ? (Array.isArray(log.meal_logs) ? log.meal_logs : [log.meal_logs]) : [];
+  const food = mealLogs.length > 0 ? mealLogs.reduce((sum, meal) => sum + (Number(meal.amount_grams) || 0), 0) : 0;
   const water = log.water_ml_per_day ?? 0;
   const alerts = analysis?.alerts?.length ? `Issues: ${analysis.alerts.join(', ')}` : 'No issues reported.';
   return `Food ${food} g, Water ${water} ml. ${alerts}`;
@@ -65,6 +66,7 @@ export default function TimelineScreen({ session, onBack }) {
   const [logs, setLogs] = useState([]);
   const [communityEvents, setCommunityEvents] = useState([]);
   const [cameraEvents, setCameraEvents] = useState([]);
+  const [aiEvents, setAiEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cat, setCat] = useState(null);
   const [activeFilter, setActiveFilter] = useState('all');
@@ -175,6 +177,39 @@ export default function TimelineScreen({ session, onBack }) {
     }));
   };
 
+  const fetchAiBehaviorEvents = async (catId) => {
+    const { data, error } = await supabase
+      .from('ai_cat_events')
+      .select('id, behavior_label, confidence, occurred_at, abnormal')
+      .eq('cat_id', catId)
+      .order('occurred_at', { ascending: false })
+      .limit(100);
+
+    if (error) throw error;
+
+    return (data || []).map((row) => {
+      const label = String(row.behavior_label || 'activity').toLowerCase();
+      let title = 'Cat activity detected';
+      let icon = 'paw';
+      
+      if (label === 'eat') { title = 'Cat is eating'; icon = 'restaurant'; }
+      if (label === 'litter') { title = 'Cat used litter box'; icon = 'trash-bin'; }
+      if (label === 'sleep') { title = 'Cat is resting'; icon = 'moon'; }
+      if (label === 'abnormal' || row.abnormal) { title = 'Abnormal behavior detected'; icon = 'alert-circle'; }
+
+      return {
+        id: `ai-${row.id}`,
+        source: 'camera', // Categorize under camera filter as it comes from AI Camera
+        action: label,
+        eventAt: row.occurred_at,
+        title,
+        detail: `AI detected ${label} with ${Math.round((row.confidence || 0) * 100)}% confidence.`,
+        isAi: true,
+        icon,
+      };
+    });
+  };
+
   const fetchTimelineData = async () => {
     try {
       setLoading(true);
@@ -194,7 +229,7 @@ export default function TimelineScreen({ session, onBack }) {
       if (catError) throw catError;
       setCat(catData || null);
 
-      const [communityResult, cameraResult] = await Promise.all([
+      const [communityResult, cameraResult, aiResult] = await Promise.all([
         fetchCommunityEvents(userId).catch((e) => {
           console.log('Community events unavailable:', e?.message || e);
           return [];
@@ -203,10 +238,15 @@ export default function TimelineScreen({ session, onBack }) {
           console.log('Camera events unavailable:', e?.message || e);
           return [];
         }),
+        catData?.id ? fetchAiBehaviorEvents(catData.id).catch((e) => {
+          console.log('AI events unavailable:', e?.message || e);
+          return [];
+        }) : Promise.resolve([]),
       ]);
 
       setCommunityEvents(communityResult);
       setCameraEvents(cameraResult);
+      setAiEvents(aiResult);
 
       if (!catData?.id) {
         setLogs([]);
@@ -215,7 +255,7 @@ export default function TimelineScreen({ session, onBack }) {
 
       const { data: logsData, error: logsError } = await supabase
         .from('daily_logs')
-        .select('*, normal_logs(*), something_off_logs(*)')
+        .select('*, normal_logs(*), something_off_logs(*), meal_logs(*)')
         .eq('cat_id', catData.id)
         .order('log_date', { ascending: false });
 
@@ -254,10 +294,10 @@ export default function TimelineScreen({ session, onBack }) {
     });
 
 
-    const allItems = [...logItems, ...communityEvents, ...cameraEvents];
+    const allItems = [...logItems, ...communityEvents, ...cameraEvents, ...aiEvents];
     const filtered = allItems.filter((item) => activeFilter === 'all' || item.source === activeFilter);
     return filtered.sort((a, b) => new Date(b.eventAt) - new Date(a.eventAt));
-  }, [logs, communityEvents, cameraEvents, activeFilter]);
+  }, [logs, communityEvents, cameraEvents, aiEvents, activeFilter]);
 
 
   const groupedItems = useMemo(() => (
@@ -276,7 +316,11 @@ export default function TimelineScreen({ session, onBack }) {
       return { icon: 'share-social', marker: '#7E57C2', bg: '#EDE7F6' };
     }
     if (item.source === 'camera') {
-      return { icon: 'camera', marker: '#FB8C00', bg: '#FFF3E0' };
+      if (item.action === 'eat') return { icon: 'restaurant', marker: '#FFAB40', bg: '#FFF3E0' };
+      if (item.action === 'litter') return { icon: 'trash-bin', marker: '#64B5F6', bg: '#E3F2FD' };
+      if (item.action === 'sleep') return { icon: 'moon', marker: '#7E57C2', bg: '#EDE7F6' };
+      if (item.action === 'abnormal') return { icon: 'alert-circle', marker: '#EF5350', bg: '#FFEBEE' };
+      return { icon: item.icon || 'camera', marker: '#FB8C00', bg: '#FFF3E0' };
     }
     return { icon: 'calendar', marker: '#2D4A47', bg: '#E0F2F1' };
   };

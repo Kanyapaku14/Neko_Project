@@ -92,7 +92,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
       // Fetch Daily Log
       const { data, error } = await supabase
         .from('daily_logs')
-        .select('*, normal_logs(*), something_off_logs(*)')
+        .select('*, normal_logs(*), something_off_logs(*), meal_logs(*)')
         .eq('cat_id', catId)
         .eq('log_date', dateString)
         .order('created_at', { ascending: false })
@@ -208,6 +208,10 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
     // Days of current month
     for (let d = 1; d <= daysInMonth; d++) {
       const date = new Date(year, month, d);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const isFutureDate = date > today;
+
       const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const isSelected = selectedDate.getDate() === d &&
         selectedDate.getMonth() === month &&
@@ -217,7 +221,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
       days.push(
         <TouchableOpacity
           key={`day-${d}`}
-          style={[styles.dayCell, isSelected && styles.selectedDay]}
+          style={[styles.dayCell, isSelected && styles.selectedDay, isFutureDate && { opacity: 0.6 }]}
           onPress={() => setSelectedDate(date)}
         >
           <Text style={[styles.dayText, isSelected && styles.selectedDayText]}>{d}</Text>
@@ -318,7 +322,11 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                   <View style={styles.summaryItem}>
                     <Text style={styles.summaryLabel}>FOOD</Text>
                     <Text style={styles.summaryValue}>
-                      {dailyLog.normal_logs?.[0]?.total_food_grams ?? dailyLog.normal_logs?.total_food_grams ?? '-'} g
+                      {(() => {
+                        const mealLogs = dailyLog.meal_logs ? (Array.isArray(dailyLog.meal_logs) ? dailyLog.meal_logs : [dailyLog.meal_logs]) : [];
+                        const totalFoodGrams = mealLogs.reduce((sum, meal) => sum + (Number(meal.amount_grams) || 0), 0);
+                        return totalFoodGrams > 0 ? totalFoodGrams : '-';
+                      })()} g
                     </Text>
                   </View>
                   <View style={styles.summaryDivider} />
@@ -519,23 +527,41 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                   </TouchableOpacity>
                 )}
 
-                {/* Add Log Button */}
-                <TouchableOpacity
-                  style={[styles.editButton, { marginBottom: 20 }]}
-                  onPress={() => {
-                    const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-                    onNavigate({
-                      screen: 'LogDaily',
-                      initialDate: dateStr,
-                      params: { date: dateStr, catId, catName: null }
-                    });
-                  }}
-                >
-                  <Feather name="plus-circle" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-                  <Text style={styles.editButtonText}>
-                    Add Log for {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
-                  </Text>
-                </TouchableOpacity>
+                {/* Add Log Button or Warning for Future Dates */}
+                {(() => {
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const isFuture = selectedDate > today;
+
+                  if (isFuture) {
+                    return (
+                      <View style={{ marginBottom: 20, alignItems: 'center' }}>
+                         <MaterialCommunityIcons name="clock-alert-outline" size={32} color="#8FA3A0" style={{ marginBottom: 8 }} />
+                         <Text style={{ ...styles.noRecordText, marginBottom: 0 }}>Cannot add log for future dates.</Text>
+                      </View>
+                    );
+                  }
+
+                  return (
+                    <TouchableOpacity
+                      style={[styles.editButton, { marginBottom: 20 }]}
+                      onPress={() => {
+                        const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+                        onNavigate({
+                          screen: 'LogDaily',
+                          initialDate: dateStr,
+                          params: { date: dateStr, catId, catName: null }
+                        });
+                      }}
+                    >
+                      <Feather name="plus-circle" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                      <Text style={styles.editButtonText}>
+                        Add Log for {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })()}
+
               </View>
             )}
 
@@ -688,8 +714,8 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   selectedIndicator: {
-    backgroundColor: "#00802bff",
-    shadowColor: "#00802bff",
+    backgroundColor: "#FF8F00",
+    shadowColor: "#FF8F00",
     shadowOpacity: 0.9,
     shadowRadius: 5,
     elevation: 4,

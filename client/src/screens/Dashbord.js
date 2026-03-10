@@ -209,7 +209,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       const daysLimit = selectedPeriod === "1 MONTH" ? 30 : 7;
       const logsPromise = supabase
         .from("daily_logs")
-        .select("*, normal_logs(*), something_off_logs(*)")
+        .select("*, normal_logs(*), something_off_logs(*), meal_logs(*)")
         .eq("cat_id", effectiveCat.id)
         .order("log_date", { ascending: false })
         .limit(daysLimit);
@@ -269,7 +269,10 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         return `${date.getDate()}/${date.getMonth() + 1}`;
       });
 
-      const foodData = chartLogs.map((log) => log.normal_logs?.total_food_grams || 0);
+      const foodData = chartLogs.map((log) => {
+        const meals = log.meal_logs || [];
+        return meals.reduce((sum, meal) => sum + (Number(meal.amount_grams) || 0), 0);
+      });
       const waterData = chartLogs.map((log) => log.normal_logs?.water_ml_per_day || 0);
 
       setChartData({
@@ -553,7 +556,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     try {
       const { data: exportLogs, error: exportError } = await supabase
         .from('daily_logs')
-        .select('log_date, normal_logs(*), something_off_logs(*)')
+        .select('log_date, normal_logs(*), something_off_logs(*), meal_logs(*)')
         .eq('cat_id', catDetails.id)
         .order('log_date', { ascending: false })
         .limit(7);
@@ -580,11 +583,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         const normal = toArray(log.normal_logs)[0];
         const off = toArray(log.something_off_logs)[0];
 
+        const mealLogs = toArray(log.meal_logs);
+        const totalFoodGrams = mealLogs.reduce((sum, meal) => sum + (Number(meal.amount_grams) || 0), 0);
+
         const normalSummary = normal
           ? [
-            `Food type: ${normal.food_type ?? '-'}`,
             `Meals/day: ${normal.meals_per_day ?? '-'}`,
-            `Food total: ${normal.total_food_grams ?? 0} g`,
+            `Food total: ${totalFoodGrams} g`,
             `Water/day: ${normal.water_ml_per_day ?? 0} ml`,
             `Urine level: ${normal.urine_level ?? '-'}`,
             `Stool level: ${normal.stool_level ?? '-'}`,
@@ -866,13 +871,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
               </View>
             </View>
             <View style={styles.assessmentButtons}>
-              <TouchableOpacity
-                style={styles.viewResultBtn}
-                onPress={() => onNavigate?.('Result')}
-              >
-                <Text style={styles.viewResultBtnText}>View Result</Text>
-                <Ionicons name="chevron-forward" size={16} color="#0C5A58" style={{marginLeft: 4}} />
-              </TouchableOpacity>
+	              <TouchableOpacity
+	                style={styles.viewResultBtn}
+	                onPress={() => onNavigate?.('Result', { source: 'db', catId: catDetails?.id || null })}
+	              >
+	                <Text style={styles.viewResultBtnText}>View Result</Text>
+	                <Ionicons name="chevron-forward" size={16} color="#0C5A58" style={{marginLeft: 4}} />
+	              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.viewHistoryBtn}
                 onPress={() => onNavigate?.('Timeline')}

@@ -145,13 +145,13 @@ export default function App() {
     setCurrentScreen('SignIn');
   };
 
-  useEffect(() => {
-    const handleSessionBootstrap = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) {
-          const msg = String(error?.message || '');
-          if (msg.includes('Invalid Refresh Token') || msg.includes('Refresh Token Not Found')) {
+		useEffect(() => {
+			const handleSessionBootstrap = async () => {
+				try {
+					const { data: { session }, error } = await supabase.auth.getSession();
+	        if (error) {
+	          const msg = String(error?.message || '');
+	          if (msg.includes('Invalid Refresh Token') || msg.includes('Refresh Token Not Found')) {
             await clearStaleAuthSession();
           } else {
             setSession(null);
@@ -163,13 +163,13 @@ export default function App() {
       } finally {
         setLoading(false);
       }
-    };
+	    };
 
-    handleSessionBootstrap();
+			handleSessionBootstrap();
 
-    const appStateSub = AppState.addEventListener('change', async (state) => {
-      if (state === 'active') {
-        supabase.auth.startAutoRefresh();
+			const appStateSub = AppState.addEventListener('change', async (state) => {
+				if (state === 'active') {
+					supabase.auth.startAutoRefresh();
         await NotificationService.markUserActiveNow();
       } else {
         supabase.auth.stopAutoRefresh();
@@ -195,11 +195,11 @@ export default function App() {
       }
     });
 
-    return () => {
-      subscription.unsubscribe();
-      appStateSub?.remove?.();
-    };
-  }, []);
+			return () => {
+				subscription.unsubscribe();
+				appStateSub?.remove?.();
+			};
+		}, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -310,11 +310,11 @@ export default function App() {
     );
   }
 
-  const renderScreen = () => {
-    // 1. Session based (if logged in)
-    if (session) {
-      // screen can be string or object { screen, params }
-      const currentScreenName = typeof authScreen === 'object' ? authScreen.screen : authScreen;
+	  const renderScreen = () => {
+	    // 1. Session based (if logged in)
+	    if (session) {
+	      // screen can be string or object { screen, params }
+	      const currentScreenName = typeof authScreen === 'object' ? authScreen.screen : authScreen;
       const screenParams = typeof authScreen === 'object' ? authScreen.params : {};
 
       if (currentScreenName === 'CatProfile') {
@@ -397,13 +397,15 @@ export default function App() {
           initialDate={screenParams?.date || null}
         />;
       }
-      if (currentScreenName === 'Result') {
-        return <ResultScreen
-          onBack={() => setAuthScreen('Home')}
-          onSave={() => setAuthScreen('Home')}
-          onNavigate={(screen, params) => navigateAuth(screen, params)}
-        />;
-      }
+	      if (currentScreenName === 'Result') {
+	        return <ResultScreen
+	          onBack={() => setAuthScreen('Home')}
+	          onSave={() => setAuthScreen('Home')}
+	          onNavigate={(screen, params) => navigateAuth(screen, params)}
+	          route={{ params: screenParams }}
+	          session={session}
+	        />;
+	      }
       if (currentScreenName === 'Overview') {
         return <Dashboard
           session={session}
@@ -523,26 +525,26 @@ export default function App() {
         onSetting={() => setAuthScreen('Setting')}
         onNavigate={(screen, params) => navigateAuth(screen, params)}
       />;
-    }
+	    }
 
-    // 2. Guest/SignIn flow
-    // Reset password mode (arrived via deep link from email)
-    if (resetPasswordMode) {
-      return (
-        <ResetPasswordScreen
-          onComplete={() => {
-            setResetPasswordMode(false);
-            setSession(null);
-            supabase.auth.signOut();
-            setCurrentScreen('SignIn');
-          }}
-        />
-      );
-    }
+	    // 2. Guest/SignIn flow
+	    // Reset password mode (arrived via deep link from email)
+	    if (resetPasswordMode) {
+	      return (
+	        <ResetPasswordScreen
+	          onComplete={() => {
+	            setResetPasswordMode(false);
+	            setSession(null);
+	            supabase.auth.signOut();
+	            setCurrentScreen('SignIn');
+	          }}
+	        />
+	      );
+	    }
 
-    return (
-      <>
-        {currentScreen === 'SignIn' && (
+	    return (
+	      <>
+	        {currentScreen === 'SignIn' && (
           <SignInScreen
             onNavigate={navigateToSignUp}
             onForgotPassword={() => setCurrentScreen('ForgotPassword')}

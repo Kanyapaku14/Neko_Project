@@ -1,5 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { styles } from './Style/authstyle';
 import supabase from './config/supabaseClient'; 
 import { View, Text, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator, SafeAreaView, StyleSheet } from 'react-native'; 
@@ -7,8 +8,11 @@ import { View, Text, TextInput, TouchableOpacity, Image, Alert, ActivityIndicato
 export default function SignUpScreen({ onNavigate }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
     const [agree, setAgree] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
     const handleSignUp = async () => {
         // 1. เช็คความถูกต้อง
@@ -32,6 +36,15 @@ export default function SignUpScreen({ onNavigate }) {
 
         try {
             // 2. ส่งข้อมูลไป Supabase (ต้องอยู่ภายในฟังก์ชัน async นี้)
+            if (!confirmPassword) {
+                Alert.alert("Error", "Please confirm your password.");
+                return;
+            }
+            if (password !== confirmPassword) {
+                Alert.alert("Error", "Passwords do not match.");
+                return;
+            }
+
             const { data, error } = await supabase.auth.signUp({
                 email: cleanEmail,
                 password: password,
@@ -112,13 +125,62 @@ export default function SignUpScreen({ onNavigate }) {
                             <Text style={styles.label}>Password</Text>
                             <Text style={styles.required}> *</Text>
                         </View>
-                        <TextInput
-                            style={styles.input}
-                            value={password}
-                            onChangeText={setPassword}
-                            placeholder="Enter your password"
-                            secureTextEntry
-                        />
+                        <View style={localStyles.inputWithIconContainer}>
+                            <TextInput
+                                style={[styles.input, localStyles.inputWithRightIcon]}
+                                value={password}
+                                onChangeText={setPassword}
+                                placeholder="Enter your password"
+                                secureTextEntry={!showPassword}
+                                autoCapitalize="none"
+                                textContentType="newPassword"
+                            />
+                            <TouchableOpacity
+                                style={localStyles.eyeButton}
+                                onPress={() => setShowPassword((prev) => !prev)}
+                                accessibilityRole="button"
+                                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                                <Ionicons
+                                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                                    size={20}
+                                    color="#607D8B"
+                                />
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
+                    {/* Confirm Password Input */}
+                    <View style={styles.inputGroup}>
+                        <View style={styles.labelRow}>
+                            <Text style={styles.label}>Confirm Password</Text>
+                            <Text style={styles.required}> *</Text>
+                        </View>
+                        <View style={localStyles.inputWithIconContainer}>
+                            <TextInput
+                                style={[styles.input, localStyles.inputWithRightIcon]}
+                                value={confirmPassword}
+                                onChangeText={setConfirmPassword}
+                                placeholder="Confirm your password"
+                                secureTextEntry={!showConfirmPassword}
+                                autoCapitalize="none"
+                                textContentType="newPassword"
+                            />
+                            <TouchableOpacity
+                                style={localStyles.eyeButton}
+                                onPress={() => setShowConfirmPassword((prev) => !prev)}
+                                accessibilityRole="button"
+                                accessibilityLabel={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                                <Ionicons
+                                    name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                                    size={20}
+                                    color="#607D8B"
+                                />
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     {/* Terms Checkbox */}
@@ -160,4 +222,24 @@ export default function SignUpScreen({ onNavigate }) {
         </SafeAreaView>
     );
 }
+
+const localStyles = StyleSheet.create({
+    inputWithIconContainer: {
+        width: '80%',
+        alignSelf: 'center',
+        justifyContent: 'center',
+    },
+    inputWithRightIcon: {
+        width: '100%',
+        alignSelf: 'stretch',
+        paddingRight: 44,
+    },
+    eyeButton: {
+        position: 'absolute',
+        right: 12,
+        height: 50,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+});
 
