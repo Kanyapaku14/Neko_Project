@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
     SafeAreaView,
     View,
@@ -9,30 +9,22 @@ import {
     Image,
     StyleSheet,
     ActivityIndicator,
+    KeyboardAvoidingView,
+    ScrollView,
+    Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import supabase from './config/supabaseClient';
 
-export default function ResetPasswordScreen({ onComplete, onBack, initialEmail }) {
-    const [email, setEmail] = useState('');
-    const [token, setToken] = useState('');
+export default function ResetPasswordScreen({ onComplete, onBack }) {
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
 
-    useEffect(() => {
-        if (!email && initialEmail) {
-            setEmail(String(initialEmail));
-        }
-    }, [email, initialEmail]);
-
     const handleReset = async () => {
-        const cleanEmail = email.trim().toLowerCase();
-        const cleanToken = token.trim();
-
-        if (!cleanEmail || !cleanToken || !password || !confirmPassword) {
-            Alert.alert('แจ้งเตือน', 'กรุณากรอก Email, Token และรหัสผ่านให้ครบถ้วน');
+        if (!password || !confirmPassword) {
+            Alert.alert('แจ้งเตือน', 'กรุณากรอกรหัสผ่านให้ครบถ้วน');
             return;
         }
         if (password.length < 6) {
@@ -46,17 +38,6 @@ export default function ResetPasswordScreen({ onComplete, onBack, initialEmail }
 
         setLoading(true);
         try {
-            const { error: verifyError } = await supabase.auth.verifyOtp({
-                email: cleanEmail,
-                token: cleanToken,
-                type: 'recovery',
-            });
-
-            if (verifyError) {
-                Alert.alert('Error', verifyError.message);
-                return;
-            }
-
             const { error } = await supabase.auth.updateUser({ password });
 
             if (error) {
@@ -87,7 +68,17 @@ export default function ResetPasswordScreen({ onComplete, onBack, initialEmail }
                 </TouchableOpacity>
             )}
 
-            <View style={styles.container}>
+            <KeyboardAvoidingView
+                style={{ flex: 1 }}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
+            >
+                <ScrollView
+                    contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
+                >
+                    <View style={styles.container}>
                 {/* Logo */}
                 <View style={styles.headerContainer}>
                     <Image
@@ -102,41 +93,6 @@ export default function ResetPasswordScreen({ onComplete, onBack, initialEmail }
 
                 <Text style={styles.title}>ตั้งรหัสผ่านใหม่</Text>
                 <Text style={styles.subtitle}>กรอกรหัสผ่านใหม่ที่ต้องการ (อย่างน้อย 6 ตัวอักษร)</Text>
-
-                {/* Email */}
-                <View style={styles.inputGroup}>
-                    <View style={styles.labelRow}>
-                        <Text style={styles.label}>Email</Text>
-                        <Text style={styles.required}> *</Text>
-                    </View>
-                    <TextInput
-                        style={styles.input}
-                        value={email}
-                        onChangeText={setEmail}
-                        placeholder="กรอกอีเมลที่ใช้สมัคร"
-                        autoCapitalize="none"
-                        keyboardType="email-address"
-                        editable={!loading}
-                        autoFocus
-                    />
-                </View>
-
-                {/* Reset Token */}
-                <View style={styles.inputGroup}>
-                    <View style={styles.labelRow}>
-                        <Text style={styles.label}>Reset Token</Text>
-                        <Text style={styles.required}> *</Text>
-                    </View>
-                    <TextInput
-                        style={styles.input}
-                        value={token}
-                        onChangeText={setToken}
-                        placeholder="กรอก token จากอีเมล"
-                        autoCapitalize="none"
-                        keyboardType="number-pad"
-                        editable={!loading}
-                    />
-                </View>
 
                 {/* New Password */}
                 <View style={styles.inputGroup}>
@@ -192,7 +148,9 @@ export default function ResetPasswordScreen({ onComplete, onBack, initialEmail }
                         <Text style={styles.buttonText}>ยืนยันรหัสผ่านใหม่</Text>
                     )}
                 </TouchableOpacity>
-            </View>
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
         </SafeAreaView>
     );
 }

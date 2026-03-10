@@ -15,6 +15,7 @@ import Dashboard from './src/screens/Dashbord';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
+import ResetPasswordTokenScreen from './src/screens/ResetPasswordTokenScreen';
 
 // 1. Import the LogDailyNormal file
 import LogDailyNormal from './src/screens/LogDailyNormal';
@@ -74,10 +75,28 @@ export default function App() {
 
 	  const [resetPasswordMode, setResetPasswordMode] = useState(false);
 	  const [resetEmail, setResetEmail] = useState('');
+	  const [resetPasswordStep, setResetPasswordStep] = useState('token'); // token -> new
+	  const [resetReturnTo, setResetReturnTo] = useState('SignIn');
 	  const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
   const [profileLoading, setProfileLoading] = useState(false); // ✅ Track if checking profile
   const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null); // null until loaded
   const notificationResponseSubRef = useRef(null);
+  const resetPasswordModeRef = useRef(false);
+
+  useEffect(() => {
+    resetPasswordModeRef.current = resetPasswordMode;
+  }, [resetPasswordMode]);
+
+  const exitResetFlow = async (targetScreen = 'SignIn') => {
+    setResetPasswordMode(false);
+    setResetPasswordStep('token');
+    setResetEmail('');
+    setSession(null);
+    try {
+      await supabase.auth.signOut();
+    } catch { }
+    setCurrentScreen(targetScreen);
+  };
 
   // Fix Logout: Should actually sign out
   const handleSignOut = async () => {
@@ -186,11 +205,15 @@ export default function App() {
       if (_event === 'PASSWORD_RECOVERY') {
         setSession(session);
         setResetPasswordMode(true);
+        setResetPasswordStep('new');
+        setResetReturnTo('SignIn');
+        setResetEmail(String(session?.user?.email || ''));
         setLoading(false);
         return;
       }
 
       setSession(session);
+      if (resetPasswordModeRef.current) return;
       if (session) {
         checkUserProfileStatus(session);
       } else {
@@ -314,34 +337,26 @@ export default function App() {
   }
 
 	  const renderScreen = () => {
-	    // Reset password mode (arrived via deep link from email)
-	    // Note: in token-based reset flow, `verifyOtp` creates a session. We must keep showing this screen even if session exists.
+	    // Reset password flow (token-based OR arrived via deep link)
+	    // Note: in token-based reset flow, `verifyOtp` creates a session. Keep showing this flow even if session exists.
 	    if (resetPasswordMode) {
-	      return (
-	        <ResetPasswordScreen
-	          initialEmail={resetEmail}
-	          onComplete={() => {
-	            setResetPasswordMode(false);
-	            setSession(null);
-	            supabase.auth.signOut();
-	            setCurrentScreen('SignIn');
-	          }}
-	        />
-	      );
-	    }
+	      if (resetPasswordStep === 'token') {
+	        return (
+	          <ResetPasswordTokenScreen
+	            initialEmail={resetEmail}
+	            onBack={() => exitResetFlow(resetReturnTo)}
+	            onVerified={(email) => {
+	              setResetEmail(String(email || ''));
+	              setResetPasswordStep('new');
+	            }}
+	          />
+	        );
+	      }
 
-	    if (currentScreen === 'ResetPassword') {
 	      return (
 	        <ResetPasswordScreen
-	          initialEmail={resetEmail}
-	          onBack={() => setCurrentScreen('ForgotPassword')}
-	          onComplete={() => {
-	            setResetPasswordMode(false);
-	            setResetEmail('');
-	            setSession(null);
-	            supabase.auth.signOut();
-	            setCurrentScreen('SignIn');
-	          }}
+	          onBack={() => setResetPasswordStep('token')}
+	          onComplete={() => exitResetFlow('SignIn')}
 	        />
 	      );
 	    }
@@ -578,8 +593,10 @@ export default function App() {
 	          <ForgotPasswordScreen
 	            onBack={() => setCurrentScreen('SignIn')}
 	            onGoToResetPassword={(email) => {
+	              setResetReturnTo('ForgotPassword');
 	              setResetEmail(String(email || ''));
-	              setCurrentScreen('ResetPassword');
+	              setResetPasswordStep('token');
+	              setResetPasswordMode(true);
 	            }}
 	          />
 	        )}
