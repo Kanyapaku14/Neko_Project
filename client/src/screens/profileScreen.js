@@ -2,8 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useState, useEffect } from 'react';
 import { styles } from './Style/authstyle';
 import supabase from './config/supabaseClient';
-import { View, Text, TextInput, TouchableOpacity, Image, Alert, SafeAreaView, ScrollView, ActivityIndicator, Platform } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { View, Text, TextInput, TouchableOpacity, Image, Alert, SafeAreaView, ScrollView, ActivityIndicator, Platform, KeyboardAvoidingView, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -11,18 +10,30 @@ import { decode } from 'base64-arraybuffer';
 // If you have icons, import them. For now using text placeholder or simple views for icons if needed.
 export default function ProfileScreen({ session, onBack, onNavigateToCatProfile, onComplete }) {
     const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
-    const [username, setUsername] = useState('');
-    const [gender, setGender] = useState('');
-    const [phone, setPhone] = useState('');
-    const [birthDate, setBirthDate] = useState('');
-    const [showDatePicker, setShowDatePicker] = useState(false);
-
-    const [showGenderPicker, setShowGenderPicker] = useState(false);
+	    const [saving, setSaving] = useState(false);
+	    const [username, setUsername] = useState('');
+	    const [gender, setGender] = useState('');
+	    const [isGenderDropdownOpen, setIsGenderDropdownOpen] = useState(false);
+	    const [phone, setPhone] = useState('');
+	    const [birthDate, setBirthDate] = useState('');
+	    const [showDatePicker, setShowDatePicker] = useState(false);
 
     const [email, setEmail] = useState('');
     const [avatarUrl, setAvatarUrl] = useState(null);
     const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+    const genderOptions = [
+        { label: 'Male', value: 'Male' },
+        { label: 'Female', value: 'Female' },
+        { label: 'Other', value: 'Other' },
+    ];
+
+    const normalizeDateString = (value) => {
+        if (!value) return '';
+        const asString = String(value);
+        const match = asString.match(/^(\d{4}-\d{2}-\d{2})/);
+        return match ? match[1] : asString;
+    };
 
     useEffect(() => {
         if (session) {
@@ -50,7 +61,7 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile,
                 setUsername(data.name || '');
                 setGender(data.gender || '');
                 setPhone(data.phone_number || '');
-                setBirthDate(data.dob || ''); // Changed dob to date_of_birth
+                setBirthDate(normalizeDateString(data.dob)); // Keep YYYY-MM-DD for display + validation
                 setAvatarUrl(data.avatar_url || null);
             }
         } catch (error) {
@@ -191,13 +202,14 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile,
     };
 
     // ฟังก์ชันจัดรูปแบบวันที่อัตโนมัติขณะพิมพ์
-    const getPickerDateValue = () => {
-        if (!birthDate) return new Date();
-        const parts = birthDate.split('-').map((v) => parseInt(v, 10));
-        if (parts.length !== 3 || parts.some((v) => Number.isNaN(v))) return new Date();
-        const [year, month, day] = parts;
-        return new Date(year, month - 1, day);
-    };
+	    const getPickerDateValue = () => {
+	        if (!birthDate) return new Date();
+	        const datePart = normalizeDateString(birthDate);
+	        const parts = datePart.split('-').map((v) => parseInt(v, 10));
+	        if (parts.length !== 3 || parts.some((v) => Number.isNaN(v))) return new Date();
+	        const [year, month, day] = parts;
+	        return new Date(year, month - 1, day);
+	    };
 
     const handlePickerChange = (event, selectedDate) => {
         if (Platform.OS === 'android') {
@@ -218,10 +230,20 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile,
         }
     };
 
-    return (
-        <SafeAreaView style={styles.safeArea}>
-            <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-                <StatusBar style="auto" />
+	    return (
+	        <SafeAreaView style={styles.safeArea}>
+	            <KeyboardAvoidingView
+	                style={{ flex: 1 }}
+	                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+	                keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
+	            >
+	                <ScrollView
+	                    contentContainerStyle={{ paddingBottom: 120 }}
+	                    keyboardShouldPersistTaps="handled"
+	                    keyboardDismissMode="on-drag"
+	                    onScrollBeginDrag={() => setIsGenderDropdownOpen(false)}
+	                >
+	                    <StatusBar style="auto" />
 
                 {/* Header with Back Button */}
                 {onBack && (
@@ -291,42 +313,48 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile,
                         />
                     </View>
 
-                    {/* Gender Selection */}
+                    {/* Gender Dropdown */}
                     <View style={[styles.inputGroup, { zIndex: 3000 }]}>
                         <Text style={styles.labelprofile}>Gender</Text>
-                        <TouchableOpacity
-                            activeOpacity={0.8}
-                            onPress={() => setShowGenderPicker(!showGenderPicker)}
-                            style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
-                        >
-                            <Text
-                                style={{ fontSize: 16, color: gender ? '#333' : '#999', flexShrink: 1, paddingRight: 8 }}
-                                numberOfLines={1}
-                                ellipsizeMode="tail"
+                        <View style={{ width: '80%', alignSelf: 'center', position: 'relative' }}>
+                            <TouchableOpacity
+                                activeOpacity={0.8}
+                                onPress={() => {
+                                    Keyboard.dismiss();
+                                    setShowDatePicker(false);
+                                    setIsGenderDropdownOpen(!isGenderDropdownOpen);
+                                }}
+                                style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }]}
                             >
-                                {gender || "Select Gender"}
-                            </Text>
-                            <Text style={{ fontSize: 12, color: '#666' }}>{showGenderPicker ? "▲" : "▼"}</Text>
-                        </TouchableOpacity>
+                                <Text
+                                    style={{ fontSize: 16, color: gender ? '#333' : '#999', flexShrink: 1, paddingRight: 8 }}
+                                    numberOfLines={1}
+                                    ellipsizeMode="tail"
+                                >
+                                    {gender || "Select Gender"}
+                                </Text>
+                                <Ionicons name={isGenderDropdownOpen ? "chevron-up" : "chevron-down"} size={18} color="#666" />
+                            </TouchableOpacity>
 
-                        {showGenderPicker && (
-                            <View style={{ backgroundColor: '#fff', borderRadius: 10, marginTop: 5, borderWidth: 1, borderColor: '#eee', overflow: 'hidden', position: 'absolute', top: 70, left: 0, right: 0, zIndex: 4000, elevation: 5 }}>
-                                {[{ label: 'Male', value: 'Male' }, { label: 'Female', value: 'Female' }, { label: 'Other', value: 'Other' }].map((item, index) => (
-                                    <TouchableOpacity
-                                        key={index}
-                                        style={{ padding: 12, borderBottomWidth: index === 2 ? 0 : 1, borderBottomColor: '#f0f0f0' }}
-                                        onPress={() => {
-                                            setGender(item.value);
-                                            setShowGenderPicker(false);
-                                        }}
-                                    >
-                                        <Text style={{ fontSize: 16, color: gender === item.value ? '#2F6A62' : '#333' }}>
-                                            {item.label}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        )}
+                            {isGenderDropdownOpen && (
+                                <View style={{ backgroundColor: '#fff', borderRadius: 10, marginTop: 5, borderWidth: 1, borderColor: '#eee', overflow: 'hidden', position: 'absolute', top: 50, left: 0, right: 0, zIndex: 4000, elevation: 5 }}>
+                                    {genderOptions.map((item, index) => (
+                                        <TouchableOpacity
+                                            key={item.value}
+                                            style={{ padding: 12, borderBottomWidth: index === genderOptions.length - 1 ? 0 : 1, borderBottomColor: '#f0f0f0' }}
+                                            onPress={() => {
+                                                setGender(item.value);
+                                                setIsGenderDropdownOpen(false);
+                                            }}
+                                        >
+                                            <Text style={{ fontSize: 16, color: gender === item.value ? '#2F6A62' : '#333' }}>
+                                                {item.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            )}
+                        </View>
                     </View>
 
                     {/* Phone Number */}
@@ -340,8 +368,15 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile,
                                 setPhone(onlyNumbers);
                             }}
                             placeholder="Phone Number"
-                            keyboardType="numeric"
+                            keyboardType="phone-pad"
+                            textContentType="telephoneNumber"
+                            autoComplete="tel"
+                            returnKeyType="done"
                             maxLength={10}
+                            onFocus={() => {
+                                setShowDatePicker(false);
+                                setIsGenderDropdownOpen(false);
+                            }}
                         />
                     </View>
 
@@ -349,12 +384,20 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile,
                     <View style={styles.inputGroup}>
                         <Text style={styles.labelprofile}>Date of birth (YYYY-MM-DD)</Text>
                         <TouchableOpacity
-                            activeOpacity={0.8}
-                            onPress={() => setShowDatePicker(true)}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                                Keyboard.dismiss();
+                                setIsGenderDropdownOpen(false);
+                                setShowDatePicker(true);
+                            }}
                             style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
                         >
-                            <Text style={{ fontSize: 16, color: birthDate ? '#333' : '#999' }}>
-                                {birthDate || 'Select date of birth'}
+                            <Text
+                                style={{ flex: 1, fontSize: 16, color: birthDate ? '#333' : '#999', paddingRight: 8, includeFontPadding: false }}
+                                numberOfLines={1}
+                                ellipsizeMode="tail"
+                            >
+                                {normalizeDateString(birthDate) || 'Select date of birth'}
                             </Text>
                             <Ionicons name="calendar-outline" size={20} color="#666" />
                         </TouchableOpacity>
@@ -384,9 +427,10 @@ export default function ProfileScreen({ session, onBack, onNavigateToCatProfile,
                     </TouchableOpacity>
 
                 </View>
-            </ScrollView>
-        </SafeAreaView>
-    );
+	                </ScrollView>
+	            </KeyboardAvoidingView>
+	        </SafeAreaView>
+	    );
 }
 
 

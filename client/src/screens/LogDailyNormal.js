@@ -140,12 +140,30 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
     const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
 
     const {
-        foodType, consumeMeals, foodIntake, waterIntake, urineLevel, stoolLevel, catName
+        meals, consumeMeals, waterIntake, urineLevel, stoolLevel, catName
     } = state;
 
     const {
-        setFoodType, setConsumeMeals, setFoodIntake, setWaterIntake, setUrineLevel, setStoolLevel
+        setMeals, setConsumeMeals, setWaterIntake, setUrineLevel, setStoolLevel
     } = setters;
+
+    const handleAddMeal = () => {
+        setMeals([...meals, { id: Date.now().toString(), food_type: null, amount_grams: "" }]);
+    };
+
+    const handleUpdateMeal = (id, field, value) => {
+        setMeals(meals.map(meal => meal.id === id ? { ...meal, [field]: value } : meal));
+    };
+
+    const handleRemoveMeal = (id) => {
+        if (meals.length > 1) {
+            setMeals(meals.filter(meal => meal.id !== id));
+        } else {
+            setMeals([{ id: Date.now().toString(), food_type: null, amount_grams: "" }]);
+        }
+    };
+
+    const isComplete = !meals.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === '') && consumeMeals && waterIntake && urineLevel && stoolLevel;
 
     // Simplified: No internal fetchCatId or handleSave needed as they are lifted to LogDaily
 
@@ -192,22 +210,47 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
 
                     {/* --- Food Section --- */}
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: theme.borderColor, zIndex: 10 }}>
-                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Food</Text>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Food Meals</Text>
 
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, zIndex: 100 }}>
-                            <Text style={{ width: 60, fontSize: 14, color: theme.textLabel }}>Type :</Text>
-                            <CustomDropdown value={foodType} onValueChange={setFoodType} />
-                        </View>
+                        {meals.map((meal, index) => (
+                            <View key={meal.id} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, zIndex: 100 - index }}>
+                                <View style={{ flex: 1, marginRight: 8 }}>
+                                    <CustomDropdown 
+                                        value={meal.food_type} 
+                                        onValueChange={(val) => handleUpdateMeal(meal.id, 'food_type', val)} 
+                                    />
+                                </View>
+                                <View style={{ marginRight: 8 }}>
+                                    <UnitInput 
+                                        value={meal.amount_grams} 
+                                        onChangeText={(val) => handleUpdateMeal(meal.id, 'amount_grams', val)} 
+                                        unit="g" 
+                                        width={80} 
+                                        maxLength={4} 
+                                    />
+                                </View>
+                                <TouchableOpacity 
+                                    onPress={() => handleRemoveMeal(meal.id)}
+                                    style={{ padding: 6, backgroundColor: '#FFEBEB', borderRadius: 8 }}
+                                >
+                                    <Ionicons name="trash-outline" size={20} color="#D32F2F" />
+                                </TouchableOpacity>
+                            </View>
+                        ))}
 
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
-                            <Text style={{ width: 85, fontSize: 14, color: theme.textLabel }}>Consume</Text>
-                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="meals" width={85} maxLength={2} />
-                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
-                        </View>
+                        <TouchableOpacity 
+                            onPress={handleAddMeal}
+                            style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 20 }}
+                        >
+                            <Ionicons name="add-circle" size={20} color="#00796B" style={{ marginRight: 6 }} />
+                            <Text style={{ color: '#00796B', fontWeight: 'bold', fontSize: 14 }}>+ Add a meal</Text>
+                        </TouchableOpacity>
+
+                        <View style={{ height: 1, backgroundColor: theme.borderColor, marginBottom: 20 }} />
 
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
-                            <UnitInput value={foodIntake} onChangeText={setFoodIntake} unit="g" width={85} maxLength={4} />
+                            <Text style={{ width: 85, fontSize: 14, color: theme.textLabel }}>Consume</Text>
+                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="meals" width={85} maxLength={2} />
                             <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
@@ -276,14 +319,14 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                     {/* --- Save Button --- */}
                     <TouchableOpacity
                         style={{
-                            backgroundColor: (foodType && consumeMeals && foodIntake && waterIntake && urineLevel && stoolLevel) ? '#00796B' : '#4DB6AC',
+                            backgroundColor: isComplete ? '#00796B' : '#4DB6AC',
                             borderRadius: 12,
                             height: 55,
                             flexDirection: 'row',
                             justifyContent: 'center',
                             alignItems: 'center',
                             marginBottom: 20,
-                            opacity: (foodType && consumeMeals && foodIntake && waterIntake && urineLevel && stoolLevel) ? 1 : 0.7
+                            opacity: isComplete ? 1 : 0.7
                         }}
                         onPress={handleSave}
                         disabled={loading}
@@ -511,9 +554,8 @@ export default function LogDaily(props) {
     const [loading, setLoading] = useState(false);
 
     // --- Normal State ---
-    const [foodType, setFoodType] = useState(null);
+    const [meals, setMeals] = useState([{ id: Date.now().toString(), food_type: null, amount_grams: "" }]);
     const [consumeMeals, setConsumeMeals] = useState(null);
-    const [foodIntake, setFoodIntake] = useState(null);
     const [waterIntake, setWaterIntake] = useState(null);
     const [urineLevel, setUrineLevel] = useState(null);
     const [stoolLevel, setStoolLevel] = useState(null);
@@ -578,12 +620,25 @@ export default function LogDaily(props) {
         const dailyLog = Array.isArray(dailyLogRows) ? dailyLogRows[0] : dailyLogRows;
 
         if (dailyLog) {
+            // Fetch Meal Logs
+            const { data: mealLogsData } = await supabase
+                .from('meal_logs')
+                .select('*')
+                .eq('daily_log_id', dailyLog.id)
+                .order('created_at', { ascending: true });
+                
+            if (mealLogsData && mealLogsData.length > 0) {
+                setMeals(mealLogsData.map((m, index) => ({
+                    id: m.id ? String(m.id) : `${Date.now()}-${index}`,
+                    food_type: m.food_type,
+                    amount_grams: m.amount_grams !== null && m.amount_grams !== undefined ? String(m.amount_grams) : ""
+                })));
+            }
+
             const normal = pickChild(dailyLog.normal_logs);
             if (normal) {
                 setHasSavedNormalData(true);
-                setFoodType(normal.food_type);
                 setConsumeMeals(normal.meals_per_day !== null && normal.meals_per_day !== undefined ? String(normal.meals_per_day) : '');
-                setFoodIntake(normal.total_food_grams !== null && normal.total_food_grams !== undefined ? String(normal.total_food_grams) : '');
                 setWaterIntake(normal.water_ml_per_day !== null && normal.water_ml_per_day !== undefined ? String(normal.water_ml_per_day) : '');
 
                 const levelToNum = (lvl) => {
@@ -615,9 +670,9 @@ export default function LogDaily(props) {
         if (!catId) return Alert.alert("Error", "No cat profile found");
 
         const missingFields = [];
-        if (foodType === null) missingFields.push("Type of food");
+        const hasInvalidMeals = meals.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === '');
+        if (hasInvalidMeals) missingFields.push("Food meals data (ประเภทหรือปริมาณ)");
         if (consumeMeals === null || consumeMeals.toString().trim() === '') missingFields.push("Consume amount");
-        if (foodIntake === null || foodIntake.toString().trim() === '') missingFields.push("Total food quantity");
         if (waterIntake === null || waterIntake.toString().trim() === '') missingFields.push("Total water quantity");
         if (urineLevel === null) missingFields.push("Urine level");
         if (stoolLevel === null) missingFields.push("Stool level");
@@ -661,9 +716,9 @@ export default function LogDaily(props) {
                 (Array.isArray(existingData.normal_logs) ? existingData.normal_logs.length > 0 : Object.keys(existingData.normal_logs).length > 0);
 
             // เช็คว่าข้อมูลใน State (หน้าจอ) กรอกครบหรือยัง?
-            const isNormalCompleteInState = foodType !== null &&
+            const hasInvalidMeals = meals.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === '');
+            const isNormalCompleteInState = !hasInvalidMeals &&
                 consumeMeals !== null && consumeMeals.toString().trim() !== '' &&
-                foodIntake !== null && foodIntake.toString().trim() !== '' &&
                 waterIntake !== null && waterIntake.toString().trim() !== '' &&
                 urineLevel !== null &&
                 stoolLevel !== null;
@@ -708,9 +763,9 @@ export default function LogDaily(props) {
             if (dailyError) throw dailyError;
 
             // Step 2: Save Normal Logs if complete
-            const isNormalComplete = foodType !== null &&
+            const hasInvalidMeals = meals.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === '');
+            const isNormalComplete = !hasInvalidMeals &&
                 consumeMeals !== null && consumeMeals.toString().trim() !== '' &&
-                foodIntake !== null && foodIntake.toString().trim() !== '' &&
                 waterIntake !== null && waterIntake.toString().trim() !== '' &&
                 urineLevel !== null &&
                 stoolLevel !== null;
@@ -720,15 +775,27 @@ export default function LogDaily(props) {
                     .from('normal_logs')
                     .upsert({
                         daily_log_id: dailyLog.id,
-                        food_type: foodType,
                         meals_per_day: consumeMeals !== null && consumeMeals !== '' ? Number(consumeMeals) : 0,
-                        total_food_grams: foodIntake !== null && foodIntake !== '' ? Number(foodIntake) : 0,
                         water_ml_per_day: waterIntake !== null && waterIntake !== '' ? Number(waterIntake) : 0,
                         urine_level: getLevelValue(urineLevel),
                         stool_level: getLevelValue(stoolLevel),
                     }, { onConflict: 'daily_log_id' });
 
                 if (normalError) throw normalError;
+                
+                // Save meals array
+                // First delete existing meals for this daily_log_id
+                await supabase.from('meal_logs').delete().eq('daily_log_id', dailyLog.id);
+                
+                // Then insert the new items
+                const mealsArray = meals.map(m => ({
+                    daily_log_id: dailyLog.id,
+                    food_type: m.food_type,
+                    amount_grams: m.amount_grams !== null && m.amount_grams !== '' ? Number(m.amount_grams) : 0
+                }));
+                
+                const { error: mealsError } = await supabase.from('meal_logs').insert(mealsArray);
+                if (mealsError) throw mealsError;
             }
 
             // Step 3: Save Something Off Logs if we are in 'Something off' mode or have data
@@ -788,13 +855,13 @@ export default function LogDaily(props) {
     };
 
     const state = {
-        foodType, consumeMeals, foodIntake, waterIntake, urineLevel, stoolLevel,
+        meals, consumeMeals, waterIntake, urineLevel, stoolLevel,
         isVomitChecked, vomitColor, isDiarrheaChecked, diarrheaColor, behaviorTags, respiratoryTags, notes,
         catName
     };
 
     const setters = {
-        setFoodType, setConsumeMeals, setFoodIntake, setWaterIntake, setUrineLevel, setStoolLevel,
+        setMeals, setConsumeMeals, setWaterIntake, setUrineLevel, setStoolLevel,
         setIsVomitChecked, setVomitColor, setIsDiarrheaChecked, setDiarrheaColor, setBehaviorTags, setRespiratoryTags, setNotes
     };
 

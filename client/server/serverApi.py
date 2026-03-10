@@ -78,69 +78,120 @@ def calculate_disease_risks(cat_data, daily_logs):
     current_weight = float(weights[0]['weight_kg']) if weights else 4.0
 
     if age_years >= 7: 
-        scores["Kidney Disease"] += 20; scores["Gum Disease"] += 15
-    if age_years >= 10: scores["Kidney Disease"] += 15
-    if 5 <= age_years <= 10: scores["Diabetes"] += 15
-    if age_years >= 3: scores["Gum Disease"] += 10
-    if 1 <= age_years <= 7: scores["Urolithiasis"] += 15
-    if age_years <= 1.5: scores["Feline Panleukopenia"] += 40
+        scores["Kidney Disease"] += 10; scores["Gum Disease"] += 10
+    if age_years >= 10: scores["Kidney Disease"] += 10
+    if 5 <= age_years <= 10: scores["Diabetes"] += 5
+    if age_years >= 3: scores["Gum Disease"] += 5
+    if 1 <= age_years <= 7: scores["Urolithiasis"] += 5
+    if age_years <= 1.5: scores["Feline Panleukopenia"] += 10
     
     if gender == 'Male':
-        scores["Diabetes"] += 10; scores["Urolithiasis"] += 25
+        scores["Diabetes"] += 5; scores["Urolithiasis"] += 10
         
     if current_weight >= 6.0:
-        scores["Diabetes"] += 20; scores["Gum Disease"] += 15 
+        scores["Diabetes"] += 10; scores["Gum Disease"] += 10 
 
-    # ข้อมูลจาก Daily Log ย้อนหลัง
+    total_days = len(daily_logs)
+    if total_days == 0:
+        return scores
+
+    # --- การหาค่าเฉลี่ยสะสม (Averaging) จากข้อมูลที่บันทึก ---
+    total_water = 0
+    urine_counts = {}
+    food_counts = {}
+    
+    vomit_count = 0
+    diarrhea_count = 0
+    vomit_types = set()
+    diarrhea_types = set()
+    behavior_counts = {}
+
     for daily in daily_logs:
         normal = daily.get('normal_logs', [])
         if isinstance(normal, list) and len(normal) > 0: normal = normal[0]
-        
         off = daily.get('something_off_logs', [])
         if isinstance(off, list) and len(off) > 0: off = off[0]
 
         if normal:
-            water = normal.get('water_ml_per_day', 0) or 0
+            total_water += normal.get('water_ml_per_day', 0) or 0
+            
             urine = normal.get('urine_level', 'normal')
-            food_type = normal.get('food_type', '')
-
-            if 0 < water < 30: 
-                scores["Urolithiasis"] += 5; scores["Kidney Disease"] += 5
-            elif water > 150: 
-                scores["Kidney Disease"] += 10; scores["Diabetes"] += 5
-
-            if urine in ['low', 'very_low']: scores["Urolithiasis"] += 15
-            elif urine in ['high', 'very_high']: scores["Kidney Disease"] += 10; scores["Diabetes"] += 5
-
-            if food_type == 'dry_food': scores["Urolithiasis"] += 5; scores["Diabetes"] += 5
+            urine_counts[urine] = urine_counts.get(urine, 0) + 1
+            
+            food = normal.get('food_type', 'dry_food')
+            food_counts[food] = food_counts.get(food, 0) + 1
 
         if off:
-            vomit = off.get('has_vomit', False)
-            v_type = off.get('vomit_type', '')
-            diarrhea = off.get('has_diarrhea', False)
-            d_type = off.get('diarrhea_type', '')
+            if off.get('has_vomit', False):
+                vomit_count += 1
+                if off.get('vomit_type'): vomit_types.add(off['vomit_type'])
+            
+            if off.get('has_diarrhea', False):
+                diarrhea_count += 1
+                if off.get('diarrhea_type'): diarrhea_types.add(off['diarrhea_type'])
+                
             behaviors = off.get('behavior_energy', []) or []
+            for b in behaviors:
+                behavior_counts[b] = behavior_counts.get(b, 0) + 1
 
-            if vomit:
-                scores["Feline Panleukopenia"] += 15; scores["Kidney Disease"] += 10
-                if v_type in ['yellow', 'white_foam']: 
-                    scores["Feline Panleukopenia"] += 10; scores["Gum Disease"] += 10
+    # วิเคราะห์ค่าเฉลี่ย Normal
+    avg_water = total_water / total_days
+    predominant_urine = max(urine_counts, key=urine_counts.get) if urine_counts else 'normal'
+    predominant_food = max(food_counts, key=food_counts.get) if food_counts else 'dry_food'
 
-            if diarrhea:
-                scores["Feline Panleukopenia"] += 15
-                if d_type in ['watery', 'fresh_blood', 'black']: scores["Feline Panleukopenia"] += 20
+    # ปริมาณน้ำที่ควรได้รับตามน้ำหนัก (มาตรฐาน 50ml/kg)
+    expected_water = current_weight * 50
+    if predominant_food == 'wet_food':
+        expected_water *= 0.5  # อาหารเปียกมีน้ำเยอะ ความต้องการน้ำเปล่าลดลง
 
-            if 'กินน้ำเยอะผิดปกติ' in behaviors: scores["Kidney Disease"] += 15; scores["Diabetes"] += 15
-            if 'โก่งตัว' in behaviors: scores["Urolithiasis"] += 30
-            if 'ร้องผิดปกติ' in behaviors: scores["Urolithiasis"] += 10; scores["Gum Disease"] += 10
-            if 'ไม่กินอาหารเลย' in behaviors: scores["Gum Disease"] += 20; scores["Feline Panleukopenia"] += 15
-            if 'ซึม' in behaviors: scores["Feline Panleukopenia"] += 10; scores["Kidney Disease"] += 5
-            if 'เบื่ออาหาร' in behaviors: scores["Gum Disease"] += 10
-            if 'กินจุผิดปกติ' in behaviors: scores["Diabetes"] += 15
+    # ตรวจสอบความสัมพันธ์ ปริมาณน้ำ น้ำหนัก และอาหาร
+    if avg_water > 0:
+        if avg_water < expected_water * 0.5:
+            # กินน้ำน้อยกว่าเกณฑ์มาก
+            risk_penalty = 15 if age_years >= 7 else 10 # แมวแก่เสี่ยงโรคไตอุดตันมากกว่า
+            scores["Urolithiasis"] += risk_penalty
+            scores["Kidney Disease"] += risk_penalty
+        elif avg_water > expected_water * 2.0:
+            # กินน้ำมากผิดปกติ (Polydipsia)
+            risk_penalty = 15 if age_years >= 7 else 10
+            scores["Kidney Disease"] += risk_penalty
+            scores["Diabetes"] += risk_penalty
+
+    if predominant_urine in ['low', 'very_low']:
+        scores["Urolithiasis"] += 15
+    elif predominant_urine in ['high', 'very_high']:
+        scores["Kidney Disease"] += 10; scores["Diabetes"] += 10
+
+    # วิเคราะห์อัตราสัดส่วน Something Off (ความถี่ในการเกิดอาการป่วย)
+    vomit_rate = vomit_count / total_days
+    diarrhea_rate = diarrhea_count / total_days
+
+    if vomit_rate >= 0.3: # อ้วกบ่อยกว่า 30% ของวันที่ตอบ
+        scores["Feline Panleukopenia"] += 15 if age_years <= 1.5 else 5
+        scores["Kidney Disease"] += 10 if age_years >= 7 else 5
+        if 'yellow' in vomit_types or 'white_foam' in vomit_types:
+            scores["Gum Disease"] += 10
+            scores["Feline Panleukopenia"] += 10
+            
+    if diarrhea_rate >= 0.3:
+        scores["Feline Panleukopenia"] += 20 if age_years <= 1.5 else 10
+        if 'watery' in diarrhea_types or 'fresh_blood' in diarrhea_types or 'black' in diarrhea_types:
+            scores["Feline Panleukopenia"] += 20
+
+    for b, count in behavior_counts.items():
+        b_rate = count / total_days
+        if b_rate >= 0.3:
+            if 'กินน้ำเยอะผิดปกติ' in b: scores["Kidney Disease"] += 15; scores["Diabetes"] += 15
+            if 'โก่งตัว' in b: scores["Urolithiasis"] += 20
+            if 'ร้องผิดปกติ' in b: scores["Urolithiasis"] += 10; scores["Gum Disease"] += 10
+            if 'ไม่กินอาหารเลย' in b: scores["Gum Disease"] += 15; scores["Feline Panleukopenia"] += 15
+            if 'ซึม' in b: scores["Feline Panleukopenia"] += 10; scores["Kidney Disease"] += 5
+            if 'เบื่ออาหาร' in b: scores["Gum Disease"] += 10
+            if 'กินจุผิดปกติ' in b: scores["Diabetes"] += 15
 
     # ลิมิตคะแนนสูงสุดไว้ที่ 100
     for key in scores:
-        scores[key] = min(100, max(0, scores[key]))
+        scores[key] = min(100, max(0, int(scores[key])))
 
     return scores
 

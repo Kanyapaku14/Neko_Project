@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../screens/config/supabaseClient';
 import { analyzeHealthLog } from '../utils/healthLogic';
@@ -364,7 +364,8 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
               .select(`
                 *,
                 normal_logs(*),
-                something_off_logs(*)
+                something_off_logs(*),
+                meal_logs(*)
               `)
               .in('cat_id', catIds)
               .eq('log_date', today);
@@ -382,7 +383,13 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
                   : (log.normal_logs?.[0] || log.normal_logs);
 
                 const unifiedLog = { ...log, ...(details || {}) };
-                totalFood += Number(unifiedLog.total_food_grams || 0);
+                
+                const mealLogs = log.meal_logs ? (Array.isArray(log.meal_logs) ? log.meal_logs : [log.meal_logs]) : [];
+                const calcFood = mealLogs.length > 0 
+                  ? mealLogs.reduce((sum, meal) => sum + (Number(meal.amount_grams) || 0), 0)
+                  : (unifiedLog.total_food_grams || 0);
+
+                totalFood += Number(calcFood);
 
                 if (unifiedLog.urine_level || unifiedLog.stool_level) {
                   totalLitter += 1;

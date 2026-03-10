@@ -140,6 +140,144 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
 
   // 🚨 สร้าง State ไว้รอรับ ID แมว
   const [catId, setCatId] = useState(route?.params?.catId || null);
+  const loadSource = route?.params?.source;
+  const loadFromDb = loadSource === 'db';
+
+  const normalizeKey = (value) => String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+
+  const buildRiskDataFromAssessmentRow = (row) => {
+    const candidate =
+      row?.risk_data ??
+      row?.riskData ??
+      row?.disease_risks ??
+      row?.diseaseRisks ??
+      row?.risk_breakdown ??
+      row?.riskBreakdown;
+
+    if (Array.isArray(candidate)) {
+      const mapped = candidate
+        .map((item) => ({
+          label: item?.label ?? item?.name ?? '',
+          value: item?.value ?? item?.riskLevel ?? item?.level ?? 'No Data',
+          score: item?.score ?? item?.riskScore ?? item?.percent ?? 0,
+        }))
+        .filter((item) => item.label);
+
+      return mapped.length > 0 ? mapped : INITIAL_RISK_DATA;
+    }
+
+    if (candidate && typeof candidate === 'object') {
+      const keys = Object.keys(candidate);
+      const next = INITIAL_RISK_DATA.map((base) => {
+        const matchKey = keys.find((k) => normalizeKey(k) === normalizeKey(base.label));
+        const entry = matchKey ? candidate[matchKey] : null;
+
+        if (entry && typeof entry === 'object') {
+          return {
+            label: base.label,
+            value: entry?.value ?? entry?.riskLevel ?? entry?.level ?? base.value,
+            score: entry?.score ?? entry?.riskScore ?? entry?.percent ?? base.score,
+          };
+        }
+
+        if (typeof entry === 'string') {
+          return { ...base, value: entry };
+        }
+
+        return base;
+      });
+
+      const hasAny = next.some((item) => item.value !== 'No Data' || (Number(item.score) || 0) > 0);
+      return hasAny ? next : INITIAL_RISK_DATA;
+    }
+
+    const getFirst = (obj, keys) => {
+      for (const k of keys) {
+        if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+      }
+      return undefined;
+    };
+
+    const colSpec = [
+      {
+        label: 'Kidney Disease',
+        levelKeys: ['kidney_risk_level', 'kidney_disease_risk_level', 'kidney_level', 'kidneyDiseaseRiskLevel'],
+        scoreKeys: ['kidney_risk_score', 'kidney_disease_risk_score', 'kidney_score', 'kidneyDiseaseRiskScore'],
+      },
+      {
+        label: 'Diabetes',
+        levelKeys: ['diabetes_risk_level', 'diabetes_level', 'diabetesRiskLevel'],
+        scoreKeys: ['diabetes_risk_score', 'diabetes_score', 'diabetesRiskScore'],
+      },
+      {
+        label: 'Urolithiasis',
+        levelKeys: ['urolithiasis_risk_level', 'urolithiasis_level', 'urolithiasisRiskLevel'],
+        scoreKeys: ['urolithiasis_risk_score', 'urolithiasis_score', 'urolithiasisRiskScore'],
+      },
+      {
+        label: 'Gum Disease',
+        levelKeys: ['gum_disease_risk_level', 'gum_risk_level', 'gumDiseaseRiskLevel'],
+        scoreKeys: ['gum_disease_risk_score', 'gum_risk_score', 'gumDiseaseRiskScore'],
+      },
+      {
+        label: 'Feline Panleukopenia',
+        levelKeys: ['feline_panleukopenia_risk_level', 'panleukopenia_risk_level', 'felinePanleukopeniaRiskLevel'],
+        scoreKeys: ['feline_panleukopenia_risk_score', 'panleukopenia_risk_score', 'felinePanleukopeniaRiskScore'],
+      },
+    ];
+
+    const next = INITIAL_RISK_DATA.map((base) => {
+      const spec = colSpec.find((s) => s.label === base.label);
+      if (!spec) return base;
+
+      const level = getFirst(row, spec.levelKeys);
+      const score = getFirst(row, spec.scoreKeys);
+
+      if (level === undefined && score === undefined) return base;
+      return {
+        label: base.label,
+        value: level ?? base.value,
+        score: score ?? base.score,
+      };
+    });
+
+    const hasAny = next.some((item) => item.value !== 'No Data' || (Number(item.score) || 0) > 0);
+    return hasAny ? next : INITIAL_RISK_DATA;
+  };
+
+  const mapAssessmentRowToResultState = (row) => {
+    const overallScoreFromDb =
+      row?.overall_risk_score ??
+      row?.overallRiskScore ??
+      row?.overallScore ??
+      row?.overall_risk ??
+      row?.overallRisk ??
+      'No Data';
+
+    const summaryTitleFromDb =
+      row?.summary_title ??
+      row?.summaryTitle ??
+      row?.summary ??
+      row?.title ??
+      '';
+
+    const summaryDescFromDb =
+      row?.summary_desc ??
+      row?.summaryDesc ??
+      row?.summary_description ??
+      row?.summaryDescription ??
+      row?.description ??
+      '';
+
+    return {
+      overallScore: overallScoreFromDb,
+      summaryTitle: summaryTitleFromDb,
+      summaryDesc: summaryDescFromDb,
+      riskData: buildRiskDataFromAssessmentRow(row),
+    };
+  };
 
   const handleSaveAssessment = async () => {
     try {
@@ -199,9 +337,37 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
     const loadInitialData = async () => {
       if (!catId) return; // 💡 รอให้ได้ catId มาก่อนค่อยทำงาน
 
-      setLoadingData(true);
-      try {
-        const result = await ResultScreenFactory.fetchAssessment(catId);
+	      setLoadingData(true);
+	      try {
+	        setShowNoDataModal(false);
+
+	        if (loadFromDb) {
+	          const { data: assessmentRow, error } = await supabase
+	            .from('assessments')
+	            .select('*')
+	            .eq('cat_id', catId)
+	            .order('created_at', { ascending: false })
+	            .limit(1)
+	            .maybeSingle();
+
+	          if (error || !assessmentRow) {
+	            setRiskData(INITIAL_RISK_DATA);
+	            setOverallScore("No Data");
+	            setSummaryTitle("");
+	            setSummaryDesc("");
+	            setShowNoDataModal(true);
+	            return;
+	          }
+
+	          const mapped = mapAssessmentRowToResultState(assessmentRow);
+	          setRiskData(mapped.riskData);
+	          setOverallScore(mapped.overallScore);
+	          setSummaryTitle(mapped.summaryTitle);
+	          setSummaryDesc(mapped.summaryDesc);
+	          return;
+	        }
+
+	        const result = await ResultScreenFactory.fetchAssessment(catId);
 
         if (result.success) {
           const validRiskData = (result.riskData && result.riskData.length > 0)
@@ -231,7 +397,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
     };
 
     loadInitialData();
-  }, [catId]);
+	  }, [catId, loadFromDb]);
 
   useEffect(() => {
     if (!selectedConditionValue) {
@@ -291,10 +457,14 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
       >
         <View style={customStyles.modalOverlay}>
           <View style={customStyles.modalContainer}>
-            <Text style={customStyles.modalTitle}>ขาดข้อมูลของวันนี้</Text>
-            <Text style={customStyles.modalText}>
-              ระบบประเมินความเสี่ยงจำเป็นต้องใช้ข้อมูลสุขภาพอัปเดตล่าสุดของ "วันนี้" ไปบันทึก Daily Log ตอนนี้เลยไหม?
-            </Text>
+	            <Text style={customStyles.modalTitle}>
+	              {loadFromDb ? 'ไม่พบผลตรวจในฐานข้อมูล' : 'ขาดข้อมูลของวันนี้'}
+	            </Text>
+	            <Text style={customStyles.modalText}>
+	              {loadFromDb
+	                ? 'ยังไม่มีผลตรวจที่บันทึกไว้สำหรับแมวตัวนี้ คุณสามารถบันทึก Daily Log แล้วทำ Assessment เพื่อสร้างผลตรวจได้'
+	                : 'ระบบประเมินความเสี่ยงจำเป็นต้องใช้ข้อมูลสุขภาพอัปเดตล่าสุดของ "วันนี้" ไปบันทึก Daily Log ตอนนี้เลยไหม?'}
+	            </Text>
             <View style={customStyles.modalButtonRow}>
               <TouchableOpacity
                 style={[customStyles.modalButton, customStyles.modalButtonCancel]}
