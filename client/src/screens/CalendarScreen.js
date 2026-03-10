@@ -221,7 +221,23 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
             style={{ width: 140, height: 140, borderRadius: 16 }}
             resizeMode="cover"
           />
-          <View style={{ marginLeft: 20, justifyContent: 'space-between', height: 120 }}>
+          <View style={{
+            flex: 1,
+            marginLeft: 16,
+            height: 140,
+            backgroundColor: '#ffffff',
+            borderRadius: 12,
+            paddingVertical: 12,
+            paddingHorizontal: 16,
+            justifyContent: 'space-between',
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.05,
+            shadowRadius: 4,
+            elevation: 2,
+            borderWidth: 1,
+            borderColor: '#F0F0F0'
+          }}>
             {items.map((item) => {
               const isUploaded = !!item.url;
               return (
@@ -233,10 +249,6 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                         width: 20,
                         height: 20,
                         tintColor: '#147C78',
-                        shadowColor: '#147C78',
-                        shadowOffset: { width: 0, height: 0 },
-                        shadowOpacity: 1,
-                        shadowRadius: 1
                       }}
                       resizeMode="contain"
                     />
@@ -246,17 +258,13 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                       style={{
                         width: 20,
                         height: 20,
-                        tintColor: '#1b1b1bff',
-                        shadowColor: '#1b1b1bff',
-                        shadowOffset: { width: 0, height: 0 },
-                        shadowOpacity: 1,
-                        shadowRadius: 1
+                        tintColor: '#000000ff',
                       }}
                       resizeMode="contain"
                     />
                   )}
                   <Text style={{
-                    marginLeft: 8,
+                    marginLeft: 12,
                     fontSize: 13,
                     fontWeight: isUploaded ? "bold" : "500",
                     color: isUploaded ? "#147C78" : "#A0AEC0"
