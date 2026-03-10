@@ -11,20 +11,13 @@ import HomeHeader from '../components/HomeHeader';
 const GRID_GAP = 12;
 const GRID_PADDING = 16;
 
-const getResponsiveColumns = (screenWidth) => {
-    if (screenWidth >= 1024) return 5;
-    if (screenWidth >= 768) return 4;
-    if (screenWidth >= 480) return 3;
-    return 2;
-};
-
 // Helper: Get color based on overall risk score
 const getRiskColor = (score) => {
-    if (score === null || score === undefined || score === 'No Data') return '#B0BEC5';
-    if (score >= 80) return '#10B981'; // Green - Excellent
-    if (score >= 60) return '#3B82F6'; // Blue - Good
-    if (score >= 40) return '#F59E0B'; // Orange - Fair
-    return '#EF4444'; // Red - Attention
+    if (score === null || score === undefined || score === 'No Data') return '#78909C';
+    if (score >= 80) return '#059669'; // Green - Excellent (Darker)
+    if (score >= 60) return '#2563EB'; // Blue - Good (Darker)
+    if (score >= 40) return '#D97706'; // Orange - Fair (Darker)
+    return '#DC2626'; // Red - Attention (Darker)
 };
 
 const getRiskLabel = (score) => {
@@ -38,8 +31,6 @@ const getRiskLabel = (score) => {
 export default function AssessmentGallery({ onBack, session, onNavigate }) {
     const { width: screenWidth } = useWindowDimensions();
     const insets = useSafeAreaInsets();
-    const columnCount = getResponsiveColumns(screenWidth);
-    const cardSize = (screenWidth - (GRID_PADDING * 2) - (GRID_GAP * (columnCount - 1))) / columnCount;
 
     const [assessments, setAssessments] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -165,23 +156,26 @@ export default function AssessmentGallery({ onBack, session, onNavigate }) {
         return (
             <Animated.View style={{ opacity: itemOpacity, transform: [{ translateY: itemTranslateY }] }}>
                 <TouchableOpacity
-                    style={[styles.cardContainer, { width: cardSize }]}
+                    style={styles.cardContainer}
                     onPress={() => handleSelectAssessment(item)}
                     activeOpacity={0.8}
                 >
-                    <View style={[styles.cardHeader, { backgroundColor: scoreColor + '15' }]}>
-                        <MaterialCommunityIcons name="heart-pulse" size={20} color={scoreColor} />
+                    <View style={[styles.cardIconScoreContainer, { backgroundColor: scoreColor + '20' }]}>
+                        <MaterialCommunityIcons name="heart-pulse" size={24} color={scoreColor} />
                         <Text style={[styles.cardScoreText, { color: scoreColor }]}>{displayScore}</Text>
                     </View>
 
                     <View style={styles.cardBody}>
                         <Text style={styles.cardStatusText} numberOfLines={1}>{scoreLabel}</Text>
-                        <Text style={styles.cardDateText}>{dateStr}</Text>
-                        <Text style={styles.cardTimeText}>{timeStr}</Text>
+                        <View style={styles.dateRow}>
+                            <Ionicons name="calendar-outline" size={14} color="#3A4F4A" />
+                            <Text style={styles.cardDateText}>{dateStr}</Text>
+                            <Text style={styles.cardTimeText}>• {timeStr}</Text>
+                        </View>
                     </View>
 
                     <View style={styles.viewBadge}>
-                        <Ionicons name="chevron-forward" size={14} color="#0C5A58" />
+                        <Ionicons name="chevron-forward" size={18} color="#063E3C" />
                     </View>
                 </TouchableOpacity>
             </Animated.View>
@@ -243,13 +237,10 @@ export default function AssessmentGallery({ onBack, session, onNavigate }) {
                             }}
                         >
                             <FlatList
-                                key={`assessments-${columnCount}`}
                                 data={assessments}
                                 renderItem={renderItem}
                                 keyExtractor={item => String(item.id)}
-                                numColumns={columnCount}
-                                contentContainerStyle={styles.gridContent}
-                                columnWrapperStyle={styles.columnWrapper}
+                                contentContainerStyle={styles.listContent}
                                 ListEmptyComponent={
                                     <View style={styles.emptyState}>
                                         <Ionicons name="document-text-outline" size={64} color="#B0BEC5" />
@@ -330,70 +321,72 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    gridContent: {
+    listContent: {
         padding: GRID_PADDING,
         paddingBottom: 40,
-        gap: GRID_GAP,
-    },
-    columnWrapper: {
-        gap: GRID_GAP,
+        gap: 12,
     },
     cardContainer: {
         backgroundColor: '#FFFFFF',
         borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#E7EFEA',
+        borderWidth: 1.5,
+        borderColor: '#CFD8D6',
         overflow: 'hidden',
         shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-        elevation: 1,
-        position: 'relative',
-    },
-    cardHeader: {
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        elevation: 2,
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(0,0,0,0.03)',
+        padding: 12,
+    },
+    cardIconScoreContainer: {
+        width: 64,
+        height: 64,
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 16,
     },
     cardScoreText: {
-        fontSize: 18,
+        fontSize: 16,
         fontWeight: '800',
+        marginTop: 4,
     },
     cardBody: {
-        padding: 12,
-        paddingTop: 8,
+        flex: 1,
+        justifyContent: 'center',
     },
     cardStatusText: {
-        fontSize: 14,
-        fontWeight: '700',
-        color: '#37474F',
-        marginBottom: 8,
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#1A2924',
+        marginBottom: 6,
+    },
+    dateRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
     },
     cardDateText: {
-        fontSize: 11,
+        fontSize: 13,
+        color: '#3A4F4A',
+        fontWeight: '700',
+    },
+    cardTimeText: {
+        fontSize: 13,
         color: '#5F7671',
         fontWeight: '600',
     },
-    cardTimeText: {
-        fontSize: 10,
-        color: '#90A4AE',
-        marginTop: 2,
-    },
     viewBadge: {
-        position: 'absolute',
-        bottom: 8,
-        right: 8,
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        backgroundColor: '#F1F8F6',
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#E2EBE8',
         justifyContent: 'center',
         alignItems: 'center',
+        marginLeft: 12,
     },
     emptyState: {
         flex: 1,
