@@ -8,11 +8,20 @@ import {
   Alert,
   StyleSheet,
   Modal,
-  Dimensions
+  Dimensions,
+  Platform
 } from "react-native";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, Path, Defs, LinearGradient as SvgLinearGradient, Stop, G } from 'react-native-svg';
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import Animated, {
+  useSharedValue,
+  withTiming,
+  useAnimatedProps,
+  useAnimatedStyle,
+  Easing
+} from "react-native-reanimated";
 import styles from "../styles/resultStyles";
 import supabase from "./config/supabaseClient"; // 🚨 เพิ่มบรรทัดนี้เพื่อดึงฐานข้อมูล
 import AlertEngine from '../services/AlertEngine';
@@ -50,7 +59,7 @@ const getRiskColor = (riskLevel) => {
 const getOverallRiskDetails = (score) => {
   if (score === null || score === undefined || score === "No Data") return { label: "No Data", color: "#B0B0B0", text: "No Data" };
   const numScore = Number(score);
-  if (isNaN(numScore) || numScore === 0) return { label: "0", color: "#B0B0B0", text: "No Data" };
+  if (isNaN(numScore) || numScore === 0) return { label: "0", color: "#B0B0B0", text: "NULL" };
 
   if (numScore >= 91) return { label: `${numScore}%`, color: "#e74c3c", text: "Extreme Risk" };
   if (numScore >= 71) return { label: `${numScore}%`, color: "#e67e22", text: "High Risk" };
@@ -58,6 +67,148 @@ const getOverallRiskDetails = (score) => {
   if (numScore >= 21) return { label: `${numScore}%`, color: "#1abc9c", text: "Low Risk" };
   return { label: `${numScore}%`, color: "#2ecc71", text: "Normal" };
 };
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+const tintHex = (hex, amount = 0) => {
+  const raw = String(hex || "").replace("#", "");
+  if (!/^[0-9a-fA-F]{6}$/.test(raw)) return hex;
+  const r = Math.max(0, Math.min(255, parseInt(raw.slice(0, 2), 16) + amount));
+  const g = Math.max(0, Math.min(255, parseInt(raw.slice(2, 4), 16) + amount));
+  const b = Math.max(0, Math.min(255, parseInt(raw.slice(4, 6), 16) + amount));
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+};
+
+function CatRiskMeter({ score = 0, color = "#2ecc71", size = 190, mainText = "0", subText = "" }) {
+  const SIZE = 190;
+  const STROKE = 12;
+  const RADIUS = 64;
+  const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
+  const safeScore = Math.max(0, Math.min(100, Number(score) || 0));
+  const scale = (size || 190) / 190;
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withTiming(safeScore / 100, {
+      duration: 1500,
+      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+    });
+  }, [safeScore]);
+
+  const animatedProps = useAnimatedProps(() => {
+    const dashoffset = CIRCUMFERENCE * (1 - progress.value);
+    return {
+      strokeDashoffset: dashoffset,
+    };
+  });
+
+  const pawOrbitStyle = useAnimatedStyle(() => {
+    const angle = progress.value * 2 * Math.PI - Math.PI / 2;
+    const pawX = SIZE / 2 + RADIUS * Math.cos(angle);
+    const pawY = SIZE / 2 + RADIUS * Math.sin(angle);
+
+    return {
+      position: "absolute",
+      width: 32,
+      height: 32,
+      left: pawX - 16,
+      top: pawY - 16,
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 10,
+    };
+  });
+
+  const ringStart = tintHex(color, 35);
+  const ringEnd = tintHex(color, -25);
+
+  return (
+    <View style={{ width: size, height: size, justifyContent: "center", alignItems: "center" }}>
+      <View style={{ width: SIZE, height: SIZE, justifyContent: "center", alignItems: "center", position: "relative", transform: [{ scale }] }}>
+        <Svg width={SIZE} height={SIZE}>
+          <Defs>
+            <SvgLinearGradient id="progressGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor={ringStart} />
+              <Stop offset="100%" stopColor={ringEnd} />
+            </SvgLinearGradient>
+          </Defs>
+
+          {/* WHITE CAT SHAPE SHADOW */}
+          <G y="8" x="0">
+            <Path d="M 48 50 Q 35 25 42 12 Q 45 8 48 12 Q 65 20 85 28 Z" fill="rgba(0,0,0,0.35)" />
+            <Path d="M 142 50 Q 155 25 148 12 Q 146 8 142 12 Q 125 20 105 28 Z" fill="rgba(0,0,0,0.35)" />
+            <Circle cx={SIZE / 2} cy={SIZE / 2} r="76" fill="rgba(0,0,0,0.12)" />
+            <Path d="M 38 85 Q 15 70 -5 82" stroke="rgba(0,0,0,0.05)" strokeWidth="8" strokeLinecap="round" fill="none" />
+            <Path d="M 35 105 Q 15 95 -8 102" stroke="rgba(0,0,0,0.05)" strokeWidth="8" strokeLinecap="round" fill="none" />
+            <Path d="M 38 125 Q 15 115 -5 120" stroke="rgba(0,0,0,0.05)" strokeWidth="8" strokeLinecap="round" fill="none" />
+            <Path d="M 152 85 Q 175 70 195 82" stroke="rgba(0,0,0,0.05)" strokeWidth="8" strokeLinecap="round" fill="none" />
+            <Path d="M 155 105 Q 175 95 198 102" stroke="rgba(0,0,0,0.05)" strokeWidth="8" strokeLinecap="round" fill="none" />
+            <Path d="M 152 125 Q 175 115 195 120" stroke="rgba(0,0,0,0.05)" strokeWidth="8" strokeLinecap="round" fill="none" />
+          </G>
+
+          {/* WHITE CAT SHAPE BASE */}
+          <Path d="M 48 50 Q 35 25 42 12 Q 45 8 48 12 Q 65 20 85 28 Z" fill="#FFFFFF" stroke="#F1F5F9" strokeWidth="1" />
+          <Path d="M 142 50 Q 155 25 148 12 Q 146 8 142 12 Q 125 20 105 28 Z" fill="#FFFFFF" stroke="#F1F5F9" strokeWidth="1" />
+          <Path d="M 52 42 Q 42 22 50 16 Q 60 25 72 32" fill="#FFE4E6" opacity="0.6" />
+          <Path d="M 138 42 Q 148 22 140 16 Q 130 25 118 32" fill="#FFE4E6" opacity="0.6" />
+
+          {/* WHISKERS */}
+          <Path d="M 38 85 Q 15 70 -5 82" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Path d="M 35 105 Q 15 95 -8 102" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Path d="M 38 125 Q 15 115 -5 120" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Path d="M 152 85 Q 175 70 195 82" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Path d="M 155 105 Q 175 95 198 102" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Path d="M 152 125 Q 175 115 195 120" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Circle cx={SIZE / 2} cy={SIZE / 2} r="76" fill="#FFFFFF" />
+
+          <Circle cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} stroke="#F1F5F9" fill="none" strokeWidth={STROKE} />
+
+          {safeScore > 0 && (
+            <AnimatedCircle
+              stroke="url(#progressGrad)"
+              fill="none"
+              cx={SIZE / 2}
+              cy={SIZE / 2}
+              r={RADIUS}
+              strokeWidth={STROKE}
+              strokeDasharray={CIRCUMFERENCE.toString()}
+              animatedProps={animatedProps}
+              strokeLinecap="round"
+              rotation="-90"
+              origin={`${SIZE / 2},${SIZE / 2}`}
+            />
+          )}
+        </Svg>
+
+        <View style={{ position: "absolute", alignItems: "center", justifyContent: "center", top: 55, width: 120, alignSelf: "center" }}>
+          <MaterialCommunityIcons name="cat" size={44} color={color} />
+          <Text style={{ fontSize: 13, fontWeight: "700", letterSpacing: 1, marginTop: 2, marginBottom: -4, color: color, textAlign: "center" }} numberOfLines={1}>
+            {String(subText).toUpperCase()}
+          </Text>
+          {mainText !== "No Data" && mainText !== "NULL" && (
+            <Text style={{ fontSize: 36, fontWeight: "800", lineHeight: 40, color: color, marginTop: 0 }}>
+              {mainText.replace('%', '')}
+            </Text>
+          )}
+        </View>
+
+        {safeScore > 0 && (
+          <Animated.View style={pawOrbitStyle}>
+            <View style={{
+              width: 32, height: 32, borderRadius: 16, backgroundColor: "#FFFFFF",
+              alignItems: "center", justifyContent: "center", shadowColor: "#000",
+              shadowOpacity: 0.12, shadowRadius: 5, shadowOffset: { width: 0, height: 3 },
+              borderWidth: 2, borderColor: "#DCE6EB"
+            }}>
+              <MaterialCommunityIcons name="heart" size={18} color={color} />
+            </View>
+          </Animated.View>
+        )}
+      </View>
+    </View>
+  );
+}
 
 const formatPreventionData = (data) => {
   if (!data) return "";
@@ -337,37 +488,37 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
     const loadInitialData = async () => {
       if (!catId) return; // 💡 รอให้ได้ catId มาก่อนค่อยทำงาน
 
-	      setLoadingData(true);
-	      try {
-	        setShowNoDataModal(false);
+      setLoadingData(true);
+      try {
+        setShowNoDataModal(false);
 
-	        if (loadFromDb) {
-	          const { data: assessmentRow, error } = await supabase
-	            .from('assessments')
-	            .select('*')
-	            .eq('cat_id', catId)
-	            .order('created_at', { ascending: false })
-	            .limit(1)
-	            .maybeSingle();
+        if (loadFromDb) {
+          const { data: assessmentRow, error } = await supabase
+            .from('assessments')
+            .select('*')
+            .eq('cat_id', catId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
 
-	          if (error || !assessmentRow) {
-	            setRiskData(INITIAL_RISK_DATA);
-	            setOverallScore("No Data");
-	            setSummaryTitle("");
-	            setSummaryDesc("");
-	            setShowNoDataModal(true);
-	            return;
-	          }
+          if (error || !assessmentRow) {
+            setRiskData(INITIAL_RISK_DATA);
+            setOverallScore("No Data");
+            setSummaryTitle("");
+            setSummaryDesc("");
+            setShowNoDataModal(true);
+            return;
+          }
 
-	          const mapped = mapAssessmentRowToResultState(assessmentRow);
-	          setRiskData(mapped.riskData);
-	          setOverallScore(mapped.overallScore);
-	          setSummaryTitle(mapped.summaryTitle);
-	          setSummaryDesc(mapped.summaryDesc);
-	          return;
-	        }
+          const mapped = mapAssessmentRowToResultState(assessmentRow);
+          setRiskData(mapped.riskData);
+          setOverallScore(mapped.overallScore);
+          setSummaryTitle(mapped.summaryTitle);
+          setSummaryDesc(mapped.summaryDesc);
+          return;
+        }
 
-	        const result = await ResultScreenFactory.fetchAssessment(catId);
+        const result = await ResultScreenFactory.fetchAssessment(catId);
 
         if (result.success) {
           const validRiskData = (result.riskData && result.riskData.length > 0)
@@ -394,10 +545,11 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
         setRiskData(INITIAL_RISK_DATA);
       }
       finally { setLoadingData(false); }
+      // setLoadingData(false); // FOR MOCK DATA REVIEW
     };
 
     loadInitialData();
-	  }, [catId, loadFromDb]);
+  }, [catId, loadFromDb]);
 
   useEffect(() => {
     if (!selectedConditionValue) {
@@ -457,14 +609,14 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
       >
         <View style={customStyles.modalOverlay}>
           <View style={customStyles.modalContainer}>
-	            <Text style={customStyles.modalTitle}>
-	              {loadFromDb ? 'ไม่พบผลตรวจในฐานข้อมูล' : 'ขาดข้อมูลของวันนี้'}
-	            </Text>
-	            <Text style={customStyles.modalText}>
-	              {loadFromDb
-	                ? 'ยังไม่มีผลตรวจที่บันทึกไว้สำหรับแมวตัวนี้ คุณสามารถบันทึก Daily Log แล้วทำ Assessment เพื่อสร้างผลตรวจได้'
-	                : 'ระบบประเมินความเสี่ยงจำเป็นต้องใช้ข้อมูลสุขภาพอัปเดตล่าสุดของ "วันนี้" ไปบันทึก Daily Log ตอนนี้เลยไหม?'}
-	            </Text>
+            <Text style={customStyles.modalTitle}>
+              {loadFromDb ? 'ไม่พบผลตรวจในฐานข้อมูล' : 'ขาดข้อมูลของวันนี้'}
+            </Text>
+            <Text style={customStyles.modalText}>
+              {loadFromDb
+                ? 'ยังไม่มีผลตรวจที่บันทึกไว้สำหรับแมวตัวนี้ คุณสามารถบันทึก Daily Log แล้วทำ Assessment เพื่อสร้างผลตรวจได้'
+                : 'ระบบประเมินความเสี่ยงจำเป็นต้องใช้ข้อมูลสุขภาพอัปเดตล่าสุดของ "วันนี้" ไปบันทึก Daily Log ตอนนี้เลยไหม?'}
+            </Text>
             <View style={customStyles.modalButtonRow}>
               <TouchableOpacity
                 style={[customStyles.modalButton, customStyles.modalButtonCancel]}
@@ -493,34 +645,23 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} nestedScrollEnabled={true}>
-        <View style={styles.circleWrapper}>
-          <View style={styles.circleBg}>
-            <Svg width="180" height="180" style={{ position: 'absolute', transform: [{ rotate: '-90deg' }] }}>
-              <Circle
-                cx="90"
-                cy="90"
-                r={radius}
-                stroke="#E1ECEB"
-                strokeWidth="16"
-                fill="none"
-              />
-              {clampedScore > 0 && (
-                <Circle
-                  cx="90"
-                  cy="90"
-                  r={radius}
-                  stroke={riskDetails.color}
-                  strokeWidth="16"
-                  strokeDasharray={circumference}
-                  strokeDashoffset={strokeDashoffset}
-                  strokeLinecap="round"
-                  fill="none"
-                />
-              )}
-            </Svg>
-            <Text style={[styles.riskText, { color: riskDetails.color, fontSize: riskDetails.label === "No Data" ? 22 : undefined }]}>{riskDetails.label}</Text>
-          </View>
-          <Text style={[styles.recommendText, { color: riskDetails.color }]}>{riskDetails.text}</Text>
+        <View style={customStyles.scoreSection}>
+          <MaterialCommunityIcons name="paw" size={38} color="rgba(0,105,92,0.15)" style={{ position: 'absolute', top: 5, right: 30, transform: [{ rotate: '25deg' }] }} />
+          <MaterialCommunityIcons name="paw" size={30} color="rgba(0,105,92,0.12)" style={{ position: 'absolute', top: 40, left: 20, transform: [{ rotate: '-20deg' }] }} />
+          <MaterialCommunityIcons name="paw" size={34} color="rgba(0,105,92,0.1)" style={{ position: 'absolute', bottom: 25, right: 45, transform: [{ rotate: '40deg' }] }} />
+          <MaterialCommunityIcons name="paw" size={26} color="rgba(0,105,92,0.08)" style={{ position: 'absolute', bottom: 15, left: 40, transform: [{ rotate: '-30deg' }] }} />
+
+          <Text style={customStyles.scoreSectionLabel}>HEALTH RISK</Text>
+
+          <CatRiskMeter
+            size={260}
+            score={clampedScore}
+            color={riskDetails.color}
+            mainText={riskDetails.label}
+            subText={riskDetails.text}
+          />
+
+          <Text style={[customStyles.scoreSubtitle, { color: riskDetails.color }]}>{riskDetails.text}</Text>
           <Text style={styles.subText}>Overall Health Risk</Text>
         </View>
 
@@ -530,28 +671,29 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
         </View>
 
         <Text style={styles.sectionTitle}>Risk Breakdown</Text>
-        {riskData.map((item, index) => {
-          const barColor = getRiskColor(item.value);
-          return (
-            <View key={index} style={styles.riskItem}>
-              <View style={styles.riskRow}>
-                <Text style={styles.riskLabel}>{item.label}</Text>
-                <Text style={[styles.riskValue, { color: barColor }]}>{item.value}</Text>
+        <View style={customStyles.riskCard}>
+          {riskData.map((item, index) => {
+            const barColor = getRiskColor(item.value);
+            return (
+              <View key={index} style={customStyles.insightRow}>
+                <View style={customStyles.insightHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                    <MaterialCommunityIcons name="alert-circle" size={16} color={item.score > 0 ? barColor : "#bdc3c7"} style={{ marginRight: 6 }} />
+                    <Text style={customStyles.insightLabel} numberOfLines={1}>{item.label}</Text>
+                  </View>
+                  <Text style={[customStyles.insightValue, { color: item.score > 0 ? barColor : "#8A9A98" }]}>{item.score > 0 ? item.value : "NULL"}</Text>
+                </View>
+                <View style={customStyles.progressBarBg}>
+                  <View style={customStyles.progressBarGray} />
+                  <View style={[customStyles.progressBarFill, { width: `${item.score}%` }]}>
+                    {item.score > 0 && <View style={[customStyles.progressBarColor, { backgroundColor: barColor }]} />}
+                    {item.score > 0 && <MaterialCommunityIcons name="paw" size={24} color={tintHex(barColor, -35)} style={customStyles.progressPaw} />}
+                  </View>
+                </View>
               </View>
-              <View style={styles.riskBarBg}>
-                <View
-                  style={[
-                    styles.riskBarFill,
-                    {
-                      width: `${item.score}%`,
-                      backgroundColor: barColor
-                    }
-                  ]}
-                />
-              </View>
-            </View>
-          );
-        })}
+            );
+          })}
+        </View>
 
         <Text style={styles.sectionTitle}>Recommended Approach</Text>
 
@@ -683,7 +825,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
         </TouchableOpacity>
 
       </ScrollView>
-    </LinearGradient>
+    </LinearGradient >
   );
 }
 
@@ -701,8 +843,98 @@ const customStyles = StyleSheet.create({
   },
   dropdownList: { marginTop: 4, borderWidth: 1, borderColor: '#eee', borderRadius: 8, backgroundColor: '#fff', position: 'absolute', top: 38, left: 0, right: 0, zIndex: 9999, elevation: 5 },
   dropdownItem: { padding: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  dropdownItemActive: { backgroundColor: '#e6fffa' },
+  dropdownItemActive: {
+    backgroundColor: '#0F766E20', /* Subtle highlight */
+  },
 
+  // Dashboard UI match styles
+  scoreSection: {
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 18,
+    position: 'relative',
+    paddingVertical: 6,
+  },
+  scoreSectionLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#8A9A98',
+    letterSpacing: 1.2,
+    marginBottom: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Inter-Bold' : 'sans-serif-medium',
+  },
+  scoreSubtitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 10,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  riskCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E6EFEB',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 1,
+  },
+  insightRow: {
+    marginBottom: 16,
+  },
+  insightHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  insightLabel: {
+    fontSize: 13,
+    color: '#455A64',
+    fontWeight: '600',
+  },
+  insightValue: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  progressBarBg: {
+    height: 24,
+    justifyContent: 'center',
+    overflow: 'visible',
+    marginVertical: 4,
+  },
+  progressBarGray: {
+    height: 8,
+    backgroundColor: '#ECEFF1',
+    borderRadius: 5,
+    width: '100%',
+    position: 'absolute',
+  },
+  progressBarFill: {
+    height: 24,
+    minWidth: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    overflow: 'visible',
+  },
+  progressBarColor: {
+    height: 8,
+    borderRadius: 5,
+    width: '100%',
+    position: 'absolute',
+  },
+  progressPaw: {
+    marginRight: -8,
+    textShadowColor: 'rgba(0,0,0,0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    zIndex: 10,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
