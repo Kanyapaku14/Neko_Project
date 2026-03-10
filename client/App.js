@@ -13,6 +13,8 @@ import UserInfoScreen from './src/screens/UserInfoScreen';
 import supabase from './src/screens/config/supabaseClient';
 import Dashboard from './src/screens/Dashbord';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
+import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 
 // 1. Import the LogDailyNormal file
 import LogDailyNormal from './src/screens/LogDailyNormal';
@@ -67,8 +69,10 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState('SignIn');
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [authScreen, setAuthScreen] = useState('Home'); // ✅ เปลี่ยนกลับเป็น Home
+  const [authScreen, setAuthScreen] = useState('Home');
   const [catId, setCatId] = useState(null);
+
+  const [resetPasswordMode, setResetPasswordMode] = useState(false);
   const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
   const [profileLoading, setProfileLoading] = useState(false); // ✅ Track if checking profile
   const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null); // null until loaded
@@ -143,13 +147,13 @@ export default function App() {
     setCurrentScreen('SignIn');
   };
 
-  useEffect(() => {
-    const handleSessionBootstrap = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) {
-          const msg = String(error?.message || '');
-          if (msg.includes('Invalid Refresh Token') || msg.includes('Refresh Token Not Found')) {
+		useEffect(() => {
+			const handleSessionBootstrap = async () => {
+				try {
+					const { data: { session }, error } = await supabase.auth.getSession();
+	        if (error) {
+	          const msg = String(error?.message || '');
+	          if (msg.includes('Invalid Refresh Token') || msg.includes('Refresh Token Not Found')) {
             await clearStaleAuthSession();
           } else {
             setSession(null);
@@ -161,13 +165,13 @@ export default function App() {
       } finally {
         setLoading(false);
       }
-    };
+	    };
 
-    handleSessionBootstrap();
+			handleSessionBootstrap();
 
-    const appStateSub = AppState.addEventListener('change', async (state) => {
-      if (state === 'active') {
-        supabase.auth.startAutoRefresh();
+			const appStateSub = AppState.addEventListener('change', async (state) => {
+				if (state === 'active') {
+					supabase.auth.startAutoRefresh();
         await NotificationService.markUserActiveNow();
       } else {
         supabase.auth.stopAutoRefresh();
@@ -175,7 +179,16 @@ export default function App() {
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Handle password recovery deep link
+      if (_event === 'PASSWORD_RECOVERY') {
+        setSession(session);
+        setResetPasswordMode(true);
+        setLoading(false);
+        return;
+      }
+
       setSession(session);
       if (session) {
         checkUserProfileStatus(session);
@@ -184,11 +197,11 @@ export default function App() {
       }
     });
 
-    return () => {
-      subscription.unsubscribe();
-      appStateSub?.remove?.();
-    };
-  }, []);
+			return () => {
+				subscription.unsubscribe();
+				appStateSub?.remove?.();
+			};
+		}, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,11 +312,11 @@ export default function App() {
     );
   }
 
-  const renderScreen = () => {
-    // 1. Session based (if logged in)
-    if (session) {
-      // screen can be string or object { screen, params }
-      const currentScreenName = typeof authScreen === 'object' ? authScreen.screen : authScreen;
+	  const renderScreen = () => {
+	    // 1. Session based (if logged in)
+	    if (session) {
+	      // screen can be string or object { screen, params }
+	      const currentScreenName = typeof authScreen === 'object' ? authScreen.screen : authScreen;
       const screenParams = typeof authScreen === 'object' ? authScreen.params : {};
 
       if (currentScreenName === 'CatProfile') {
@@ -386,13 +399,15 @@ export default function App() {
           initialDate={screenParams?.date || null}
         />;
       }
-      if (currentScreenName === 'Result') {
-        return <ResultScreen
-          onBack={() => setAuthScreen('Home')}
-          onSave={() => setAuthScreen('Home')}
-          onNavigate={(screen, params) => navigateAuth(screen, params)}
-        />;
-      }
+	      if (currentScreenName === 'Result') {
+	        return <ResultScreen
+	          onBack={() => setAuthScreen('Home')}
+	          onSave={() => setAuthScreen('Home')}
+	          onNavigate={(screen, params) => navigateAuth(screen, params)}
+	          route={{ params: screenParams }}
+	          session={session}
+	        />;
+	      }
       if (currentScreenName === 'Overview') {
         return <Dashboard
           session={session}
@@ -512,16 +527,36 @@ export default function App() {
         onSetting={() => setAuthScreen('Setting')}
         onNavigate={(screen, params) => navigateAuth(screen, params)}
       />;
-    }
+	    }
 
-    // 2. Guest/SignIn flow
-    return (
-      <>
-        {currentScreen === 'SignIn' && (
-          <SignInScreen onNavigate={navigateToSignUp} />
+	    // 2. Guest/SignIn flow
+	    // Reset password mode (arrived via deep link from email)
+	    if (resetPasswordMode) {
+	      return (
+	        <ResetPasswordScreen
+	          onComplete={() => {
+	            setResetPasswordMode(false);
+	            setSession(null);
+	            supabase.auth.signOut();
+	            setCurrentScreen('SignIn');
+	          }}
+	        />
+	      );
+	    }
+
+	    return (
+	      <>
+	        {currentScreen === 'SignIn' && (
+          <SignInScreen
+            onNavigate={navigateToSignUp}
+            onForgotPassword={() => setCurrentScreen('ForgotPassword')}
+          />
         )}
         {currentScreen === 'SignUp' && (
           <SignUpScreen onNavigate={navigateToSignIn} />
+        )}
+        {currentScreen === 'ForgotPassword' && (
+          <ForgotPasswordScreen onBack={() => setCurrentScreen('SignIn')} />
         )}
       </>
     );

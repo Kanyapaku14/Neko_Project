@@ -81,6 +81,9 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const [rawLogs, setRawLogs] = useState([]);
   const [latestAlerts, setLatestAlerts] = useState([]);
   const [latestRedFlags, setLatestRedFlags] = useState(0);
+
+  const [pawStats, setPawStats] = useState({ activity: 0, litter: 0, wellness: 0 });
+
   const [eventSummary, setEventSummary] = useState({
     all: { eat: 0, litter: 0, sleep: 0, activity: 0, abnormal: 0, total: 0 },
     d7: { eat: 0, litter: 0, sleep: 0, activity: 0, abnormal: 0, total: 0 },
@@ -123,6 +126,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     };
   }, [session?.user?.id]);
 
+
   useEffect(() => {
     if (session?.user) {
       fetchDashboardData();
@@ -157,6 +161,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     };
     persistHealthCache();
   }, [session?.user?.id, catDetails?.id, currentScore]);
+
+  // Fetch paw stats whenever the active cat changes
+  useEffect(() => {
+    if (catDetails?.id) {
+      fetchPawStats(catDetails.id);
+    }
+  }, [catDetails]);
 
   const fetchDashboardData = async () => {
     try {
@@ -198,7 +209,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       const daysLimit = selectedPeriod === "1 MONTH" ? 30 : 7;
       const logsPromise = supabase
         .from("daily_logs")
-        .select("*, normal_logs(*), something_off_logs(*)")
+        .select("*, normal_logs(*), something_off_logs(*), meal_logs(*)")
         .eq("cat_id", effectiveCat.id)
         .order("log_date", { ascending: false })
         .limit(daysLimit);
@@ -258,7 +269,10 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         return `${date.getDate()}/${date.getMonth() + 1}`;
       });
 
-      const foodData = chartLogs.map((log) => log.normal_logs?.total_food_grams || 0);
+      const foodData = chartLogs.map((log) => {
+        const meals = log.meal_logs || [];
+        return meals.reduce((sum, meal) => sum + (Number(meal.amount_grams) || 0), 0);
+      });
       const waterData = chartLogs.map((log) => log.normal_logs?.water_ml_per_day || 0);
 
       setChartData({
@@ -275,6 +289,64 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       setLoading(false);
     }
   };
+
+
+  // ==========================================
+  // 🐾 Fetch Paw Progress Stats from Supabase
+  // ==========================================
+  const fetchPawStats = async (catId) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+
+      // --- Activity & Litter from ai_daily_summary ---
+      const { data: summaryData, error: summaryError } = await supabase
+        .from('ai_daily_summary')
+        .select('count_00_06, count_06_12, count_12_18, count_18_24, total_litter')
+        .eq('cat_id', catId)
+        .eq('summary_date', today)
+        .single();
+
+      let activityPercent = 0;
+      let litterPercent = 0;
+
+      if (!summaryError && summaryData) {
+        const ACTIVITY_GOAL = 20; // target movements per day
+        const totalActivity =
+          (summaryData.count_00_06 || 0) +
+          (summaryData.count_06_12 || 0) +
+          (summaryData.count_12_18 || 0) +
+          (summaryData.count_18_24 || 0);
+        activityPercent = Math.min(100, Math.round((totalActivity / ACTIVITY_GOAL) * 100));
+
+        const LITTER_GOAL = 4; // target litter visits per day
+        litterPercent = Math.min(100, Math.round(((summaryData.total_litter || 0) / LITTER_GOAL) * 100));
+      }
+
+      // --- Wellness from assessments (latest record) ---
+      const { data: assessmentData, error: assessmentError } = await supabase
+        .from('assessments')
+        .select('overall_risk_score')
+        .eq('cat_id', catId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      let wellnessPercent = 0;
+      if (!assessmentError && assessmentData) {
+        wellnessPercent = Math.max(0, 100 - (assessmentData.overall_risk_score || 0));
+      }
+
+      setPawStats({
+        activity: activityPercent,
+        litter: litterPercent,
+        wellness: wellnessPercent,
+      });
+    } catch (err) {
+      console.warn('fetchPawStats error:', err);
+      setPawStats({ activity: 0, litter: 0, wellness: 0 });
+    }
+  };
+
 
   const fetchAccumulatedEventSummary = async (catId) => {
     const mkIsoDaysAgo = (days) => new Date(Date.now() - (days * 24 * 60 * 60 * 1000)).toISOString();
@@ -461,6 +533,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     setLatestAssessment(data || null);
   };
 
+
   const calculateAge = (birthdate) => {
     if (!birthdate) return 'N/A';
     const birth = new Date(birthdate);
@@ -483,7 +556,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     try {
       const { data: exportLogs, error: exportError } = await supabase
         .from('daily_logs')
-        .select('log_date, normal_logs(*), something_off_logs(*)')
+        .select('log_date, normal_logs(*), something_off_logs(*), meal_logs(*)')
         .eq('cat_id', catDetails.id)
         .order('log_date', { ascending: false })
         .limit(7);
@@ -510,11 +583,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         const normal = toArray(log.normal_logs)[0];
         const off = toArray(log.something_off_logs)[0];
 
+        const mealLogs = toArray(log.meal_logs);
+        const totalFoodGrams = mealLogs.reduce((sum, meal) => sum + (Number(meal.amount_grams) || 0), 0);
+
         const normalSummary = normal
           ? [
-            `Food type: ${normal.food_type ?? '-'}`,
             `Meals/day: ${normal.meals_per_day ?? '-'}`,
-            `Food total: ${normal.total_food_grams ?? 0} g`,
+            `Food total: ${totalFoodGrams} g`,
             `Water/day: ${normal.water_ml_per_day ?? 0} ml`,
             `Urine level: ${normal.urine_level ?? '-'}`,
             `Stool level: ${normal.stool_level ?? '-'}`,
@@ -796,19 +871,19 @@ export default function Dashboard({ onBack, onNavigate, session }) {
               </View>
             </View>
             <View style={styles.assessmentButtons}>
-              <TouchableOpacity
-                style={styles.viewResultBtn}
-                onPress={() => onNavigate?.('Result')}
-              >
-                <Text style={styles.viewResultBtnText}>View Result</Text>
-                <Ionicons name="chevron-forward" size={16} color="#0C5A58" style={{ marginLeft: 4 }} />
-              </TouchableOpacity>
+	              <TouchableOpacity
+	                style={styles.viewResultBtn}
+	                onPress={() => onNavigate?.('Result', { source: 'db', catId: catDetails?.id || null })}
+	              >
+	                <Text style={styles.viewResultBtnText}>View Result</Text>
+	                <Ionicons name="chevron-forward" size={16} color="#0C5A58" style={{marginLeft: 4}} />
+	              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.viewHistoryBtn}
                 onPress={() => onNavigate?.('Timeline')}
               >
                 <Text style={styles.viewHistoryBtnText}>View History</Text>
-                <Ionicons name="time-outline" size={16} color="#0C5A58" style={{ marginLeft: 6 }} />
+                <Ionicons name="time-outline" size={16} color="#0C5A58" style={{marginLeft: 6}} />
               </TouchableOpacity>
             </View>
             {latestAssessment && (
@@ -827,6 +902,39 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                 </View>
               </View>
             )}
+          </View>
+
+          {/* ===== 🐾 System Risk Analysis (Paw Progress) ===== */}
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleRow}>
+              <MaterialCommunityIcons name="shield-check-outline" size={22} color="#00695C" />
+              <Text style={styles.sectionTitle}>System Risk Analysis</Text>
+            </View>
+            <TouchableOpacity onPress={() => console.log('View Detail pressed')}>
+              <Text style={styles.viewDetailLink}>View Detail</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.riskCard}>
+            <PawProgressBar
+              label="Activity Level"
+              percent={pawStats.activity}
+              icon="lightning-bolt"
+            />
+            <PawProgressBar
+              label="Litter Box Usage"
+              percent={pawStats.litter}
+              icon="cat"
+            />
+            <PawProgressBar
+              label="Overall Wellness"
+              percent={pawStats.wellness}
+              icon="heart-pulse"
+            />
+            <View style={styles.riskFooter}>
+              <MaterialCommunityIcons name="clock-outline" size={14} color="#90A4AE" />
+              <Text style={styles.riskFooterText}>Based on the last {selectedPeriod === '1 MONTH' ? '30' : '7'} days of activity</Text>
+            </View>
           </View>
 
           <View style={styles.summaryCard}>
@@ -958,51 +1066,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
             </View>
           </View>
 
-          {/* ===== 🐾 System Risk Analysis (Paw Progress) ===== */}
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleRow}>
-              <MaterialCommunityIcons name="shield-check-outline" size={22} color="#00695C" />
-              <Text style={styles.sectionTitle}>System Risk Analysis</Text>
-            </View>
-          </View>
 
-          <View style={styles.riskCard}>
-            <PawProgressBar
-              label="Abnormal Posture"
-              percent={riskPct.abnormal}
-              icon="alert-circle"
-            />
-            <PawProgressBar
-              label="Resting"
-              percent={riskPct.rest}
-              icon="sleep"
-            />
-            <PawProgressBar
-              label="Eating"
-              percent={riskPct.eat}
-              icon="food-drumstick"
-            />
-            <View style={styles.riskSubDivider} />
-            <PawProgressBar
-              label="Activity Level"
-              percent={legacyRiskPct.activity}
-              icon="run"
-            />
-            <PawProgressBar
-              label="Litter Box Usage"
-              percent={legacyRiskPct.litter}
-              icon="emoticon-poop"
-            />
-            <PawProgressBar
-              label="Wellness Balance"
-              percent={legacyRiskPct.wellness}
-              icon="heart-pulse"
-            />
-            <View style={styles.riskFooter}>
-              <MaterialCommunityIcons name="clock-outline" size={14} color="#90A4AE" />
-              <Text style={styles.riskFooterText}>Based on the last {selectedPeriod === '1 MONTH' ? '30' : '7'} days of activity</Text>
-            </View>
-          </View>
 
           {/* ===== 🔘 Action Buttons ===== */}
           <View style={styles.summaryCard}>
