@@ -205,6 +205,84 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
     }
   };
 
+  const renderAiPhotoSection = (aiRecord) => {
+    const items = [
+      { key: 'face', label: 'Picture Face', url: aiRecord.image_face_url },
+      { key: 'body', label: 'Picture Body', url: aiRecord.image_body_url },
+      { key: 'poop', label: 'Picture Poop', url: aiRecord.image_poop_url },
+      { key: 'vomit', label: 'Picture Vomit', url: aiRecord.image_vomit_url },
+    ];
+
+    return (
+      <View style={{ marginBottom: 20 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Image
+            source={{ uri: aiRecord.image_face_url || aiRecord.image_body_url || aiRecord.image_poop_url || aiRecord.image_vomit_url }}
+            style={{ width: 140, height: 140, borderRadius: 16 }}
+            resizeMode="cover"
+          />
+          <View style={{ marginLeft: 20, justifyContent: 'space-between', height: 120 }}>
+            {items.map((item) => {
+              const isUploaded = !!item.url;
+              return (
+                <View key={item.key} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {isUploaded ? (
+                    <Image
+                      source={require('../../assets/foot-print.png')}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        tintColor: '#147C78',
+                        shadowColor: '#147C78',
+                        shadowOffset: { width: 0, height: 0 },
+                        shadowOpacity: 1,
+                        shadowRadius: 1
+                      }}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <Image
+                      source={require('../../assets/paw-print.png')}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        tintColor: '#1b1b1bff',
+                        shadowColor: '#1b1b1bff',
+                        shadowOffset: { width: 0, height: 0 },
+                        shadowOpacity: 1,
+                        shadowRadius: 1
+                      }}
+                      resizeMode="contain"
+                    />
+                  )}
+                  <Text style={{
+                    marginLeft: 8,
+                    fontSize: 13,
+                    fontWeight: isUploaded ? "bold" : "500",
+                    color: isUploaded ? "#147C78" : "#A0AEC0"
+                  }}>
+                    {item.label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        {aiRecord.status === 'done' && aiRecord.ai_result && (
+          <TouchableOpacity
+            style={{ marginTop: 12 }}
+            onPress={() => onNavigate({ screen: 'AnalysisResult', params: { recordId: aiRecord.id, result: aiRecord.ai_result } })}
+          >
+            <Text style={{ color: '#147C78', fontSize: 14, textDecorationLine: 'underline', fontWeight: 'bold' }}>
+              อ่านผลลัพธ์ที่วิเคราะห์
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
   const renderCalendar = () => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
@@ -445,23 +523,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                 {/* Photos section for Recorded Log */}
                 <Text style={styles.photosLabel}>Photos</Text>
                 {aiRecord ? (
-                  <View style={{ marginBottom: 20 }}>
-                    <Image
-                      source={{ uri: aiRecord.image_face_url || aiRecord.image_body_url || aiRecord.image_poop_url || aiRecord.image_vomit_url }}
-                      style={{ width: 140, height: 140, borderRadius: 16 }}
-                      resizeMode="cover"
-                    />
-                    {aiRecord.status === 'done' && aiRecord.ai_result && (
-                      <TouchableOpacity
-                        style={{ marginTop: 8 }}
-                        onPress={() => onNavigate({ screen: 'AnalysisResult', params: { recordId: aiRecord.id, result: aiRecord.ai_result } })}
-                      >
-                        <Text style={{ color: '#147C78', fontSize: 14, textDecorationLine: 'underline', fontWeight: 'bold' }}>
-                          อ่านผลลัพธ์ที่วิเคราะห์
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
+                  renderAiPhotoSection(aiRecord)
                 ) : (
                   <TouchableOpacity
                     style={styles.photoPlaceholder}
@@ -525,23 +587,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
 
                 <Text style={styles.photosLabel}>Photos</Text>
                 {aiRecord ? (
-                  <View style={{ marginBottom: 20 }}>
-                    <Image
-                      source={{ uri: aiRecord.image_face_url || aiRecord.image_body_url || aiRecord.image_poop_url || aiRecord.image_vomit_url }}
-                      style={{ width: 140, height: 140, borderRadius: 16 }}
-                      resizeMode="cover"
-                    />
-                    {aiRecord.status === 'done' && aiRecord.ai_result && (
-                      <TouchableOpacity
-                        style={{ marginTop: 8 }}
-                        onPress={() => onNavigate({ screen: 'AnalysisResult', params: { recordId: aiRecord.id, result: aiRecord.ai_result } })}
-                      >
-                        <Text style={{ color: '#147C78', fontSize: 14, textDecorationLine: 'underline', fontWeight: 'bold' }}>
-                          อ่านผลลัพธ์ที่วิเคราะห์
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
+                  renderAiPhotoSection(aiRecord)
                 ) : (
                   <TouchableOpacity
                     style={styles.photoPlaceholder}
