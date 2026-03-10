@@ -354,28 +354,28 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
     const colSpec = [
       {
         label: 'Kidney Disease',
-        levelKeys: ['kidney_risk_level', 'kidney_disease_risk_level', 'kidney_level', 'kidneyDiseaseRiskLevel'],
-        scoreKeys: ['kidney_risk_score', 'kidney_disease_risk_score', 'kidney_score', 'kidneyDiseaseRiskScore'],
+        levelKeys: ['kidney_disease_risk', 'kidney_risk_level', 'kidney_disease_risk_level', 'kidney_level'],
+        scoreKeys: ['kidney_disease_score', 'kidney_risk_score', 'kidney_disease_risk_score', 'kidney_score'],
       },
       {
         label: 'Diabetes',
-        levelKeys: ['diabetes_risk_level', 'diabetes_level', 'diabetesRiskLevel'],
-        scoreKeys: ['diabetes_risk_score', 'diabetes_score', 'diabetesRiskScore'],
+        levelKeys: ['diabetes_risk', 'diabetes_risk_level', 'diabetes_level'],
+        scoreKeys: ['diabetes_score', 'diabetes_risk_score'],
       },
       {
         label: 'Urolithiasis',
-        levelKeys: ['urolithiasis_risk_level', 'urolithiasis_level', 'urolithiasisRiskLevel'],
-        scoreKeys: ['urolithiasis_risk_score', 'urolithiasis_score', 'urolithiasisRiskScore'],
+        levelKeys: ['urolithiasis_risk', 'urolithiasis_risk_level', 'urolithiasis_level'],
+        scoreKeys: ['urolithiasis_score', 'urolithiasis_risk_score'],
       },
       {
         label: 'Gum Disease',
-        levelKeys: ['gum_disease_risk_level', 'gum_risk_level', 'gumDiseaseRiskLevel'],
-        scoreKeys: ['gum_disease_risk_score', 'gum_risk_score', 'gumDiseaseRiskScore'],
+        levelKeys: ['gum_disease_risk', 'gum_disease_risk_level', 'gum_risk_level'],
+        scoreKeys: ['gum_disease_score', 'gum_disease_risk_score', 'gum_risk_score'],
       },
       {
         label: 'Feline Panleukopenia',
-        levelKeys: ['feline_panleukopenia_risk_level', 'panleukopenia_risk_level', 'felinePanleukopeniaRiskLevel'],
-        scoreKeys: ['feline_panleukopenia_risk_score', 'panleukopenia_risk_score', 'felinePanleukopeniaRiskScore'],
+        levelKeys: ['panleukopenia_risk', 'feline_panleukopenia_risk_level', 'panleukopenia_risk_level'],
+        scoreKeys: ['panleukopenia_score', 'feline_panleukopenia_risk_score', 'panleukopenia_risk_score'],
       },
     ];
 
@@ -408,6 +408,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
       'No Data';
 
     const summaryTitleFromDb =
+      row?.recommendation ??
       row?.summary_title ??
       row?.summaryTitle ??
       row?.summary ??
@@ -415,6 +416,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
       '';
 
     const summaryDescFromDb =
+      row?.explanation ??
       row?.summary_desc ??
       row?.summaryDesc ??
       row?.summary_description ??
@@ -434,14 +436,27 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
     try {
       if (catId) {
         const riskLevel = getOverallRiskDetails(overallScore).text;
+
+        const getRiskVal = (label) => riskData.find(d => d.label === label)?.value || 'No Data';
+        const getRiskScore = (label) => Number(riskData.find(d => d.label === label)?.score) || 0;
+
         const { error } = await supabase.from('assessments').insert({
           cat_id: catId,
           assessment_date: new Date().toISOString(),
           overall_risk_score: overallScore === 'No Data' ? null : Number(overallScore),
           overall_risk_level: riskLevel,
-          summary_title: summaryTitle,
-          summary_desc: summaryDesc,
-          risk_data: riskData
+          recommendation: summaryTitle,
+          explanation: summaryDesc,
+          kidney_disease_risk: getRiskVal('Kidney Disease'),
+          kidney_disease_score: getRiskScore('Kidney Disease'),
+          diabetes_risk: getRiskVal('Diabetes'),
+          diabetes_score: getRiskScore('Diabetes'),
+          urolithiasis_risk: getRiskVal('Urolithiasis'),
+          urolithiasis_score: getRiskScore('Urolithiasis'),
+          gum_disease_risk: getRiskVal('Gum Disease'),
+          gum_disease_score: getRiskScore('Gum Disease'),
+          panleukopenia_risk: getRiskVal('Feline Panleukopenia'),
+          panleukopenia_score: getRiskScore('Feline Panleukopenia')
         });
         if (error) {
           console.error("Error saving assessment to DB:", error);
