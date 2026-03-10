@@ -51,6 +51,7 @@ import {
   Inter_300Light
 } from '@expo-google-fonts/inter';
 import { Poppins_400Regular } from '@expo-google-fonts/poppins';
+import { Itim_400Regular } from '@expo-google-fonts/itim';
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -60,6 +61,7 @@ export default function App() {
     'Inter-SemiBold': Inter_600SemiBold,
     'Inter-Light': Inter_300Light,
     'Poppins-Regular': Poppins_400Regular,
+    'Itim-Regular': Itim_400Regular,
   });
 
   const [currentScreen, setCurrentScreen] = useState('SignIn');

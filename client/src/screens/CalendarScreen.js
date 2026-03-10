@@ -326,7 +326,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
               shadowOpacity: 0.1,
               shadowRadius: 4,
             }}>
-              <Text style={{ color: '#147C78', fontSize: 12, fontWeight: 'bold' }}>
+              <Text style={{ fontFamily: 'Itim-Regular', color: '#535353ff', fontSize: 13, paddingTop: 2 }}>
                 click me for read more, nya!
               </Text>
             </View>
