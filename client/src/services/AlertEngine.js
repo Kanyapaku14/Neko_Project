@@ -197,6 +197,8 @@ class AlertEngineService {
             title: alertData.title,
             desc: alertData.desc,
             details: alertData.details || '',
+            catId: alertData.catId || null,
+            catName: alertData.catName || null,
             timestamp: alertData.timestamp || new Date().toISOString(),
             expiresAt,
             isRead: false,

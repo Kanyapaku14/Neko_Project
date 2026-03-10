@@ -9,9 +9,17 @@ import CatHealthMeter from "../components/CatHealthMeter";
 import supabase from "./config/supabaseClient";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
+import AlertEngine from '../services/AlertEngine';
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
 import Svg, { Line, Circle, Path, Text as SvgText } from 'react-native-svg';
+
+const uuidv4 = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+  const r = (Math.random() * 16) | 0;
+  const v = c === 'x' ? r : (r & 0x3) | 0x8;
+  return v.toString(16);
+});
+const lowScoreAlertInFlight = new Set();
 
 // ==========================================
 // 🐾 Paw Progress Bar Component
@@ -163,6 +171,58 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     persistHealthCache();
   }, [session?.user?.id, catDetails?.id, currentScore]);
 
+  const notifyLowScoreIfNeeded = async (score, catId, catName) => {
+    if (!session?.user?.id || !catId) return;
+    if (!Number.isFinite(score)) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const key = `dashboard_low_score_alert:${session.user.id}:${catId}`;
+    if (lowScoreAlertInFlight.has(key)) return;
+    lowScoreAlertInFlight.add(key);
+    const lastDateKey60 = `${key}:date:60`;
+    const lastDateKey40 = `${key}:date:40`;
+    const lastDate60 = await AsyncStorage.getItem(lastDateKey60);
+    const lastDate40 = await AsyncStorage.getItem(lastDateKey40);
+
+    try {
+      if (score >= 60) {
+        // reset both levels when user recovers to 60+
+        await AsyncStorage.multiRemove([lastDateKey60, lastDateKey40]);
+        return;
+      }
+
+      if (score >= 40) {
+        // reset 40-level when user recovers to 40+
+        await AsyncStorage.removeItem(lastDateKey40);
+      }
+
+      const level = score < 40 ? '40' : '60';
+      const type = level === '40' ? 'dashboard_low_score_40' : 'dashboard_low_score_60';
+      const severity = level === '40' ? 'critical' : 'warning';
+      if (level === '60' && lastDate60 === today) return;
+      if (level === '40' && lastDate40 === today) return;
+
+      if (level === '40' && AlertEngine.resolveActiveAlerts) {
+        await AlertEngine.resolveActiveAlerts('dashboard_low_score_40');
+      }
+      await AlertEngine.logEvent({
+        id: uuidv4(),
+        type,
+        severity,
+        title: level === '40' ? 'Health score is very low' : 'Health score is low',
+        desc: `Your dashboard score dropped to ${score}.`,
+        catId,
+        catName: catName || null,
+        timestamp: new Date().toISOString(),
+        dedupeKey: `${key}:${level}`,
+        cooldownMs: 0,
+      });
+      if (level === '60') await AsyncStorage.setItem(lastDateKey60, today);
+      if (level === '40') await AsyncStorage.setItem(lastDateKey40, today);
+    } finally {
+      lowScoreAlertInFlight.delete(key);
+    }
+  };
+
   // Fetch paw stats whenever the active cat changes
   useEffect(() => {
     if (catDetails?.id) {
@@ -255,6 +315,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
         const averageScore = Math.round(totalScore / logsForCurrentStatus.length);
         setCurrentScore(averageScore);
+        await notifyLowScoreIfNeeded(averageScore, effectiveCat.id, effectiveCat.name);
         // เก็บ alerts ล่าสุดไม่เกิน 3 รายการ (ไม่ซ้ำ)
         setLatestAlerts([...new Set(allAlerts)].slice(0, 4));
         setLatestRedFlags(totalRedFlags);
