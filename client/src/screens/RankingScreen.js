@@ -155,10 +155,10 @@ export default function RankingScreen({ session, onBack }) {
     try {
       if (!session?.user?.id) return;
 
-      // 1. Fetch pending friends (just user_ids) to avoid ambiguous embedding
+      // 1. Fetch pending friends (user_ids and created_at)
       const { data: incomingRows, error: incomingError } = await supabase
         .from("friends")
-        .select("user_id")
+        .select("user_id, created_at")
         .eq("friend_id", session.user.id)
         .eq("status", "pending");
 
@@ -169,9 +169,17 @@ export default function RankingScreen({ session, onBack }) {
 
       console.log("Raw Incoming Rows:", incomingRows);
 
-      if (incomingRows && incomingRows.length > 0) {
+      // Filter out requests older than 24 hours
+      const now = new Date();
+      const oneDayInMs = 24 * 60 * 60 * 1000;
+      const validIncomingRows = (incomingRows || []).filter(row => {
+        if (!row.created_at) return true;
+        return (now - new Date(row.created_at)) <= oneDayInMs;
+      });
+
+      if (validIncomingRows && validIncomingRows.length > 0) {
         // 2. Fetch profiles for these users
-        const userIds = incomingRows.map(r => r.user_id);
+        const userIds = validIncomingRows.map(r => r.user_id);
         const { data: profiles, error: profileError } = await supabase
           .from("profiles")
           .select("id, name, avatar_url, score")
@@ -189,7 +197,7 @@ export default function RankingScreen({ session, onBack }) {
           });
         }
 
-        const pending = incomingRows.map(req => {
+        const pending = validIncomingRows.map(req => {
           const profile = profileMap[req.user_id];
           return {
             id: req.user_id,
@@ -205,7 +213,7 @@ export default function RankingScreen({ session, onBack }) {
     } catch (e) {
       console.log("Error loading pending requests:", e);
     }
-  }
+  };
 
   const loadFriends = async () => {
     try {
@@ -297,12 +305,19 @@ export default function RankingScreen({ session, onBack }) {
       // 3. Include incoming requests check (am I the friend_id?)
       const { data: incoming } = await supabase
         .from("friends")
-        .select("user_id, status")
+        .select("user_id, status, created_at")
         .eq("friend_id", session.user.id)
         .eq("status", "pending");
 
       if (incoming) {
+        const now = new Date();
+        const oneDayInMs = 24 * 60 * 60 * 1000;
+
         incoming.forEach(r => {
+          if (r.created_at && (now - new Date(r.created_at)) > oneDayInMs) {
+            // Skip hiding it from the button if it's older than 1 day so user can send again (though DB might block pending requests)
+            return;
+          }
           relMap[r.user_id] = 'incoming'; // Mark as incoming request
         });
       }
