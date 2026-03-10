@@ -432,6 +432,24 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
 
   const handleSaveAssessment = async () => {
     try {
+      if (catId) {
+        const riskLevel = getOverallRiskDetails(overallScore).text;
+        const { error } = await supabase.from('assessments').insert({
+          cat_id: catId,
+          assessment_date: new Date().toISOString(),
+          overall_risk_score: overallScore === 'No Data' ? null : Number(overallScore),
+          overall_risk_level: riskLevel,
+          summary_title: summaryTitle,
+          summary_desc: summaryDesc,
+          risk_data: riskData
+        });
+        if (error) {
+          console.error("Error saving assessment to DB:", error);
+        } else {
+          Alert.alert("Success", "Assessment saved successfully!");
+        }
+      }
+
       await AlertEngine.logEvent({
         type: 'assessment_saved',
         severity: 'success',
@@ -441,8 +459,8 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
         dedupeKey: `assessment_saved:${catId || 'no_cat'}:${overallScore}`,
         cooldownMs: 2 * 60 * 1000,
       });
-    } catch (_) {
-      // keep original save flow even if alert logging fails
+    } catch (e) {
+      console.error("Save error:", e);
     } finally {
       if (onSave) onSave();
     }
@@ -493,13 +511,20 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
         setShowNoDataModal(false);
 
         if (loadFromDb) {
-          const { data: assessmentRow, error } = await supabase
+          const assessmentId = route?.params?.assessmentId;
+
+          let query = supabase
             .from('assessments')
             .select('*')
-            .eq('cat_id', catId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+            .eq('cat_id', catId);
+
+          if (assessmentId) {
+            query = query.eq('id', assessmentId);
+          } else {
+            query = query.order('created_at', { ascending: false }).limit(1);
+          }
+
+          const { data: assessmentRow, error } = await query.maybeSingle();
 
           if (error || !assessmentRow) {
             setRiskData(INITIAL_RISK_DATA);

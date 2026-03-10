@@ -871,19 +871,19 @@ export default function Dashboard({ onBack, onNavigate, session }) {
               </View>
             </View>
             <View style={styles.assessmentButtons}>
-	              <TouchableOpacity
-	                style={styles.viewResultBtn}
-	                onPress={() => onNavigate?.('Result', { source: 'db', catId: catDetails?.id || null })}
-	              >
-	                <Text style={styles.viewResultBtnText}>View Result</Text>
-	                <Ionicons name="chevron-forward" size={16} color="#0C5A58" style={{marginLeft: 4}} />
-	              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.viewResultBtn}
+                onPress={() => onNavigate?.('AssessmentGallery')}
+              >
+                <Text style={styles.viewResultBtnText}>View Result</Text>
+                <Ionicons name="chevron-forward" size={16} color="#FFFFFF" style={{ marginLeft: 4 }} />
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.viewHistoryBtn}
                 onPress={() => onNavigate?.('Timeline')}
               >
                 <Text style={styles.viewHistoryBtnText}>View History</Text>
-                <Ionicons name="time-outline" size={16} color="#0C5A58" style={{marginLeft: 6}} />
+                <Ionicons name="time-outline" size={16} color="#0C5A58" style={{ marginLeft: 6 }} />
               </TouchableOpacity>
             </View>
             {latestAssessment && (
