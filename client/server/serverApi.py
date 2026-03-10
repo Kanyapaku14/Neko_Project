@@ -1,11 +1,10 @@
-from flask import Flask, request, jsonify, Response # <-- เพิ่ม Response ตรงนี้
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google import genai
 from google.genai import types
 import os
 import json
 import traceback
-import cv2 # <-- เพิ่มไลบรารี OpenCV สำหรับดึงภาพกล้อง
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from datetime import datetime, timedelta, timezone
@@ -17,7 +16,6 @@ from datetime import datetime, timedelta, timezone
 # ป้องกันปัญหา SSL Certificate บน Windows
 os.environ['CURL_CA_BUNDLE'] = ''
 os.environ['SSL_CERT_FILE'] = ''
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 # โหลด Environment Variables จากไฟล์ .env ที่อยู่โฟลเดอร์นอกสุด
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,19 +31,15 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 app = Flask(__name__)
 CORS(app)
 
-# 🚨 กำหนด URL ของกล้อง
-RTSP_URL = "rtsp://testt1:1234test@192.168.1.145:554/stream2"
-
 try:
     print("⏳ กำลังเชื่อมต่อ Gemini...")
     client = genai.Client(api_key=GEMINI_API_KEY)
-    print("✅ Gemini เชื่อมต่อสำเร็จ")
-    
+    print("✅ Gemini เชื่อมต่อสำเร็จ")                                                                                              
     print("⏳ กำลังเชื่อมต่อ Supabase...")
     if not SUPABASE_KEY:
         raise ValueError("หา SUPABASE_SERVICE_KEY ไม่พบ โปรดเช็คการตั้งค่าในไฟล์ .env")
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("✅ Supabase เชื่อมต่อสำเร็จ (โหมด Service Role)")
+    print("✅ Supabase เชื่อมต่อสำเร็จ")
 except Exception as e:
     print(f"❌ Error initializing services:")
     traceback.print_exc()
@@ -199,41 +193,6 @@ def build_disease_prompt(disease_name, cat_data):
 # =====================================================
 # 4. API ENDPOINTS
 # =====================================================
-
-# 🚨 เพิ่มฟังก์ชันสำหรับดึงภาพจากกล้องและส่งออกเป็น Stream
-def generate_camera_frames():
-    print(f"กำลังพยายามเชื่อมต่อกล้อง: {RTSP_URL}")
-    # ใช้ cv2.CAP_FFMPEG เพื่อให้รองรับ RTSP ได้ดีขึ้น
-    cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
-    
-    if not cap.isOpened():
-        print("❌ ERROR: ไม่สามารถเปิดกล้อง RTSP ได้ โปรดเช็ครหัสผ่าน หรือ IP กล้อง")
-        return
-
-    print("✅ เชื่อมต่อกล้องสำเร็จ! กำลังเริ่มสตรีม...")
-    while True:
-        success, frame = cap.read()
-        if not success:
-            print("⚠️ สัญญาณภาพขาดหาย กำลังลองใหม่...")
-            time.sleep(1)
-            continue # ถ้าภาพหลุดให้ลองวนใหม่ ไม่หยุดสตรีม
-            
-        # แปลงภาพเป็น JPG
-        ret, buffer = cv2.imencode('.jpg', frame)
-        if not ret:
-            continue
-            
-        frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
-# 🚨 เพิ่ม Route สำหรับหน้าแอปมาดึงภาพไปแสดง
-@app.route('/api/video_feed')
-def video_feed():
-    # ใช้ Response ของ Flask เพื่อสตรีมข้อมูลออกไปต่อเนื่อง (mimetype='multipart/x-mixed-replace')
-    return Response(generate_camera_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-
 @app.route('/api/assessment', methods=['POST'])
 def get_assessment():
     try:
@@ -366,7 +325,116 @@ def get_guidance():
         print(f"❌ Error in guidance: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/photo-check', methods=['POST'])
+def photo_check():
+    """
+    รับ recordId ของ ai_photo_checks → ดึง URL รูป → วิเคราะห์ด้วย Gemini Vision
+    → บันทึกผลกลับ Supabase → คืน JSON ให้ app
+    """
+    try:
+        data = request.json
+        record_id = data.get('recordId')
+        if not record_id:
+            return jsonify({"error": "recordId is required"}), 400
+
+        # 1. ดึง record จาก Supabase
+        res = supabase.table('ai_photo_checks').select(
+            'id, image_face_url, image_body_url, image_poop_url, image_vomit_url'
+        ).eq('id', record_id).single().execute()
+
+        if not res.data:
+            return jsonify({"error": "Record not found"}), 404
+
+        row = res.data
+
+        # 2. สร้าง parts สำหรับ Gemini (เฉพาะช่องที่มีรูป)
+        SLOT_META = {
+            'image_face_url':  ('face',  'ใบหน้าและตา (Face & Eyes)'),
+            'image_body_url':  ('body',  'รูปร่างและขน (Body Shape & Coat)'),
+            'image_poop_url':  ('poop',  'อุจจาระ (Feces)'),
+            'image_vomit_url': ('vomit', 'อ้วก (Vomit)'),
+        }
+
+        slots_present = []
+        gemini_parts = []
+
+        prompt_intro = """
+คุณเป็นสัตวแพทย์ AI ผู้เชี่ยวชาญด้านสุขภาพแมว
+ฉันจะส่งรูปภาพของแมวให้คุณดู อาจมีตั้งแต่ 1-4 รูป ได้แก่: ใบหน้า, ลำตัว, อุจจาระ, และอ้วก
+กรุณาวิเคราะห์แต่ละรูปและตอบกลับเป็น JSON Format เท่านั้น (ห้ามมีข้อความอื่นนอก JSON):
+
+{
+  "overallStatus": "Good / Moderate Concern / Needs Attention",
+  "overallDesc": "คำอธิบายภาพรวมสุขภาพ 2-3 ประโยค ภาษาไทย อบอุ่นและเป็นห่วง",
+  "items": [
+    {
+      "slot": "face|body|poop|vomit",
+      "label": "ชื่อหมวดหมู่ภาษาไทย",
+      "finding": "สิ่งที่พบจากรูป 1-2 ประโยค",
+      "risk": "low|moderate|high"
+    }
+  ],
+  "recommendations": [
+    "คำแนะนำ 1",
+    "คำแนะนำ 2",
+    "คำแนะนำ 3"
+  ]
+}
+
+กฎ:
+- items[] ต้องมีเฉพาะ slot ที่ได้รับรูปมาเท่านั้น
+- risk: low = ปกติดี, moderate = ควรสังเกต, high = ควรพาพบสัตวแพทย์
+- ถ้ารูปไม่ชัดหรือดูยาก ให้ระบุใน finding ตามความเป็นจริง
+- ตอบกลับเป็น JSON เท่านั้น ไม่มี markdown code block
+
+รูปที่จะส่งให้:
+"""
+        slot_labels = []
+        for col, (slot_key, slot_label) in SLOT_META.items():
+            url = row.get(col)
+            if url:
+                slots_present.append((slot_key, slot_label))
+                slot_labels.append(f"- {slot_label}")
+                gemini_parts.append(types.Part.from_uri(file_uri=url, mime_type="image/jpeg"))
+
+        if not slots_present:
+            return jsonify({"error": "No images found in record"}), 400
+
+        prompt_text = prompt_intro + "\n".join(slot_labels)
+        gemini_parts.insert(0, types.Part.from_text(text=prompt_text))
+
+        # 3. เรียก Gemini Vision
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=[types.Content(parts=gemini_parts, role="user")],
+            config=types.GenerateContentConfig(response_mime_type="application/json")
+        )
+
+        ai_result = json.loads(response.text)
+
+        # 4. บันทึกผลกลับ Supabase
+        supabase.table('ai_photo_checks').update({
+            'status': 'done',
+            'ai_result': ai_result
+        }).eq('id', record_id).execute()
+
+        return jsonify({"success": True, "result": ai_result})
+
+    except Exception as e:
+        print(f"❌ Error in photo-check: {e}")
+        traceback.print_exc()
+        # อัปเดตสถานะเป็น error ใน Supabase
+        try:
+            if record_id:
+                supabase.table('ai_photo_checks').update({
+                    'status': 'error'
+                }).eq('id', record_id).execute()
+        except:
+            pass
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == '__main__':
+
     print("🚀 Server is running on port 3000...")
-    # เปิดการทำงานแบบ Threaded ให้ Flask รองรับการสตรีมพร้อมกับ Request อื่นๆ ได้
-    app.run(host='0.0.0.0', port=3000, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=3000, debug=True)

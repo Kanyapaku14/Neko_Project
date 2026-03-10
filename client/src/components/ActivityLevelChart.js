@@ -1,16 +1,15 @@
 import React from 'react';
-import { View, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet, useWindowDimensions } from 'react-native';
 import Svg, { Line, Circle, Path, Text as SvgText, LinearGradient as SvgGradient, Stop, Defs } from 'react-native-svg';
 
-const { width } = Dimensions.get('window');
-const CHART_WIDTH = width - 64; // Matching CameraScreen horizontal padding (16*2) + card padding (16*2)
-const CHART_HEIGHT = 140;
+const CHART_HEIGHT = 158;
 const PADDING_TOP = 20;
 const PADDING_BOTTOM = 25;
-const PADDING_LEFT = 30;
-const PADDING_RIGHT = 30;
+const PADDING_LEFT = 24;
+const PADDING_RIGHT = 18;
 
 export default function ActivityLevelChart({ data }) {
+    const { width } = useWindowDimensions();
     if (!data || !data.activity || data.activity.length === 0) {
         return null;
     }
@@ -20,7 +19,8 @@ export default function ActivityLevelChart({ data }) {
     // Calculate scales
     const maxValue = Math.max(...activity, 100); // Normalize to 100 or higher if data exceeds it
 
-    const chartWidth = CHART_WIDTH - PADDING_LEFT - PADDING_RIGHT;
+    const chartOuterWidth = Math.max(280, width - 40);
+    const chartWidth = chartOuterWidth - PADDING_LEFT - PADDING_RIGHT;
     const chartHeight = CHART_HEIGHT - PADDING_TOP - PADDING_BOTTOM;
 
     const xStep = chartWidth / (labels.length - 1 || 1);
@@ -73,7 +73,7 @@ export default function ActivityLevelChart({ data }) {
 
     return (
         <View style={styles.container}>
-            <Svg width={CHART_WIDTH} height={CHART_HEIGHT}>
+            <Svg width={chartOuterWidth} height={CHART_HEIGHT}>
                 <Defs>
                     <SvgGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
                         <Stop offset="0" stopColor="#FF9800" stopOpacity="0.4" />
@@ -93,7 +93,7 @@ export default function ActivityLevelChart({ data }) {
                             key={`grid-${i}`}
                             x1={PADDING_LEFT}
                             y1={y}
-                            x2={CHART_WIDTH - PADDING_RIGHT}
+                            x2={chartOuterWidth - PADDING_RIGHT}
                             y2={y}
                             stroke="rgba(255, 255, 255, 0.1)"
                             strokeWidth="1"

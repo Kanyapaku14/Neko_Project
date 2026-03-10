@@ -42,6 +42,13 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
     const [uploadingAvatar, setUploadingAvatar] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
 
+    // Friends Modal
+    const [showFriendsModal, setShowFriendsModal] = useState(false);
+    const [friendsTab, setFriendsTab] = useState('accepted'); // 'accepted' or 'pending'
+    const [friendsList, setFriendsList] = useState([]);
+    const [pendingList, setPendingList] = useState([]);
+    const [loadingFriendsList, setLoadingFriendsList] = useState(false);
+
     // Post Options & Editing
     const [optionPost, setOptionPost] = useState(null);
     const [editingPost, setEditingPost] = useState(null);
@@ -181,12 +188,67 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
     };
 
     const fetchFriendsCount = async () => {
-        const { count, error } = await supabase
-            .from('friends')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', profileId)
-            .eq('status', 'accepted');
-        if (count !== null) setFriendsCount(count);
+        try {
+            const { data: q1, error: e1 } = await supabase
+                .from('friends')
+                .select('friend_id')
+                .eq('user_id', profileId)
+                .eq('status', 'accepted');
+
+            const { data: q2, error: e2 } = await supabase
+                .from('friends')
+                .select('user_id')
+                .eq('friend_id', profileId)
+                .eq('status', 'accepted');
+
+            const ids = new Set();
+            if (q1) q1.forEach(row => ids.add(row.friend_id));
+            if (q2) q2.forEach(row => ids.add(row.user_id));
+
+            setFriendsCount(ids.size);
+        } catch (e) {
+            console.log("Error counting accepted friends:", e);
+        }
+    };
+
+    const fetchFriendsData = async () => {
+        setLoadingFriendsList(true);
+        try {
+            // 1) Fetch Accepted Friends (Both Directions)
+            const { data: q1 } = await supabase.from("friends").select("friend_id").eq("user_id", profileId).eq("status", "accepted");
+            const { data: q2 } = await supabase.from("friends").select("user_id").eq("friend_id", profileId).eq("status", "accepted");
+
+            const ids = new Set();
+            if (q1) q1.forEach(row => ids.add(row.friend_id));
+            if (q2) q2.forEach(row => ids.add(row.user_id));
+
+            const friendIds = Array.from(ids);
+            if (friendIds.length > 0) {
+                const { data: profiles } = await supabase.from("profiles").select("id, name, avatar_url").in("id", friendIds);
+                setFriendsList(profiles || []);
+            } else {
+                setFriendsList([]);
+            }
+
+            // 2) Fetch Pending Outgoing Requests (Only sensible if viewing our own profile, but we can show it generally)
+            if (!isReadyOnly) {
+                const { data: pendingRows } = await supabase.from("friends").select("friend_id").eq("user_id", profileId).eq("status", "pending");
+                if (pendingRows && pendingRows.length > 0) {
+                    const pendingIds = pendingRows.map(r => r.friend_id);
+                    const { data: pendingProfiles } = await supabase.from("profiles").select("id, name, avatar_url").in("id", pendingIds);
+                    setPendingList(pendingProfiles || []);
+                } else {
+                    setPendingList([]);
+                }
+            } else {
+                setPendingList([]);
+            }
+
+        } catch (e) {
+            console.log("Error fetching friends data:", e);
+        } finally {
+            setLoadingFriendsList(false);
+        }
     };
 
     const fetchUserScore = async () => {
@@ -211,6 +273,12 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
     };
 
     // ─── Score Calculation (matching RankingScreen) ───
+    const getLocalDateString = (dateObj) => {
+        const offset = dateObj.getTimezoneOffset();
+        const localDate = new Date(dateObj.getTime() - (offset * 60 * 1000));
+        return localDate.toISOString().split('T')[0];
+    };
+
     const calcScore = async (targetUserId) => {
         let score = 0;
         let streakData = { streak: 0, isDouble: false };
@@ -239,18 +307,19 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
 
                     if (logs && logs.length > 0) {
                         const uniqueDates = [...new Set(logs.map(l => l.log_date))].sort((a, b) => new Date(b) - new Date(a));
-                        const todayStr = new Date().toISOString().split('T')[0];
+                        const todayStr = getLocalDateString(new Date());
                         const yesterday = new Date();
                         yesterday.setDate(yesterday.getDate() - 1);
-                        const yesterdayStr = yesterday.toISOString().split('T')[0];
+                        const yesterdayStr = getLocalDateString(yesterday);
 
                         let streak = 0;
                         if (uniqueDates[0] === todayStr || uniqueDates[0] === yesterdayStr) {
                             streak = 1;
-                            let checkDate = new Date(uniqueDates[0]);
+                            const [y, m, d] = uniqueDates[0].split('-');
+                            let checkDate = new Date(y, m - 1, d);
                             for (let i = 1; i < uniqueDates.length; i++) {
                                 checkDate.setDate(checkDate.getDate() - 1);
-                                if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+                                if (uniqueDates[i] === getLocalDateString(checkDate)) {
                                     streak++;
                                 } else {
                                     break;
@@ -262,7 +331,7 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                         let fullCycles = Math.floor(streak / 7);
                         let remainderDays = streak % 7;
 
-                        bonus += fullCycles * 28;
+                        bonus += fullCycles * 28; // 1+2+3+4+5+6+7 = 28
                         for (let i = 1; i <= remainderDays; i++) {
                             bonus += i;
                         }
@@ -270,6 +339,7 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
 
                         streakData.streak = streak;
                         streakData.isDouble = streak >= 7;
+                        streakData.cycleDays = remainderDays === 0 && streak > 0 ? 7 : remainderDays;
                     }
                 }
             } catch (catLogEx) {
@@ -285,14 +355,14 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                 score += (assessCount || 0) * 2;
             } catch { }
 
-            // 4) Count assessments with image (3pt each)
+            // 4) Count assessments with image (1pt each)
             try {
                 const { count: photoCount } = await supabase
                     .from("assessments")
                     .select("id", { count: "exact", head: true })
                     .eq("user_id", targetUserId)
                     .not("image_url", "is", null);
-                score += (photoCount || 0) * 3;
+                score += (photoCount || 0) * 1;
             } catch { }
         } catch (e) {
             console.log("Score calc error:", e);
@@ -308,10 +378,10 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
 
             if (!checkinError && checkins && checkins.length > 0) {
                 const uniqueDates = [...new Set(checkins.map(c => c.checkin_date))];
-                const todayStr = new Date().toISOString().split('T')[0];
+                const todayStr = getLocalDateString(new Date());
                 const yesterday = new Date();
                 yesterday.setDate(yesterday.getDate() - 1);
-                const yesterdayStr = yesterday.toISOString().split('T')[0];
+                const yesterdayStr = getLocalDateString(yesterday);
 
                 let streak = 0;
                 let checkinScore = 0;
@@ -321,10 +391,11 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                     streak = 1;
                     checkinScore += streak; // Day 1 = +1
 
-                    let checkDate = new Date(uniqueDates[0]);
+                    const [y, m, d] = uniqueDates[0].split('-');
+                    let checkDate = new Date(y, m - 1, d);
                     for (let i = 1; i < uniqueDates.length; i++) {
                         checkDate.setDate(checkDate.getDate() - 1);
-                        if (uniqueDates[i] === checkDate.toISOString().split('T')[0]) {
+                        if (uniqueDates[i] === getLocalDateString(checkDate)) {
                             streak++;
                             checkinScore += streak; // Day N = +N
                         } else {
@@ -341,6 +412,8 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
         if (streakData.isDouble) {
             score *= 2;
         }
+
+        console.log(`FINAL Community calcScore for userId=${targetUserId}:`, score);
 
         return score;
     };
@@ -411,7 +484,7 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                 allowsEditing: true,
                 aspect: [1, 1],
                 quality: 0.8,
-                base64: true, // เพิ่มตัวนี้!!
+                base64: true,
             });
 
             if (!result.canceled) {
@@ -526,9 +599,19 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
             setLoading(true);
 
             // Re-using exiting uploadImage from CommunityProfile, but 'posts' bucket
-            let uploadedImageUrl = postData.image;
-            if (postData.image && !postData.image.startsWith('http')) {
-                uploadedImageUrl = await uploadImage(postData.image, 'posts');
+            let uploadedImageUrl = null;
+            if (postData.image) {
+                const uris = postData.image.split(',').filter(Boolean);
+                const newUrls = [];
+                for (let uri of uris) {
+                    if (!uri.startsWith('http')) {
+                        const newUrl = await uploadImage(uri, 'posts');
+                        if (newUrl) newUrls.push(newUrl);
+                    } else {
+                        newUrls.push(uri);
+                    }
+                }
+                uploadedImageUrl = newUrls.length > 0 ? newUrls.join(',') : null;
             }
 
             const payload = {
@@ -769,10 +852,16 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                         <Text style={styles.xStatNumber}>{userPosts.length}</Text>
                         <Text style={styles.xStatLabel}>Posts</Text>
                     </View>
-                    <View style={styles.xStatItem}>
+                    <TouchableOpacity
+                        style={styles.xStatItem}
+                        onPress={() => {
+                            setShowFriendsModal(true);
+                            fetchFriendsData();
+                        }}
+                    >
                         <Text style={styles.xStatNumber}>{friendsCount}</Text>
                         <Text style={styles.xStatLabel}>Friends</Text>
-                    </View>
+                    </TouchableOpacity>
                     <View style={styles.xStatItem}>
                         <Text style={styles.xStatNumber}>{userScore}</Text>
                         <Text style={styles.xStatLabel}>Score</Text>
@@ -804,6 +893,87 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
             />
         );
     }
+
+    // ─── Render Friends Modal ───
+    const renderFriendsModal = () => {
+        const displayedList = friendsTab === 'accepted' ? friendsList : pendingList;
+
+        return (
+            <Modal
+                visible={showFriendsModal}
+                animationType="slide"
+                presentationStyle="pageSheet"
+                onRequestClose={() => setShowFriendsModal(false)}
+            >
+                <SafeAreaView style={styles.modalContainer}>
+                    {/* Header */}
+                    <View style={styles.modalHeader}>
+                        <TouchableOpacity
+                            onPress={() => setShowFriendsModal(false)}
+                            style={styles.modalCloseBtn}
+                        >
+                            <Ionicons name="close" size={24} color="#90A4AE" />
+                        </TouchableOpacity>
+                        <Text style={styles.modalTitle}>Friends</Text>
+                        <View style={{ width: 40 }} />
+                    </View>
+
+                    {/* Tabs */}
+                    <View style={styles.toggleContainer}>
+                        <TouchableOpacity
+                            style={[styles.toggleBtn, friendsTab === 'accepted' && styles.toggleBtnActive]}
+                            onPress={() => setFriendsTab('accepted')}
+                        >
+                            <Text style={[styles.toggleText, friendsTab === 'accepted' && styles.toggleTextActive]}>Friends</Text>
+                        </TouchableOpacity>
+                        {!isReadyOnly && (
+                            <TouchableOpacity
+                                style={[styles.toggleBtn, friendsTab === 'pending' && styles.toggleBtnActive]}
+                                onPress={() => setFriendsTab('pending')}
+                            >
+                                <Text style={[styles.toggleText, friendsTab === 'pending' && styles.toggleTextActive]}>Sent Requests</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+
+                    {/* List */}
+                    {loadingFriendsList ? (
+                        <ActivityIndicator size="large" color="#4DB6AC" style={{ marginTop: 40 }} />
+                    ) : (
+                        <FlatList
+                            data={displayedList}
+                            keyExtractor={item => item.id}
+                            contentContainerStyle={{ padding: 16 }}
+                            ListEmptyComponent={
+                                <View style={styles.noResult}>
+                                    <Ionicons name="people-outline" size={48} color="#E0E0E0" />
+                                    <Text style={styles.noResultText}>
+                                        {friendsTab === 'accepted' ? 'No friends yet' : 'No pending requests'}
+                                    </Text>
+                                </View>
+                            }
+                            renderItem={({ item }) => (
+                                <View style={styles.resultCard}>
+                                    <Image
+                                        source={{ uri: item.avatar_url || "https://placekitten.com/50/50" }}
+                                        style={styles.resultAvatar}
+                                    />
+                                    <View style={styles.resultInfo}>
+                                        <Text style={styles.resultName}>{item.name}</Text>
+                                    </View>
+                                    <View style={[styles.resultBadge, friendsTab === 'pending' && { backgroundColor: '#FFCC80' }]}>
+                                        <Text style={[styles.resultBadgeText, friendsTab === 'pending' && { color: '#E65100' }]}>
+                                            {friendsTab === 'accepted' ? 'Friend' : 'Pending'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            )}
+                        />
+                    )}
+                </SafeAreaView>
+            </Modal>
+        );
+    };
 
     return (
         <SafeAreaView style={styles.container}>
@@ -963,6 +1133,9 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                     </View>
                 </TouchableOpacity>
             </Modal>
+
+            {/* Friends Modal */}
+            {renderFriendsModal()}
 
         </SafeAreaView>
     );
@@ -1180,6 +1353,8 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
+        paddingHorizontal: 20,
+        paddingTop: 16,
         marginBottom: 20,
     },
     modalTitle: {
@@ -1249,5 +1424,99 @@ const styles = StyleSheet.create({
         fontFamily: "Inter-SemiBold",
         color: "#37474F",
         marginLeft: 16,
+    },
+    // New Modal / Toggle Styles
+    modalContainer: {
+        flex: 1,
+        backgroundColor: "#F4FAF9",
+    },
+    modalCloseBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "#E0F2F1",
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    toggleContainer: {
+        flexDirection: 'row',
+        backgroundColor: "#E0F2F1",
+        borderRadius: 12,
+        padding: 4,
+        marginHorizontal: 16,
+        marginVertical: 12,
+    },
+    toggleBtn: {
+        flex: 1,
+        paddingVertical: 10,
+        alignItems: 'center',
+        borderRadius: 8,
+    },
+    toggleBtnActive: {
+        backgroundColor: "#FFFFFF",
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    toggleText: {
+        fontSize: 14,
+        fontFamily: "Inter-SemiBold",
+        color: "#78909C",
+    },
+    toggleTextActive: {
+        color: "#26A69A",
+    },
+    resultCard: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#FFFFFF",
+        padding: 12,
+        borderRadius: 16,
+        marginBottom: 10,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+        elevation: 1,
+    },
+    resultAvatar: {
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        marginRight: 12,
+        backgroundColor: "#ECEFF1",
+    },
+    resultInfo: {
+        flex: 1,
+    },
+    resultName: {
+        fontSize: 16,
+        fontFamily: "Inter-SemiBold",
+        color: "#37474F",
+        marginBottom: 2,
+    },
+    resultBadge: {
+        backgroundColor: "#E0F2F1",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+    },
+    resultBadgeText: {
+        fontSize: 12,
+        fontFamily: "Inter-Bold",
+        color: "#00897B",
+    },
+    noResult: {
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 60,
+    },
+    noResultText: {
+        fontSize: 16,
+        fontFamily: "Inter-Medium",
+        color: "#B0BEC5",
+        marginTop: 12,
     },
 });

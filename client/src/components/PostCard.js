@@ -1,18 +1,33 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
   Image,
   TouchableOpacity,
   StyleSheet,
-  Dimensions
+  Dimensions,
+  ScrollView
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-const { width } = Dimensions.get('window');
+const { width: screenWidth } = Dimensions.get('window');
 
 export default function PostCard({ post, onLike, onOpen, onMore, currentUserId }) {
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
   const isLiked = post.likes.includes(currentUserId);
   const timeAgo = new Date(post.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+
+
+  const images = post.image ? post.image.split(',').filter(Boolean) : [];
+
+  const handleScroll = (event) => {
+    const slideSize = event.nativeEvent.layoutMeasurement.width;
+    const index = event.nativeEvent.contentOffset.x / slideSize;
+    const roundIndex = Math.round(index);
+    if (roundIndex !== currentImageIndex) {
+      setCurrentImageIndex(roundIndex);
+    }
+  };
 
   return (
     <View style={styles.cardContainer}>
@@ -35,8 +50,38 @@ export default function PostCard({ post, onLike, onOpen, onMore, currentUserId }
       {/* Content: Text + Image */}
       <View style={styles.contentBody}>
         <Text style={styles.contentText}>{post.content}</Text>
-        {post.image && (
-          <Image source={{ uri: post.image }} style={styles.postImage} resizeMode="cover" />
+
+        {images.length > 0 && (
+          <View>
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={handleScroll}
+              style={styles.carouselContainer}
+            >
+              {images.map((imgUri, index) => (
+                <View key={index} style={styles.slide}>
+                  <Image source={{ uri: imgUri }} style={styles.postImage} resizeMode="cover" />
+                </View>
+              ))}
+            </ScrollView>
+
+            {/* Pagination Dots */}
+            {images.length > 1 && (
+              <View style={styles.paginationContainer}>
+                {images.map((_, index) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.dot,
+                      currentImageIndex === index ? styles.activeDot : styles.inactiveDot
+                    ]}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
         )}
       </View>
 
@@ -131,11 +176,39 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 12,
   },
+  carouselContainer: {
+    width: '100%',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  slide: {
+    width: screenWidth - 64, // Accounts for card margin (16+16) + padding (16+16)
+    alignItems: 'center',
+  },
   postImage: {
     width: "100%",
-    height: 220,
+    aspectRatio: 1, // Forces 1:1 Square Ratio
     borderRadius: 16,
     backgroundColor: "#F5F5F5",
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginHorizontal: 3,
+  },
+  activeDot: {
+    backgroundColor: "#26A69A",
+    width: 16,
+  },
+  inactiveDot: {
+    backgroundColor: "#E0E0E0",
   },
 
   // Footer

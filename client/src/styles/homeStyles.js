@@ -47,7 +47,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 5,
-    zIndex: -1,
+    zIndex: 0,
   },
 
   title: {
@@ -69,8 +69,8 @@ const styles = StyleSheet.create({
   /* ====== HERO SECTION (Circle Cat) ====== */
   heroSection: {
     alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 20,
+    marginTop: 14,
+    marginBottom: 26,
   },
 
   circleCatContainer: {
@@ -112,16 +112,16 @@ const styles = StyleSheet.create({
   },
 
   heroTitle: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '700',
     color: '#2D3748', // Darker elegant text
     textAlign: 'center',
-    width: 250,
-    lineHeight: 30,
+    width: 290,
+    lineHeight: 32,
   },
 
   lastCheckText: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#A0AEC0',
     marginLeft: 4,
   },

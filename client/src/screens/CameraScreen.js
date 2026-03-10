@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect, useState, useContext } from 'react';
+﻿import React, { useRef, useEffect, useState, useContext, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,8 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
-  Platform
+  Platform,
+  DeviceEventEmitter,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -22,7 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient';
 import HomeHeader from '../components/HomeHeader';
 
-
+import { WebView } from 'react-native-webview'; // <-- ต้องมี WebView
 import BottomNav from '../components/BottomNav';
 import useCameraData from '../hooks/useCameraData';
 import ActivityLevelChart from '../components/ActivityLevelChart';
@@ -33,11 +34,48 @@ import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
 const { width } = Dimensions.get('window');
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-// Change 5000 to 3000 if using a proxy, or your PC's IP if on a physical device
-const VIDEO_STREAM_URL = `http://${HOST}:5000/api/video_feed`;
+// 🚨 เปลี่ยน 192.168.1.159 เป็น IP จริงของคอมพิวเตอร์คุณเสมอ
+const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed_raw';
+const VIDEO_STREAM_QUERY = 'fps=15&quality=62&width=960';
+const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
+
+const isDemoLikeSource = (source = '') => {
+  const s = String(source || '').toLowerCase();
+  return (
+    s.endsWith('.mp4') ||
+    s.endsWith('.webm') ||
+    s.endsWith('.mov') ||
+    s.endsWith('.mkv') ||
+    s.endsWith('.avi') ||
+    s.includes('/storage/v1/object/public/')
+  );
+};
 
 // Create animated components
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
+const ButtonScale = ({ children, onPress, style, disabled = false }) => {
+  const scaleValue = useRef(new Animated.Value(1)).current;
+
+  const onPressIn = () => {
+    Animated.spring(scaleValue, { toValue: 0.95, useNativeDriver: true }).start();
+  };
+  const onPressOut = () => {
+    Animated.spring(scaleValue, { toValue: 1, useNativeDriver: true }).start();
+  };
+
+  return (
+    <AnimatedTouchableOpacity
+      activeOpacity={disabled ? 1 : 0.9}
+      onPress={disabled ? undefined : onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      style={[style, disabled && { opacity: 0.45 }, { transform: [{ scale: scaleValue }] }]}
+    >
+      {children}
+    </AnimatedTouchableOpacity>
+  );
+};
 
 const DecorativeCatEars = () => (
   <View style={styles.earContainer} pointerEvents="none">
@@ -47,21 +85,72 @@ const DecorativeCatEars = () => (
 );
 
 export default function CameraScreen({ onNavigate, session }) {
-  const [showSetupIntro, setShowSetupIntro] = useState(null); // null | true | false
+  const [showSetupIntro, setShowSetupIntro] = useState(null);
   const [requireSetcamera, setRequireSetcamera] = useState(false);
+
   const [cameraStatus, setCameraStatus] = useState('disconnected');
   const [currentCamera, setCurrentCamera] = useState(1);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
   const [hasCriticalAlert, setHasCriticalAlert] = useState(false);
   const [pendingIdentityCount, setPendingIdentityCount] = useState(0);
-  const [cats, setCats] = useState([]);
   const [selectedCat, setSelectedCat] = useState(null);
-  const [showCatSwitcher, setShowCatSwitcher] = useState(false);
-  const [environment, setEnvironment] = useState({ temperature: 25.4, humidity: 58 });
-  const [proStats, setProStats] = useState({ ping: 42, bitrate: 1.2, fps: 30 });
+  const [environment, setEnvironment] = useState({ temperature: null, humidity: null });
+  const [proStats, setProStats] = useState({ ping: null, bitrate: null, fps: null });
+  const [cameraModeFromDb, setCameraModeFromDb] = useState(null);
   const [livePreviewUri, setLivePreviewUri] = useState(null);
+  const [quickSummary, setQuickSummary] = useState({ eventsToday: 0, lastDetected: '--' });
+  // ดึง stream_source จาก DB
+  const [dbStreamUrl, setDbStreamUrl] = useState(null);
+  const [streamWebViewUrl] = useState(`${VIDEO_STREAM_URL}?${VIDEO_STREAM_QUERY}&t=${Date.now()}`);
+  const streamWebViewHtml = useMemo(() => `<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+      .wrap {
+        width: 100%;
+        height: 100%;
+        background: #000;
+      }
+      img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <img src="${streamWebViewUrl}" alt="live-stream" />
+    </div>
+  </body>
+</html>`, [streamWebViewUrl]);
+  const lastAppliedSourceRef = useRef('');
+  const cameraScreenCatKey = session?.user?.id
+    ? `camera_screen_selected_cat_id:${session.user.id}`
+    : 'camera_screen_selected_cat_id';
+  const scopedCameraIdKey = session?.user?.id
+    ? `camera_id:${session.user.id}`
+    : 'camera_id';
+  const scopedSetupKey = session?.user?.id
+    ? `camera_setup_complete:${session.user.id}`
+    : 'camera_setup_complete';
+  const healthMissCountRef = useRef(0);
+  const lastConnectedAtRef = useRef(0);
 
-  const { data } = useCameraData(session, cameraStatus);
+  const { data, refetch } = useCameraData(session, cameraStatus, selectedCat?.id || null);
+  const frameWidth = width - 28; // scrollContent horizontal padding (14 + 14)
+  const videoFrameHeight = Math.max(220, Math.min(340, Math.round(frameWidth * 9 / 16)));
 
   // Animations
   const bannerAnim = useRef(new Animated.Value(0)).current;
@@ -128,26 +217,104 @@ export default function CameraScreen({ onNavigate, session }) {
     return () => AlertEngine.off(AlertEvents.UPDATED, handler);
   }, []);
 
+  // ผู้ใช้ใหม่ (camera_setup_complete ยังไม่ถูก set) -> หน้า Phone.js ทันที
   useEffect(() => {
+    if (showSetupIntro === true) {
+      onNavigate('Phone', { initialStep: 'intro' });
+    }
+  }, [showSetupIntro]);
+
+  useEffect(() => {
+    const applySourceToBackend = async ({ sourceUrl, cameraId, ownerId }) => {
+      const cleanSource = String(sourceUrl || '').trim();
+      if (!cleanSource || !cameraId || !ownerId) return;
+      const sourceType = cleanSource ? (isDemoLikeSource(cleanSource) ? 'demo' : 'live') : 'live';
+      const sourceKey = `${sourceType}|${cameraId}|${cleanSource || 'DEFAULT_LIVE'}`;
+      if (lastAppliedSourceRef.current === sourceKey) return;
+
+      // Avoid forcing backend source restart when it is already set correctly.
+      try {
+        const statusRes = await fetch(`${VIDEO_SERVER_BASE}/api/source_status`);
+        const status = await statusRes.json();
+        const backendKey = `${status?.source_type || 'live'}|${status?.camera_id || ''}|${String(status?.source || '').trim() || 'DEFAULT_LIVE'}`;
+        if (backendKey === sourceKey) {
+          lastAppliedSourceRef.current = sourceKey;
+          return;
+        }
+      } catch (_e) {
+        // continue to set_source fallback
+      }
+
+      await fetch(`${VIDEO_SERVER_BASE}/api/set_source`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_type: sourceType,
+          source_url: cleanSource || null,
+          camera_id: cameraId || null,
+          owner_id: ownerId || null,
+        })
+      });
+
+      lastAppliedSourceRef.current = sourceKey;
+    };
+
     const fetchStatusAndSetup = async () => {
       try {
-        const hasSetup = await AsyncStorage.getItem('camera_setup_complete');
+        const hasSetup = await AsyncStorage.getItem(scopedSetupKey);
+        const isSetupComplete = String(hasSetup || '').toLowerCase() === 'true';
         let hasValidSource = false;
-        const storedCameraId = await AsyncStorage.getItem('camera_id');
+        const storedCameraId =
+          (await AsyncStorage.getItem(scopedCameraIdKey)) ||
+          (await AsyncStorage.getItem('camera_id'));
         let cameraId = storedCameraId;
 
-        if (!cameraId && session?.user?.id) {
-          const { data: latestCamera } = await supabase
+        if (session?.user?.id) {
+          // -- Fetch cameras and always resolve active camera from owner_id --
+          const { data: userCameras, error: camErr } = await supabase
             .from('cameras')
-            .select('id, stream_source')
+            .select('id, name, mode, stream_source, is_primary')
             .eq('owner_id', session.user.id)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (latestCamera?.id) {
-            cameraId = latestCamera.id;
+            .order('is_primary', { ascending: false })
+            .order('created_at', { ascending: true });
+
+          if (camErr) {
+            console.warn('camera query failed:', camErr?.message || camErr);
+          }
+
+          if (userCameras && userCameras.length > 0) {
+            const ownedStoredCam = userCameras.find((c) => c.id === storedCameraId);
+            const activeCam = ownedStoredCam || userCameras[0];
+            cameraId = activeCam.id;
+            await AsyncStorage.setItem(scopedCameraIdKey, cameraId);
             await AsyncStorage.setItem('camera_id', cameraId);
-            hasValidSource = Boolean((latestCamera.stream_source || '').trim());
+            if (activeCam?.mode) {
+              const normalized = String(activeCam.mode || '').toLowerCase().includes('single') ? 'single' : 'multi';
+              setCameraModeFromDb(normalized);
+            }
+
+            const source = String(activeCam.stream_source || '').trim();
+            hasValidSource = Boolean(source);
+            setDbStreamUrl(hasValidSource ? source : null);
+            setCameraStatus(hasValidSource && isSetupComplete ? 'connected' : 'disconnected');
+
+            if (hasValidSource && isSetupComplete) {
+              try {
+                await applySourceToBackend({
+                  sourceUrl: source,
+                  cameraId,
+                  ownerId: session.user.id,
+                });
+              } catch (e) {
+                console.log('Failed to update python backend source', e);
+              }
+            }
+          } else {
+            setCameraStatus('disconnected');
+            setDbStreamUrl(null);
+            hasValidSource = false;
+            await AsyncStorage.removeItem(scopedCameraIdKey);
+            await AsyncStorage.removeItem('camera_id');
           }
         }
 
@@ -158,39 +325,136 @@ export default function CameraScreen({ onNavigate, session }) {
             .eq('id', cameraId)
             .eq('owner_id', session.user.id)
             .maybeSingle();
-          hasValidSource = Boolean((camRow?.stream_source || '').trim());
+          const source = (camRow?.stream_source || '').trim();
+          hasValidSource = Boolean(source);
+          // เก็บ URL เพื่อใส่ใน WebView — ไม่เปลี่ยน connection logic
+          if (hasValidSource) {
+            setDbStreamUrl(source);
+            setCameraStatus(isSetupComplete ? 'connected' : 'disconnected');
+            if (isSetupComplete) {
+              try {
+                await applySourceToBackend({
+                  sourceUrl: source,
+                  cameraId,
+                  ownerId: session.user.id,
+                });
+              } catch (e) {
+                console.log('Failed to update python backend source (fallback)', e);
+              }
+            }
+          } else {
+            // ไม่มี source สำหรับ account นี้: บล็อกกล้องไว้จนกว่าจะตั้งค่าใน Setcamera
+            setDbStreamUrl(null);
+            setCameraStatus('disconnected');
+          }
         }
 
-        setRequireSetcamera(!hasValidSource);
+        setRequireSetcamera(!(hasValidSource && isSetupComplete));
         setShowSetupIntro(prev => {
-          const shouldShow = hasSetup !== 'true';
-          // Prevent unnecessary re-renders if the value is the same
+          const shouldShow = !isSetupComplete;
           return (prev === null || prev !== shouldShow) ? shouldShow : prev;
         });
 
-        // Check for camera connection status
-        const storedStatus = await AsyncStorage.getItem('camera_status');
-        if (storedStatus && hasValidSource) {
-          setCameraStatus((prev) => (prev !== storedStatus ? storedStatus : prev));
-        } else if (!hasValidSource) {
-          setCameraStatus('disconnected');
-        }
       } catch (e) {
         console.error("Failed to fetch status from storage:", e);
       }
     };
 
     fetchStatusAndSetup();
-
-    const interval = setInterval(fetchStatusAndSetup, 2000);
+    const interval = setInterval(fetchStatusAndSetup, 25000);
     return () => clearInterval(interval);
-  }, []);
+  }, [session?.user?.id, scopedCameraIdKey, scopedSetupKey]);
+
+  useEffect(() => {
+    let timer;
+    const pollBackendHealth = async () => {
+      // Guard: if user has not connected camera for this account yet,
+      // do not allow backend health to flip UI to connected.
+      if (requireSetcamera) {
+        setCameraStatus('disconnected');
+        return;
+      }
+      try {
+        const startedAt = Date.now();
+        const res = await fetch(`${VIDEO_SERVER_BASE}/api/health`);
+        const h = await res.json();
+        const pingMs = Math.max(1, Date.now() - startedAt);
+        setProStats((prev) => ({
+          ...prev,
+          ping: pingMs,
+          fps: Number.isFinite(Number(h?.capture_fps)) ? Number(h.capture_fps) : prev.fps,
+        }));
+        if (h?.camera_status === 'connected' || h?.camera === true) {
+          healthMissCountRef.current = 0;
+          lastConnectedAtRef.current = Date.now();
+          setCameraStatus('connected');
+        } else if (h?.camera_status === 'disconnected') {
+          healthMissCountRef.current += 1;
+          // Debounce disconnected to avoid stream flicker/remount on transient drops.
+          if (healthMissCountRef.current >= 3 && (Date.now() - lastConnectedAtRef.current) > 15000) {
+            setCameraStatus('disconnected');
+          } else {
+            setCameraStatus('connected');
+          }
+        } else {
+          setCameraStatus('connected');
+        }
+      } catch (_e) {
+        healthMissCountRef.current += 1;
+        if (healthMissCountRef.current >= 3 && (Date.now() - lastConnectedAtRef.current) > 15000) {
+          setCameraStatus('disconnected');
+        } else {
+          setCameraStatus('connected');
+        }
+      }
+    };
+
+    pollBackendHealth();
+    timer = setInterval(pollBackendHealth, 5000);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [requireSetcamera]);
+
+  useEffect(() => {
+    let timer;
+    const fetchEnvironment = async () => {
+      try {
+        const cameraId =
+          (await AsyncStorage.getItem(scopedCameraIdKey)) ||
+          (await AsyncStorage.getItem('camera_id'));
+        const url = cameraId
+          ? `${VIDEO_SERVER_BASE}/api/environment?camera_id=${encodeURIComponent(cameraId)}`
+          : `${VIDEO_SERVER_BASE}/api/environment`;
+        const res = await fetch(url);
+        const env = await res.json();
+        if (env?.status === 'ok') {
+          setEnvironment({
+            temperature: Number(env.temperature),
+            humidity: Number(env.humidity),
+          });
+        } else {
+          setEnvironment({ temperature: null, humidity: null });
+        }
+      } catch (_e) {
+        setEnvironment({ temperature: null, humidity: null });
+      }
+    };
+
+    fetchEnvironment();
+    timer = setInterval(fetchEnvironment, 5 * 60 * 1000);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [session?.user?.id, scopedCameraIdKey]);
 
   useEffect(() => {
     let timer;
     const fetchLatestPreview = async () => {
       try {
-        const cameraId = await AsyncStorage.getItem('camera_id');
+        const cameraId =
+          (await AsyncStorage.getItem(scopedCameraIdKey)) ||
+          (await AsyncStorage.getItem('camera_id'));
         if (!cameraId) {
           setLivePreviewUri(null);
           return;
@@ -231,159 +495,110 @@ export default function CameraScreen({ onNavigate, session }) {
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [cameraStatus]);
+  }, [cameraStatus, scopedCameraIdKey]);
 
-  // Simulate environment data from camera stream
+  // Sync selected cat with HomeHeader dropdown
   useEffect(() => {
-    let interval;
-    if (cameraStatus === 'connected') {
-      interval = setInterval(() => {
-        setEnvironment(prev => {
-          const tempChange = (Math.random() * 0.4) - 0.2;
-          let newTemp = prev.temperature + tempChange;
-          if (newTemp > 30) newTemp = 30;
-          if (newTemp < 22) newTemp = 22;
-
-          const humChange = Math.floor(Math.random() * 3) - 1;
-          let newHum = prev.humidity + humChange;
-          if (newHum > 70) newHum = 70;
-          if (newHum < 40) newHum = 40;
-
-          return { temperature: newTemp, humidity: newHum };
-        });
-
-        setProStats(prev => {
-          const newPing = Math.max(12, Math.min(120, prev.ping + (Math.floor(Math.random() * 15) - 7)));
-          const newBitrate = Math.max(0.5, Math.min(4.5, prev.bitrate + (Math.random() * 0.4 - 0.2)));
-          const newFps = Math.max(24, Math.min(30, prev.fps + (Math.floor(Math.random() * 3) - 1)));
-          return { ping: newPing, bitrate: newBitrate, fps: newFps };
-        });
-      }, 5000);
-    }
-    return () => clearInterval(interval);
-  }, [cameraStatus]);
-
-  // Fetch Cats for Switcher
-  useEffect(() => {
-    const fetchCats = async () => {
+    const fetchSelectedCat = async () => {
       if (session?.user?.id) {
-        const { data } = await supabase
+        const { data: catRows } = await supabase
           .from('cats')
           .select('*')
           .eq('owner_id', session.user.id);
 
-        if (data && data.length > 0) {
-          setCats(data);
-          const lastCatId = await AsyncStorage.getItem('last_selected_cat_id');
-          const found = data.find(c => c.id === lastCatId);
-          setSelectedCat(found || data[0]);
+        if (catRows && catRows.length > 0) {
+          const scopedLastCatKey = `last_selected_cat_id:${session.user.id}`;
+          const lastCatId =
+            (await AsyncStorage.getItem(cameraScreenCatKey)) ||
+            (await AsyncStorage.getItem(`selectedCatId:${session.user.id}`)) ||
+            (await AsyncStorage.getItem(scopedLastCatKey)) ||
+            (await AsyncStorage.getItem('selectedCatId')) ||
+            (await AsyncStorage.getItem('last_selected_cat_id'));
+          const found = catRows.find(c => String(c.id) === String(lastCatId));
+          const targetCat = found || catRows[0];
+          setSelectedCat(targetCat);
         }
       }
     };
-    fetchCats();
-  }, [session]);
 
-  const handleSelectCat = async (cat) => {
-    setSelectedCat(cat);
-    setShowCatSwitcher(false);
-    await AsyncStorage.setItem('last_selected_cat_id', cat.id);
-  };
+    fetchSelectedCat();
+    const sub = DeviceEventEmitter.addListener('catChanged', (cat) => {
+      if (!cat?.id) return;
+      (async () => {
+        setSelectedCat(cat);
+        await AsyncStorage.setItem(cameraScreenCatKey, String(cat.id));
+        await refetch();
+      })().catch((e) => {
+        console.warn('Failed to apply catChanged selection:', e?.message || e);
+      });
+    });
+    return () => sub?.remove?.();
+  }, [session, cameraScreenCatKey]);
+
+  // ดึง Quick Summary จาก DB (Events Today + Last Detected)
+  useEffect(() => {
+    const fetchQuickSummary = async () => {
+      if (cameraStatus !== 'connected' || !session?.user?.id) return;
+      try {
+        const cameraId =
+          (await AsyncStorage.getItem(scopedCameraIdKey)) ||
+          (await AsyncStorage.getItem('camera_id'));
+        if (!cameraId) return;
+        const selectedCatId = selectedCat?.id || null;
+
+        const dayStart = new Date();
+        dayStart.setHours(0, 0, 0, 0);
+
+        // Events today — นับจาก ai_cat_events ตาม camera_id
+        let countQuery = supabase
+          .from('ai_cat_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('camera_id', cameraId)
+          .gte('occurred_at', dayStart.toISOString());
+        if (selectedCatId) countQuery = countQuery.eq('cat_id', selectedCatId);
+        const { count } = await countQuery;
+
+        // Last detected — ดึงจาก ai_cat_identity_review ที่ reviewed=true
+        let lastReviewQuery = supabase
+          .from('ai_cat_identity_review')
+          .select('resolved_cat_id, occurred_at')
+          .eq('camera_id', cameraId)
+          .eq('reviewed', true)
+          .not('resolved_cat_id', 'is', null)
+          .order('occurred_at', { ascending: false })
+          .limit(1);
+        if (selectedCatId) lastReviewQuery = lastReviewQuery.eq('resolved_cat_id', selectedCatId);
+        const { data: lastReview } = await lastReviewQuery.maybeSingle();
+
+        let lastDetectedName = '--';
+        if (lastReview?.resolved_cat_id) {
+          const { data: catRow } = await supabase
+            .from('cats').select('name').eq('id', lastReview.resolved_cat_id).maybeSingle();
+          lastDetectedName = catRow?.name || '--';
+        }
+
+        setQuickSummary({ eventsToday: count ?? 0, lastDetected: lastDetectedName });
+      } catch (e) {
+        console.warn('quickSummary fetch error:', e?.message || e);
+      }
+    };
+    fetchQuickSummary();
+    const t = setInterval(fetchQuickSummary, 60000); // refresh ทุก 1 นาที
+    return () => clearInterval(t);
+  }, [cameraStatus, session, selectedCat?.id, scopedCameraIdKey]);
 
   const toggleCamera = () => {
-    // Return to the Phone intro/setup page
     onNavigate('Setcamera');
   };
 
-  // Button Press Animation Helper
-  const ButtonScale = ({ children, onPress, style, disabled = false }) => {
-    const scaleValue = useRef(new Animated.Value(1)).current;
-
-    const onPressIn = () => {
-      Animated.spring(scaleValue, { toValue: 0.95, useNativeDriver: true }).start();
-    };
-    const onPressOut = () => {
-      Animated.spring(scaleValue, { toValue: 1, useNativeDriver: true }).start();
-    };
-
-    return (
-      <AnimatedTouchableOpacity
-        activeOpacity={disabled ? 1 : 0.9}
-        onPress={disabled ? undefined : onPress}
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
-        style={[style, disabled && { opacity: 0.45 }, { transform: [{ scale: scaleValue }] }]}
-      >
-        {children}
-      </AnimatedTouchableOpacity>
-    );
-  };
-
   if (!data) return null;
-  // --- Render Functions ---
 
   const CameraSetupIntro = ({ onSetup, onMaybeLater }) => {
-    const FeatureCard = ({ icon, title, subtitle }) => (
-      <View style={styles.introFeatureCard}>
-        <View style={styles.introFeatureIcon}>
-          <MaterialCommunityIcons name={icon} size={28} color="#00695C" />
-        </View>
-        <Text style={styles.introFeatureTitle}>{title}</Text>
-        <Text style={styles.introFeatureSubtitle}>{subtitle}</Text>
-      </View>
-    );
-
+    // ... (โค้ดส่วนนี้เหมือนเดิม)
     return (
-      <LinearGradient colors={['#F5FBFB', '#E8F5E9']} style={styles.introContainer}>
-        <SafeAreaView edges={['top', 'left', 'right']} style={{ flex: 1 }}>
-          <View style={styles.introHeader}>
-            <TouchableOpacity onPress={onMaybeLater} style={styles.introBackButton}>
-              <Ionicons name="close" size={24} color="#2F6A62" />
-            </TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={styles.introScrollContent} showsVerticalScrollIndicator={false}>
-            <View style={styles.introHeroIcon}>
-              <MaterialCommunityIcons name="camera-plus-outline" size={64} color="#00695C" />
-            </View>
-            <Text style={styles.introTitle}>Connect Your Camera</Text>
-            <Text style={styles.introSubtitle}>
-              Turn your home camera into a smart health monitor for your cat.
-            </Text>
-
-            <View style={styles.introFeatureGrid}>
-              <FeatureCard
-                icon="video-check-outline"
-                title="AI Detection"
-                subtitle="Tracks eating, drinking, and litter box visits."
-              />
-              <FeatureCard
-                icon="chart-bell-curve-cumulative"
-                title="Health Trends"
-                subtitle="Identifies changes in behavior over time."
-              />
-              <FeatureCard
-                icon="shield-alert-outline"
-                title="Smart Alerts"
-                subtitle="Notifies you of potential health issues."
-              />
-              <FeatureCard
-                icon="image-multiple-outline"
-                title="Activity Gallery"
-                subtitle="Creates a visual diary of your cat's day."
-              />
-            </View>
-
-            <View style={styles.introButtonContainer}>
-              <TouchableOpacity style={styles.introPrimaryButton} onPress={onSetup}>
-                <Text style={styles.introPrimaryButtonText}>Start Camera Setup</Text>
-                <Ionicons name="arrow-forward" size={20} color="#FFF" style={{ marginLeft: 8 }} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={onMaybeLater} style={styles.introSkipButton}>
-                <Text style={styles.introSkipText}>I'll do this later</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      </LinearGradient>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#00695C" />
+      </View>
     );
   };
 
@@ -396,16 +611,15 @@ export default function CameraScreen({ onNavigate, session }) {
   }
 
   const SectionOverlay = ({ children }) => {
-    if (cameraStatus !== 'disconnected') return children;
-
+    if (!requireSetcamera && cameraStatus !== 'disconnected') return children;
     return (
       <View style={styles.sectionOverlayWrapper}>
-        <View pointerEvents="none">
-          {children}
-        </View>
+        <View pointerEvents="none">{children}</View>
         <View style={styles.sectionOverlayContent}>
           <View style={styles.sectionOverlayHint}>
-            <Text style={styles.sectionOverlayHintText}>Connect camera to unlock this section</Text>
+            <Text style={styles.sectionOverlayHintText}>
+              {requireSetcamera ? 'Connect camera to start monitoring' : 'Connect camera to unlock this section'}
+            </Text>
           </View>
         </View>
       </View>
@@ -422,27 +636,19 @@ export default function CameraScreen({ onNavigate, session }) {
           <Text style={styles.setupCardTitle}>Connect Your Camera</Text>
           <Text style={styles.setupCardSubtitle}>Enable AI behavior monitoring for your pet.</Text>
         </View>
-        <TouchableOpacity
-          style={styles.setupCardButton}
-          onPress={() => onNavigate('Phone', { initialStep: 'intro' })}
-        >
-          <Text style={styles.setupCardButtonText}>Connect Now</Text>
+        <TouchableOpacity style={styles.setupCardButton} onPress={() => onNavigate('Phone', { initialStep: 'intro' })}>
+          <Text style={styles.setupCardButtonText}>Connect</Text>
         </TouchableOpacity>
       </LinearGradient>
     </View>
   );
 
-  if (showSetupIntro && !requireSetcamera) {
-    return <CameraSetupIntro onSetup={() => onNavigate('Setcamera')} onMaybeLater={() => onNavigate('Home')} />;
-  }
-
-  const modeDisplay = data.settings?.monitoringMode
-    ? data.settings.monitoringMode.charAt(0).toUpperCase() + data.settings.monitoringMode.slice(1)
-    : 'Multi';
-  const selectedCatsCount = data.settings?.selectedCats?.length ?? 0;
+  const effectiveMode = data.cats <= 1 ? 'single' : (cameraModeFromDb || data.settings?.monitoringMode || 'multi');
+  const modeDisplay = effectiveMode.charAt(0).toUpperCase() + effectiveMode.slice(1);
+  const selectedCatsCount = data.cats <= 1 ? 1 : (data.settings?.selectedCats?.length ?? 0);
   const householdCatsCount = selectedCatsCount > 0 ? selectedCatsCount : data.cats;
+  const isDisplayConnected = !requireSetcamera && cameraStatus === 'connected';
 
-  // Interpolate entry animation
   const translateY = entryAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [50, 0]
@@ -455,95 +661,72 @@ export default function CameraScreen({ onNavigate, session }) {
       <LinearGradient colors={['#f5fffdff', '#f5fffdff']} style={{ flex: 1 }}>
         <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
           <HomeHeader
-            leftComponent={
-              <TouchableOpacity
-                style={styles.catProfileCard}
-                onPress={() => setShowCatSwitcher(!showCatSwitcher)}
-                activeOpacity={0.8}
-              >
-                <View style={styles.catAvatarContainer}>
-                  <Image
-                    source={selectedCat?.image_url ? { uri: selectedCat.image_url } : require('../../assets/cioncat.jpg')}
-                    style={styles.catAvatar}
-                  />
-                  <View style={[styles.onlineIndicator, { backgroundColor: cameraStatus === 'connected' ? '#4CAF50' : '#B0BEC5' }]} />
-                </View>
-              </TouchableOpacity>
-            }
-            rightComponent={
-              <TouchableOpacity onPress={() => onNavigate('Alert')} style={styles.bellButton}>
-                <Ionicons name="notifications-outline" size={26} color="#00695C" />
-                {unreadAlerts > 0 ? <View style={styles.notificationDot} /> : null}
-              </TouchableOpacity>
-            }
+            onNotify={() => onNavigate('Alert', { returnTo: 'Camera' })}
+            onSetting={() => onNavigate('Setting')}
           />
 
-          {showCameraIssueBanner ? (
-            <Animated.View style={[
-              styles.overlayBannerWrapper,
-              {
-                opacity: bannerAnim,
-                transform: [{
-                  translateY: bannerAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-20, 0]
-                  })
-                }, {
-                  scale: bannerAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.95, 1]
-                  })
-                }]
-              }
-            ]}>
-              <TouchableOpacity
-                style={styles.overlayBanner}
-                activeOpacity={0.8}
-                onPress={() => onNavigate('Alert')}
-              >
-                <Ionicons name="warning" size={20} color="#fff" />
-                <View style={styles.overlayTextContainer}>
-                  <Text style={styles.overlayTitle}>Camera Issue Detected</Text>
-                  <Text style={styles.overlayDesc}>Litter Box camera is offline.</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#fff" />
-              </TouchableOpacity>
-            </Animated.View>
-          ) : null}
-
-          {/* Pending Identity Banner for normal behaviors (or missed popups) */}
-          <PendingIdentityBanner
-            count={pendingIdentityCount}
-            onPress={openPendingQueue}
-          />
+          <PendingIdentityBanner count={pendingIdentityCount} onPress={openPendingQueue} />
 
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-            {cameraStatus === 'disconnected' && <SetupPromptCard />}
+            {/* แสดง SetupPromptCard ถ้ายังไม่ได้ตั้งค่า stream_source (ไม่แตะ camera status) */}
+            {requireSetcamera && <SetupPromptCard />}
 
-            {/* Main Content Animated Wrapper */}
             <Animated.View style={{ opacity, transform: [{ translateY }] }}>
 
-              {/* Camera Section */}
+              {/* 🚨 โซนแสดงกล้อง (ปรับเป็น WebView แบบยิงตรง ไม่ฝัง HTML) */}
               <View style={styles.cameraContainer}>
-                <View style={styles.cameraFrame}>
-                  {cameraStatus === 'connected' ? (
-                    <Image source={{ uri: VIDEO_STREAM_URL }} style={styles.livePreviewImage} resizeMode="cover" />
+                <View style={[styles.cameraFrame, { height: videoFrameHeight }]}>
+                  {isDisplayConnected ? (
+                    <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#000' }}>
+                      <WebView
+                        source={{ html: streamWebViewHtml, baseUrl: VIDEO_SERVER_BASE }}
+                        style={{ width: '100%', height: '100%', backgroundColor: '#000' }}
+                        cacheEnabled={false}
+                        scrollEnabled={false}
+                        bounces={false}
+                        showsVerticalScrollIndicator={false}
+                        showsHorizontalScrollIndicator={false}
+                        originWhitelist={['*']}
+                        mixedContentMode="always"
+                        allowsInlineMediaPlayback={true}
+                        automaticallyAdjustContentInsets={false}
+                      />
+                    </View>
                   ) : (
-                    <View style={styles.videoPlaceholder}>
-                      <Text style={styles.liveFeedLabel}>Live Feed</Text>
+                    <View style={[styles.videoPlaceholder, { backgroundColor: '#FFFFFF' }]}>
+                      <MaterialCommunityIcons
+                        name={requireSetcamera ? 'camera-plus-outline' : 'camera-off-outline'}
+                        size={30}
+                        color="#90A4AE"
+                        style={{ marginBottom: 8 }}
+                      />
+                      <Text style={styles.liveFeedLabel}>
+                        {requireSetcamera ? 'Camera not connected yet' : 'Camera Disconnected'}
+                      </Text>
+                      <Text style={styles.videoSubText}>
+                        {requireSetcamera ? 'Choose one way to connect and start monitoring.' : 'Reconnect from Camera settings.'}
+                      </Text>
+                      {requireSetcamera && (
+                        <View style={styles.videoConnectActions}>
+                          <TouchableOpacity
+                            style={styles.videoConnectPrimary}
+                            onPress={() => onNavigate('Phone', { initialStep: 'intro' })}
+                          >
+                            <Text style={styles.videoConnectPrimaryText}>Connect</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   )}
 
-                  <View style={[styles.cameraStatusBadge, { backgroundColor: cameraStatus === 'connected' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(30, 30, 30, 0.75)' }]}>
+                  <View style={[styles.cameraStatusBadge, { backgroundColor: isDisplayConnected ? 'rgba(255, 255, 255, 0.85)' : 'rgba(30, 30, 30, 0.75)' }]}>
                     <Animated.View style={[styles.cameraStatusDot, {
-                      opacity: cameraStatus === 'connected' ? pulseAnim : 1,
-                      backgroundColor: cameraStatus === 'connected' ? '#4CAF50' :
-                        cameraStatus === 'connecting' ? '#FFC107' : '#F44336'
+                      opacity: isDisplayConnected ? pulseAnim : 1,
+                      backgroundColor: isDisplayConnected ? '#4CAF50' : '#F44336'
                     }]} />
-                    <Text style={[styles.cameraStatusText, { color: cameraStatus === 'connected' ? '#1B5E20' : '#fff' }]}>
-                      {cameraStatus === 'connected' ? 'Connected' :
-                        cameraStatus === 'connecting' ? 'Connecting...' : 'Camera Disconnected'}
+                    <Text style={[styles.cameraStatusText, { color: isDisplayConnected ? '#1B5E20' : '#fff' }]}>
+                      {isDisplayConnected ? 'Connected' : 'Camera Disconnected'}
                     </Text>
                   </View>
                 </View>
@@ -558,18 +741,17 @@ export default function CameraScreen({ onNavigate, session }) {
 
               {/* Environment Status */}
               <View style={styles.envRow}>
-                <LinearGradient
-                  colors={['#DDE7FF', '#EEF2FF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.weatherWidget}
-                >
+                <LinearGradient colors={['#DDE7FF', '#EEF2FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.weatherWidget}>
                   <View style={styles.weatherLeft}>
                     <Text style={styles.weatherLabel}>Current location</Text>
                     <Text style={styles.weatherCity}>Home</Text>
                     <Text style={styles.weatherCondition}>
-                      {cameraStatus === 'connected'
-                        ? (environment.humidity > 70 ? 'Humid' : environment.temperature > 30 ? 'Warm' : 'Comfort')
+                      {isDisplayConnected
+                        ? (environment.humidity != null && environment.humidity > 70
+                          ? 'Humid'
+                          : environment.temperature != null && environment.temperature > 30
+                            ? 'Warm'
+                            : 'Live')
                         : 'No Signal'}
                     </Text>
                   </View>
@@ -579,19 +761,53 @@ export default function CameraScreen({ onNavigate, session }) {
                       <MaterialCommunityIcons name="weather-partly-cloudy" size={28} color="#6366F1" />
                     </View>
                     <Text style={styles.weatherTemp}>
-                      {cameraStatus === 'connected' ? `${environment.temperature.toFixed(1)}°C` : '--°C'}
+                      {isDisplayConnected && environment.temperature != null ? `${Number(environment.temperature).toFixed(1)}°C` : '--°C'}
                     </Text>
                     <View style={styles.weatherHumidityPill}>
                       <MaterialCommunityIcons name="water-percent" size={12} color="#5B67D6" style={{ marginRight: 4 }} />
                       <Text style={styles.weatherHumidity}>
-                        {cameraStatus === 'connected' ? `${environment.humidity}%` : '--%'}
+                        {isDisplayConnected && environment.humidity != null ? `${environment.humidity}%` : '--%'}
                       </Text>
                     </View>
                   </View>
                 </LinearGradient>
               </View>
 
-              {/* Recent Activity Scroll */}
+              {/* Stream Stats Bar — ping/bitrate/fps จาก proStats + Quick Summary */}
+              {isDisplayConnected && (
+                <View style={styles.streamStatsBar}>
+                  <View style={styles.streamStatItem}>
+                    <MaterialCommunityIcons name="access-point" size={13} color="#00695C" />
+                    <Text style={styles.streamStatLabel}>Ping</Text>
+                    <Text style={styles.streamStatValue}>{proStats.ping != null ? `${Math.round(proStats.ping)}ms` : '--'}</Text>
+                  </View>
+                  <View style={styles.streamStatDivider} />
+                  <View style={styles.streamStatItem}>
+                    <MaterialCommunityIcons name="video" size={13} color="#00695C" />
+                    <Text style={styles.streamStatLabel}>Bitrate</Text>
+                    <Text style={styles.streamStatValue}>{proStats.bitrate != null ? `${proStats.bitrate.toFixed(1)} Mbps` : '--'}</Text>
+                  </View>
+                  <View style={styles.streamStatDivider} />
+                  <View style={styles.streamStatItem}>
+                    <MaterialCommunityIcons name="speedometer" size={13} color="#00695C" />
+                    <Text style={styles.streamStatLabel}>FPS</Text>
+                    <Text style={styles.streamStatValue}>{proStats.fps != null ? Math.round(proStats.fps) : '--'}</Text>
+                  </View>
+                  <View style={styles.streamStatDivider} />
+                  <View style={styles.streamStatItem}>
+                    <MaterialCommunityIcons name="calendar-today" size={13} color="#00695C" />
+                    <Text style={styles.streamStatLabel}>Events</Text>
+                    <Text style={styles.streamStatValue}>{quickSummary.eventsToday}</Text>
+                  </View>
+                  <View style={styles.streamStatDivider} />
+                  <View style={styles.streamStatItem}>
+                    <MaterialCommunityIcons name="paw" size={13} color="#00695C" />
+                    <Text style={styles.streamStatLabel}>Last seen</Text>
+                    <Text style={[styles.streamStatValue, { maxWidth: 60 }]} numberOfLines={1}>{quickSummary.lastDetected}</Text>
+                  </View>
+                </View>
+              )}
+
               <SectionOverlay>
                 <Text style={styles.sectionTitle}>Recent Activity</Text>
                 <ScrollView
@@ -600,28 +816,25 @@ export default function CameraScreen({ onNavigate, session }) {
                   contentContainerStyle={styles.recentScrollContent}
                   style={styles.recentScroll}
                 >
-                  {(data?.recentActivities || [
-                    { id: 1, type: 'Motion', time: '2m ago', icon: 'run', color: '#FFB74D' },
-                    { id: 2, type: 'Eating', time: '15m ago', icon: 'food', color: '#81C784' },
-                    { id: 3, type: 'Litter', time: '1h ago', icon: 'delete-outline', color: '#BA68C8' }, // Fixed icon
-                    { id: 4, type: 'Sleep', time: '3h ago', icon: 'sleep', color: '#90A4AE' },
-                  ]).map((item, index) => (
-                    <View key={item.id || index} style={styles.recentItem}>
-                      <View style={[styles.recentIcon, { backgroundColor: item.color + '20' }]}>
-                        <MaterialCommunityIcons name={item.icon} size={20} color={item.color} />
+                  {data?.recentActivities?.length > 0
+                    ? data.recentActivities.map((item, index) => (
+                      <View key={item.id || index} style={styles.recentItem}>
+                        <View style={[styles.recentIcon, { backgroundColor: (item.color || '#FFB74D') + '25' }]}>
+                          <MaterialCommunityIcons name={item.icon || 'run'} size={20} color={item.color || '#FFB74D'} />
+                        </View>
+                        <View>
+                          <Text style={styles.recentType}>{item.type}</Text>
+                          <Text style={styles.recentTime}>{item.time}</Text>
+                        </View>
                       </View>
-                      <View>
-                        <Text style={styles.recentType}>{item.type}</Text>
-                        <Text style={styles.recentTime}>{item.time}</Text>
-                      </View>
-                    </View>
-                  ))}
+                    ))
+                    : <Text style={{ color: '#B0BEC5', fontSize: 12, paddingVertical: 12, paddingLeft: 4 }}>No activity recorded today</Text>
+                  }
                 </ScrollView>
               </SectionOverlay>
 
               <Text style={styles.sectionTitle}>Today's Insights</Text>
 
-              {/* Activity Chart Card */}
               <SectionOverlay>
                 <View style={styles.cardContainer}>
                   <DecorativeCatEars />
@@ -629,7 +842,17 @@ export default function CameraScreen({ onNavigate, session }) {
                     <View>
                       <Text style={styles.cardTitle}>Activity Level</Text>
                       <Text style={styles.cardSubtitle}>
-                        Status: <Text style={{ color: '#FF6D00', fontWeight: 'bold' }}>{data.posture.normal.name === 'Active' ? 'Active' : 'Moderate'}</Text>
+                        Status: <Text style={{
+                          color:
+                            (data.behaviorAnalytics?.energy?.active ?? 0) >= 60 ? '#FF6D00'
+                              : (data.behaviorAnalytics?.energy?.active ?? 0) >= 30 ? '#F9A825'
+                                : '#90A4AE',
+                          fontWeight: 'bold'
+                        }}>
+                          {(data.behaviorAnalytics?.energy?.active ?? 0) >= 60 ? 'High'
+                            : (data.behaviorAnalytics?.energy?.active ?? 0) >= 30 ? 'Moderate'
+                              : 'Low'}
+                        </Text>
                       </Text>
                     </View>
                     <View style={styles.iconCircleSmall}>
@@ -646,7 +869,7 @@ export default function CameraScreen({ onNavigate, session }) {
                 </View>
               </SectionOverlay>
 
-              {/* Stats Grid */}
+              {/* Stats Grid — Food & Litter จาก DB */}
               <SectionOverlay>
                 <View style={styles.statsRow}>
                   <View style={styles.statCardGlowFood}>
@@ -656,8 +879,8 @@ export default function CameraScreen({ onNavigate, session }) {
                         <MaterialCommunityIcons name="food-apple" size={26} color="#FF6D00" />
                       </View>
                       <View style={styles.statContent}>
-                        <Text style={styles.statValue}>{data.food}g</Text>
-                        <Text style={styles.statLabel}>Food Consumed</Text>
+                        <Text style={styles.statValue}>{data.food}</Text>
+                        <Text style={styles.statLabel}>Feeding Events</Text>
                       </View>
                     </View>
                   </View>
@@ -677,7 +900,7 @@ export default function CameraScreen({ onNavigate, session }) {
                 </View>
               </SectionOverlay>
 
-              {/* Posture Card */}
+              {/* Posture & Behavior Card — จาก DB */}
               <SectionOverlay>
                 <View style={styles.cardContainer}>
                   <DecorativeCatEars />
@@ -687,24 +910,22 @@ export default function CameraScreen({ onNavigate, session }) {
                   </View>
 
                   <View style={styles.postureGrid}>
-                    {/* Normal Card */}
                     <View style={[styles.postureCard, styles.postureCardNormal]}>
                       <View style={styles.postureIconBgNormal}>
                         <MaterialCommunityIcons name="cat" size={28} color="#00695C" />
                       </View>
                       <View style={styles.postureContent}>
-                        <Text style={styles.postureValueNormal}>{data.posture.normal.percent}%</Text>
+                        <Text style={styles.postureValueNormal}>{data.posture?.normal?.percent ?? 0}%</Text>
                         <Text style={styles.postureLabel}>Normal</Text>
                       </View>
                     </View>
 
-                    {/* Abnormal Card */}
                     <View style={[styles.postureCard, styles.postureCardAbnormal]}>
                       <View style={styles.postureIconBgAbnormal}>
                         <MaterialCommunityIcons name="medical-bag" size={28} color="#D32F2F" />
                       </View>
                       <View style={styles.postureContent}>
-                        <Text style={styles.postureValueAbnormal}>{data.posture.abnormal.percent}%</Text>
+                        <Text style={styles.postureValueAbnormal}>{data.posture?.abnormal?.percent ?? 0}%</Text>
                         <Text style={styles.postureLabel}>Attention</Text>
                       </View>
                     </View>
@@ -712,14 +933,18 @@ export default function CameraScreen({ onNavigate, session }) {
 
                   <View style={styles.postureContext}>
                     <Text style={styles.postureContextText}>
-                      Most detected: <Text style={{ fontWeight: 'bold', color: '#00695C' }}>{data.posture.normal.name}</Text>
+                      Most detected: <Text style={{ fontWeight: 'bold', color: '#00695C' }}>{data.posture?.normal?.name ?? '--'}</Text>
                     </Text>
-                    {data.posture.abnormal.percent > 0 && <Text style={[styles.postureContextText, { color: '#D32F2F', marginTop: 4 }]}>Alert: {data.posture.abnormal.name}</Text>}
+                    {(data.posture?.abnormal?.percent ?? 0) > 0 && (
+                      <Text style={[styles.postureContextText, { color: '#D32F2F', marginTop: 4 }]}>
+                        Alert: {data.posture?.abnormal?.name ?? '--'}
+                      </Text>
+                    )}
                   </View>
                 </View>
               </SectionOverlay>
 
-              {/* Pro Analytics Card */}
+              {/* Behavior Analytics Card — คำนวณจากข้อมูลจริงใน DB ผ่าน useCameraData */}
               <SectionOverlay>
                 <View style={styles.cardContainer}>
                   <View style={styles.cardHeader}>
@@ -751,10 +976,10 @@ export default function CameraScreen({ onNavigate, session }) {
                       </View>
                       <View style={styles.progressBarBg}>
                         <View style={styles.progressBarGray} />
-                        <Animated.View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.energy?.active || 0}%` }]}>
+                        <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.energy?.active || 0}%` }]}>
                           <View style={[styles.progressBarColor, { backgroundColor: '#FFAB40' }]} />
                           <MaterialCommunityIcons name="paw" size={24} color="#FF6D00" style={styles.progressPaw} />
-                        </Animated.View>
+                        </View>
                       </View>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
                         <Text style={styles.insightSubtextLeft}>High (Playing)</Text>
@@ -776,10 +1001,10 @@ export default function CameraScreen({ onNavigate, session }) {
                       </View>
                       <View style={styles.progressBarBg}>
                         <View style={styles.progressBarGray} />
-                        <Animated.View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.routine?.score || 0}%` }]}>
+                        <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.routine?.score || 0}%` }]}>
                           <View style={[styles.progressBarColor, { backgroundColor: '#64B5F6' }]} />
                           <MaterialCommunityIcons name="paw" size={24} color="#0D47A1" style={styles.progressPaw} />
-                        </Animated.View>
+                        </View>
                       </View>
                       <Text style={[styles.insightSubtextLeft, { marginTop: 0 }]}>Consistent feeding and litter habits</Text>
                     </View>
@@ -798,10 +1023,10 @@ export default function CameraScreen({ onNavigate, session }) {
                       </View>
                       <View style={styles.progressBarBg}>
                         <View style={styles.progressBarGray} />
-                        <Animated.View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.wellness?.score || 0}%` }]}>
+                        <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.wellness?.score || 0}%` }]}>
                           <View style={[styles.progressBarColor, { backgroundColor: '#81C784' }]} />
                           <MaterialCommunityIcons name="paw" size={24} color="#1B5E20" style={styles.progressPaw} />
-                        </Animated.View>
+                        </View>
                       </View>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
                         <Text style={styles.insightSubtextLeft}>Relaxed</Text>
@@ -813,12 +1038,6 @@ export default function CameraScreen({ onNavigate, session }) {
               </SectionOverlay>
 
               {/* Action Buttons */}
-              <ButtonScale style={styles.actionButton} onPress={() => onNavigate('Timeline')}>
-                <MaterialCommunityIcons name="timeline-clock-outline" size={22} color="#00695C" />
-                <Text style={styles.actionButtonText}>View Timeline</Text>
-                <Ionicons name="chevron-forward" size={20} color="#B2DFDB" />
-              </ButtonScale>
-
               <ButtonScale style={styles.actionButton} onPress={() => onNavigate('Gallery')}>
                 <MaterialCommunityIcons name="image-multiple-outline" size={22} color="#00695C" />
                 <Text style={styles.actionButtonText}>Activity Gallery</Text>
@@ -839,45 +1058,6 @@ export default function CameraScreen({ onNavigate, session }) {
             <BottomNav current="Camera" onNavigate={onNavigate} />
           </View>
 
-          {/* Cat Switcher Modal */}
-          <Modal
-            visible={showCatSwitcher}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={() => setShowCatSwitcher(false)}
-          >
-            <TouchableOpacity
-              style={styles.modalOverlay}
-              activeOpacity={1}
-              onPress={() => setShowCatSwitcher(false)}
-            >
-              <View style={styles.switcherContainer}>
-                <Text style={styles.switcherTitle}>Switch Profile</Text>
-                <FlatList
-                  data={cats}
-                  keyExtractor={item => item.id}
-                  showsVerticalScrollIndicator={false}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={[styles.switcherItem, selectedCat?.id === item.id && styles.switcherItemActive]}
-                      onPress={() => handleSelectCat(item)}
-                    >
-                      <Image
-                        source={item.image_url ? { uri: item.image_url } : require('../../assets/cioncat.jpg')}
-                        style={styles.switcherAvatar}
-                      />
-                      <Text style={[styles.switcherName, selectedCat?.id === item.id && styles.switcherNameActive]}>
-                        {item.name}
-                      </Text>
-                      {selectedCat?.id === item.id && (
-                        <Ionicons name="checkmark-circle" size={20} color="#00695C" />
-                      )}
-                    </TouchableOpacity>
-                  )}
-                />
-              </View>
-            </TouchableOpacity>
-          </Modal>
         </SafeAreaView>
       </LinearGradient>
     </View >
@@ -885,1008 +1065,130 @@ export default function CameraScreen({ onNavigate, session }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5fffdff',
-  },
-  scrollContent: {
-    padding: 14,
-    paddingBottom: 68,
-  },
-  footerBar: {
-    backgroundColor: '#FFFFFF',
-  },
-  headerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    marginBottom: 20,
-    paddingHorizontal: 8,
-  },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    textAlign: 'center',
-    color: '#004D40',
-  },
-  // Cat Profile Card Styles
-  catProfileCard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  catAvatarContainer: {
-    position: 'relative',
-  },
-  catAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 2,
-    borderColor: '#E0F2F1',
-  },
-  onlineIndicator: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
-  catInfo: {
-    marginLeft: 10,
-    flexShrink: 1,
-  },
-  catName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#37474F',
-    maxWidth: 140,
-  },
-  catStatus: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  bellButton: {
-    width: 40,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-  },
-  notificationDot: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FF5252',
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
-  },
-  overlayBannerWrapper: {
-    marginBottom: 16,
-    zIndex: 10,
-  },
-  overlayBanner: {
-    backgroundColor: '#FF5252',
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#FF5252',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  overlayTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  overlayTitle: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  overlayDesc: {
-    color: '#ffebee',
-    fontSize: 12,
-  },
-  cameraContainer: {
-    marginTop: 12,
-    marginBottom: 24,
-    alignItems: 'center',
-  },
-  cameraFrame: {
-    width: '100%',
-    height: 220,
-    borderRadius: 24,
-    overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
-    position: 'relative',
-    elevation: 2,
-    shadowColor: '#546E7A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-  },
-  videoPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-  },
-  livePreviewImage: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#E5E7EB',
-  },
-  liveFeedLabel: {
-    color: '#64748B',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  cameraStatusBadge: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  cameraStatusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  cameraStatusText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  switchCameraButton: {
-    position: 'absolute',
-    bottom: 12,
-    right: 14,
-    backgroundColor: '#FFFFFF',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    zIndex: 20,
-  },
-  galleryOverlayButton: {
-    position: 'absolute',
-    bottom: 12,
-    left: 14,
-    backgroundColor: '#FFFFFF',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    zIndex: 20,
-  },
-  devToolsContainer: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    zIndex: 100,
-    gap: 6,
-    alignItems: 'flex-end'
-  },
-  networkStatsOverlay: {
-    position: 'absolute',
-    bottom: 60,
-    left: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  overlayTextSmall: {
-    fontSize: 10,
-    color: '#1B5E20',
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
-  householdPill: {
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: -16, // Overlap camera slightly
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  householdText: {
-    color: '#00695C',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  sectionTitle: {
-    fontSize: 15,
-    marginTop: 16,
-    marginBottom: 10,
-    fontWeight: '700',
-    color: '#37474F',
-    marginLeft: 4,
-  },
-  cardContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 15,
-    padding: 13,
-    marginBottom: 10,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 10,
-  },
-  cardTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#37474F',
-    marginBottom: 4,
-  },
-  cardSubtitle: {
-    fontSize: 11,
-    color: '#78909C',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    padding: 11,
-    borderRadius: 14,
-    alignItems: 'center',
-    flexDirection: 'row', // Horizontal layout for better premium feel
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.015,
-    shadowRadius: 2,
-    elevation: 0,
-  },
-  statCardFood: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF6D00',
-  },
-  statCardLitter: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#0288D1',
-  },
-  statCardGlowFood: {
-    flex: 1,
-    marginRight: 6,
-    borderRadius: 18,
-    shadowColor: '#FF6D00',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  statCardGlowLitter: {
-    flex: 1,
-    marginLeft: 6,
-    borderRadius: 18,
-    shadowColor: '#0288D1',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  statContent: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  iconCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  iconCircleFood: {
-    backgroundColor: '#FFF3E0',
-  },
-  iconCircleLitter: {
-    backgroundColor: '#E1F5FE',
-  },
-  iconCircleSmall: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#FFF3E0', // Match chart card
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#37474F',
-  },
-  statLabel: {
-    fontSize: 8,
-    color: '#78909C',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-  },
-  // Posture Redesign
-  postureGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 6,
-    gap: 10,
-  },
-  postureCard: {
-    flex: 1,
-    borderRadius: 16,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  postureCardNormal: {
-    backgroundColor: '#E0F2F1', // Light Teal
-  },
-  postureCardAbnormal: {
-    backgroundColor: '#FFEBEE', // Light Red
-  },
-  postureIconBgNormal: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  postureIconBgAbnormal: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  postureContent: {
-    flex: 1,
-  },
-  postureValueNormal: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#00695C',
-  },
-  postureValueAbnormal: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#D32F2F',
-  },
-  postureLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#546E7A',
-  },
-  postureContext: {
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#ECEFF1',
-  },
-  postureContextText: {
-    fontSize: 11,
-    color: '#78909C',
-  },
-  actionButton: {
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 11,
-    borderRadius: 14,
-    marginBottom: 10,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  actionButtonText: {
-    flex: 1,
-    marginLeft: 10,
-    fontSize: 13,
-    color: '#37474F',
-    fontWeight: '700',
-  },
-  // Environment Styles
-  envRow: {
-    marginBottom: 16,
-  },
-  weatherWidget: {
-    borderRadius: 15,
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: '#E3E8FF',
-  },
-  weatherLeft: {
-    flex: 1,
-  },
-  weatherLabel: {
-    fontSize: 12,
-    color: '#6B78B8',
-    fontWeight: '600',
-  },
-  weatherCity: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#3D4A80',
-    marginTop: 2,
-    marginBottom: 4,
-  },
-  weatherCondition: {
-    fontSize: 12,
-    color: '#5F6CA8',
-    fontWeight: '700',
-  },
-  weatherRight: {
-    alignItems: 'flex-end',
-    minWidth: 110,
-  },
-  weatherIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.75)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  weatherTemp: {
-    fontSize: 17,
-    color: '#3D4A80',
-    fontWeight: '800',
-    marginTop: 6,
-    marginBottom: 4,
-  },
-  weatherHumidityPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  weatherHumidity: {
-    fontSize: 11,
-    color: '#4B5A9A',
-    fontWeight: '700',
-  },
-  statWatermark: {
-    position: 'absolute',
-    right: -10,
-    bottom: -10,
-    opacity: 0.5,
-  },
-  // Recent Activity Styles
-  recentScroll: {
-    marginBottom: 8,
-  },
-  recentScrollContent: {
-    paddingRight: 16,
-  },
-  recentItem: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 8,
-    paddingRight: 12,
-    marginRight: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#90A4AE',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  recentIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 11,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  recentType: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#37474F',
-  },
-  recentTime: {
-    fontSize: 11,
-    color: '#90A4AE',
-    marginTop: 2,
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  switcherContainer: {
-    width: '80%',
-    backgroundColor: '#FFF',
-    borderRadius: 24,
-    padding: 20,
-    maxHeight: '50%',
-  },
-  switcherTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#37474F',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  switcherItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F5F5F5',
-  },
-  switcherItemActive: {
-    backgroundColor: '#F0F4F8',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-  },
-  switcherAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 12,
-  },
-  switcherName: {
-    fontSize: 16,
-    color: '#37474F',
-    flex: 1,
-  },
-  switcherNameActive: {
-    fontWeight: 'bold',
-    color: '#00695C',
-  },
-
-  // Pro Widgets Styles
-  insightsGrid: {
-    marginTop: 12,
-    gap: 16,
-  },
-  insightRow: {
-    marginBottom: 4,
-  },
-  insightHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  insightLabel: {
-    fontSize: 13,
-    color: '#455A64',
-    fontWeight: '600',
-  },
-  insightValue: {
-    fontSize: 13,
-    color: '#37474F',
-    fontWeight: 'bold',
-  },
-  progressBarBg: {
-    height: 24, // Enough height to not clip the paw
-    justifyContent: 'center',
-    overflow: 'visible',
-    marginVertical: 4,
-  },
-  progressBarGray: {
-    height: 8,
-    backgroundColor: '#ECEFF1',
-    borderRadius: 5,
-    width: '100%',
-    position: 'absolute',
-  },
-  progressBarFill: {
-    height: 24,
-    minWidth: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    overflow: 'visible',
-  },
-  progressBarColor: {
-    height: 8,
-    borderRadius: 5,
-    width: '100%',
-    position: 'absolute',
-  },
-  progressPaw: {
-    marginRight: -8,
-    textShadowColor: 'rgba(0,0,0,0.15)',
-    textShadowOffset: { width: 0, height: 1.5 },
-    textShadowRadius: 3,
-    zIndex: 10,
-  },
-  insightSubtext: {
-    fontSize: 11,
-    color: '#90A4AE',
-    marginTop: 4,
-    textAlign: 'right',
-  },
-  insightSubtextLeft: {
-    fontSize: 11,
-    color: '#90A4AE',
-  },
-
-  // --- Intro Screen Styles ---
-  introContainer: {
-    flex: 1,
-  },
-  introHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  introBackButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  introScrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-  introHeroIcon: {
-    alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 24,
-  },
-  introTitle: {
-    fontSize: 28,
-    fontFamily: 'Inter-Bold',
-    color: '#0C5A58',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  introSubtitle: {
-    fontSize: 15,
-    color: '#285855',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 22,
-    paddingHorizontal: 10,
-  },
-  introFeatureGrid: {
-    width: '100%',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 14,
-  },
-  introFeatureCard: {
-    width: `48%`,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    borderRadius: 20,
-    padding: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.9)',
-  },
-  introFeatureIcon: {
-    marginBottom: 12,
-  },
-  introFeatureTitle: {
-    fontFamily: 'Inter-Bold',
-    color: '#0C5A58',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  introFeatureSubtitle: {
-    color: '#285855',
-    fontSize: 11,
-    marginTop: 2,
-    textAlign: 'center',
-    lineHeight: 16,
-  },
-  introButtonContainer: {
-    marginTop: 32,
-  },
-  introPrimaryButton: {
-    backgroundColor: '#147C78',
-    paddingVertical: 18,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    width: '100%',
-  },
-  introPrimaryButtonText: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  introSkipButton: {
-    marginTop: 16,
-    padding: 10,
-    alignItems: 'center',
-  },
-  introSkipText: {
-    color: '#285855',
-    fontSize: 14,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
-  statWatermark: {
-    position: 'absolute',
-    right: -10,
-    bottom: -10,
-    opacity: 0.5,
-  },
-  // Cat Ear Decorative Styles
-  earContainer: {
-    position: 'absolute',
-    top: -8,
-    left: 12,
-    right: 12,
-    height: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    zIndex: -1,
-  },
-  ear: {
-    width: 20,
-    height: 16,
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-  },
-  earLeft: {
-    transform: [{ rotate: '-15deg' }],
-  },
-  earRight: {
-    transform: [{ rotate: '15deg' }],
-  },
-  // Section Overlay Styles
-  sectionOverlayWrapper: {
-    position: 'relative',
-    marginHorizontal: 0,
-    marginBottom: 0,
-    borderRadius: 0,
-    overflow: 'visible',
-  },
-  sectionOverlayContent: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.45)',
-    zIndex: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sectionOverlayHint: {
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  sectionOverlayHintText: {
-    fontSize: 10,
-    color: '#475569',
-    fontWeight: '600',
-  },
-  // Setup Prompt Card Styles
-  setupCardWrapper: {
-    marginHorizontal: 16,
-    marginTop: 10,
-    marginBottom: 10,
-    borderRadius: 18,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#D7ECE5',
-    elevation: 2,
-    shadowColor: '#0F766E',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-  },
-  setupCardGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-  },
-  setupCardIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: '#D9F1E8',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  setupCardTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  setupCardTitle: {
-    color: '#0F172A',
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 1,
-  },
-  setupCardSubtitle: {
-    color: '#64748B',
-    fontSize: 11,
-  },
-  setupCardButton: {
-    backgroundColor: '#0F766E',
-    borderColor: '#0F766E',
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
-    shadowColor: '#0F766E',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  setupCardButtonText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  // New styles from user
-  disconnectedPromptTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#004D40',
-    marginTop: 12,
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  disconnectedPromptSubtitle: {
-    fontSize: 14,
-    color: '#37474F',
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 16,
-  },
-  disconnectedPromptButton: {
-    backgroundColor: '#00897B',
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 20,
-  },
-  disconnectedPromptButtonText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  lastUpdatedText: {
-    fontSize: 10,
-    color: '#90A4AE',
-    marginLeft: 5,
-    fontFamily: 'Inter-Medium',
-  },
-  requireSetcameraOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 150,
-    bottom: 240,
-    backgroundColor: 'rgba(255,255,255,0.88)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    zIndex: 40,
-  },
-  requireSetcameraCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 20,
-    alignItems: 'center',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  requireSetcameraTitle: {
-    marginTop: 10,
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  requireSetcameraText: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 18,
-    color: '#475569',
-    textAlign: 'center',
-  },
-  requireSetcameraButton: {
-    marginTop: 14,
-    backgroundColor: '#0F766E',
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-  },
-  requireSetcameraButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  container: { flex: 1, backgroundColor: '#f5fffdff' },
+  scrollContent: { padding: 14, paddingBottom: 68 },
+  footerBar: { backgroundColor: '#FFFFFF' },
+  headerContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, marginBottom: 20, paddingHorizontal: 8 },
+  headerTitle: { fontSize: 26, fontWeight: '800', textAlign: 'center', color: '#004D40' },
+  catProfileCard: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', width: 42, height: 42, borderRadius: 21, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  catAvatarContainer: { position: 'relative' },
+  catAvatar: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: '#E0F2F1' },
+  onlineIndicator: { position: 'absolute', bottom: 0, right: 0, width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: '#FFFFFF' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
+  bellButton: { width: 40, height: 32, justifyContent: 'center', alignItems: 'center', position: 'relative' },
+  headerIconButton: { width: 36, height: 32, justifyContent: 'center', alignItems: 'center' },
+  notificationDot: { position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF5252', borderWidth: 1.5, borderColor: '#FFFFFF' },
+  cameraContainer: { marginTop: 12, marginBottom: 24, alignItems: 'center' },
+  cameraFrame: { width: '100%', borderRadius: 24, overflow: 'hidden', backgroundColor: '#FFFFFF', position: 'relative', elevation: 2, shadowColor: '#546E7A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12 },
+  videoPlaceholder: { flex: 1, justifyContent: 'center', backgroundColor: '#FFFFFF', alignItems: 'center' },
+  livePreviewImage: { width: '100%', height: '100%', backgroundColor: '#000' },
+  liveFeedLabel: { color: '#64748B', fontSize: 14, fontWeight: '600' },
+  videoSubText: { color: '#94A3B8', fontSize: 12, marginTop: 4, marginBottom: 10, textAlign: 'center' },
+  videoConnectActions: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
+  videoConnectPrimary: { backgroundColor: '#0F766E', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  videoConnectPrimaryText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  cameraStatusBadge: { position: 'absolute', top: 12, left: 12, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 3 },
+  cameraStatusDot: { width: 10, height: 10, borderRadius: 4, marginRight: 6 },
+  cameraStatusText: { color: '#fff', fontSize: 12, fontWeight: '500' },
+  householdPill: { backgroundColor: '#FFFFFF', paddingVertical: 6, paddingHorizontal: 14, borderRadius: 16, flexDirection: 'row', alignItems: 'center', marginTop: -16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 3 },
+  householdText: { color: '#00695C', fontSize: 12, fontWeight: '700' },
+  envRow: { marginBottom: 16 },
+  weatherWidget: { borderRadius: 15, paddingHorizontal: 13, paddingVertical: 11, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2, borderWidth: 1, borderColor: '#E3E8FF' },
+  weatherLeft: { flex: 1 },
+  weatherLabel: { fontSize: 12, color: '#6B78B8', fontWeight: '600' },
+  weatherCity: { fontSize: 18, fontWeight: '800', color: '#3D4A80', marginTop: 2, marginBottom: 4 },
+  weatherCondition: { fontSize: 12, color: '#5F6CA8', fontWeight: '700' },
+  weatherRight: { alignItems: 'flex-end', minWidth: 110 },
+  weatherIconWrap: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.75)', alignItems: 'center', justifyContent: 'center' },
+  weatherTemp: { fontSize: 17, color: '#3D4A80', fontWeight: '800', marginTop: 6, marginBottom: 4 },
+  weatherHumidityPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.7)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  weatherHumidity: { fontSize: 11, color: '#4B5A9A', fontWeight: '700' },
+  sectionTitle: { fontSize: 15, marginTop: 16, marginBottom: 10, fontWeight: '700', color: '#37474F', marginLeft: 4 },
+  cardContainer: { backgroundColor: '#FFFFFF', borderRadius: 15, padding: 13, marginBottom: 10, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
+  cardTitle: { fontSize: 13, fontWeight: '700', color: '#37474F', marginBottom: 4 },
+  cardSubtitle: { fontSize: 11, color: '#78909C' },
+  iconCircleSmall: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#FFF3E0', justifyContent: 'center', alignItems: 'center' },
+  actionButton: { backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', padding: 11, borderRadius: 14, marginBottom: 10, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  actionButtonText: { flex: 1, marginLeft: 10, fontSize: 13, color: '#37474F', fontWeight: '700' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  switcherContainer: { width: '80%', backgroundColor: '#FFF', borderRadius: 24, padding: 20, maxHeight: '50%' },
+  switcherTitle: { fontSize: 18, fontWeight: 'bold', color: '#37474F', marginBottom: 16, textAlign: 'center' },
+  switcherItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  switcherItemActive: { backgroundColor: '#F0F4F8', borderRadius: 12, paddingHorizontal: 8 },
+  switcherAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 12 },
+  switcherName: { fontSize: 16, color: '#37474F', flex: 1 },
+  switcherNameActive: { fontWeight: 'bold', color: '#00695C' },
+  earContainer: { position: 'absolute', top: -8, left: 12, right: 12, height: 12, flexDirection: 'row', justifyContent: 'space-between', zIndex: -1 },
+  ear: { width: 20, height: 16, backgroundColor: '#FFFFFF', borderTopLeftRadius: 10, borderTopRightRadius: 10 },
+  earLeft: { transform: [{ rotate: '-15deg' }] },
+  earRight: { transform: [{ rotate: '15deg' }] },
+  sectionOverlayWrapper: { position: 'relative', marginHorizontal: 0, marginBottom: 0, borderRadius: 0, overflow: 'visible' },
+  sectionOverlayContent: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255, 255, 255, 0.45)', zIndex: 20, justifyContent: 'center', alignItems: 'center' },
+  sectionOverlayHint: { backgroundColor: 'rgba(255, 255, 255, 0.82)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#E2E8F0' },
+  sectionOverlayHintText: { fontSize: 10, color: '#475569', fontWeight: '600' },
+  setupCardWrapper: { marginHorizontal: 16, marginTop: 10, marginBottom: 10, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: '#D7ECE5', elevation: 2, shadowColor: '#0F766E', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6 },
+  setupCardGradient: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 14 },
+  setupCardIconContainer: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#D9F1E8', justifyContent: 'center', alignItems: 'center' },
+  setupCardTextContainer: { flex: 1, marginLeft: 12 },
+  setupCardTitle: { color: '#0F172A', fontSize: 15, fontWeight: '700', marginBottom: 1 },
+  setupCardSubtitle: { color: '#64748B', fontSize: 11 },
+  setupCardButton: { backgroundColor: '#0F766E', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
+  setupCardButtonText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  // Stream Stats Bar
+  streamStatsBar: { flexDirection: 'row', backgroundColor: '#F0FDF8', borderRadius: 14, paddingVertical: 8, paddingHorizontal: 10, marginBottom: 12, alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#CCEDE4' },
+  streamStatItem: { flex: 1, alignItems: 'center', gap: 2 },
+  streamStatLabel: { fontSize: 9, color: '#78909C', fontWeight: '600', textTransform: 'uppercase', marginTop: 2 },
+  streamStatValue: { fontSize: 11, color: '#004D40', fontWeight: '800' },
+  streamStatDivider: { width: 1, height: 28, backgroundColor: '#D0EDE6' },
+  // Stats Grid
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  statCard: { flex: 1, backgroundColor: '#FFFFFF', padding: 11, borderRadius: 14, alignItems: 'center', flexDirection: 'row', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.015, shadowRadius: 2, elevation: 0 },
+  statCardFood: { borderLeftWidth: 4, borderLeftColor: '#FF6D00' },
+  statCardLitter: { borderLeftWidth: 4, borderLeftColor: '#0288D1' },
+  statCardGlowFood: { flex: 1, marginRight: 6, borderRadius: 18, shadowColor: '#FF6D00', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 1 },
+  statCardGlowLitter: { flex: 1, marginLeft: 6, borderRadius: 18, shadowColor: '#0288D1', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 1 },
+  statContent: { marginLeft: 12, flex: 1 },
+  iconCircle: { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  iconCircleFood: { backgroundColor: '#FFF3E0' },
+  iconCircleLitter: { backgroundColor: '#E1F5FE' },
+  statValue: { fontSize: 14, fontWeight: '800', color: '#37474F' },
+  statLabel: { fontSize: 8, color: '#78909C', fontWeight: '600', textTransform: 'uppercase' },
+  statWatermark: { position: 'absolute', right: -10, bottom: -10, opacity: 0.5 },
+  // Posture Card
+  postureGrid: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, gap: 10 },
+  postureCard: { flex: 1, borderRadius: 16, padding: 12, flexDirection: 'row', alignItems: 'center' },
+  postureCardNormal: { backgroundColor: '#E0F2F1' },
+  postureCardAbnormal: { backgroundColor: '#FFEBEE' },
+  postureIconBgNormal: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  postureIconBgAbnormal: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  postureContent: { flex: 1 },
+  postureValueNormal: { fontSize: 17, fontWeight: '800', color: '#00695C' },
+  postureValueAbnormal: { fontSize: 17, fontWeight: '800', color: '#D32F2F' },
+  postureLabel: { fontSize: 11, fontWeight: '600', color: '#546E7A' },
+  postureContext: { marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#ECEFF1' },
+  postureContextText: { fontSize: 11, color: '#78909C' },
+  // Recent Activity
+  recentScroll: { marginBottom: 8 },
+  recentScrollContent: { paddingRight: 16 },
+  recentItem: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 8, paddingRight: 12, marginRight: 12, flexDirection: 'row', alignItems: 'center', shadowColor: '#90A4AE', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  recentIcon: { width: 34, height: 34, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  recentType: { fontSize: 12, fontWeight: '700', color: '#37474F' },
+  recentTime: { fontSize: 11, color: '#90A4AE', marginTop: 2 },
+  // Behavior Analytics
+  insightsGrid: { marginTop: 12, gap: 16 },
+  insightRow: { marginBottom: 4 },
+  insightHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  insightLabel: { fontSize: 13, color: '#455A64', fontWeight: '600' },
+  insightValue: { fontSize: 13, color: '#37474F', fontWeight: 'bold' },
+  progressBarBg: { height: 24, justifyContent: 'center', overflow: 'visible', marginVertical: 4 },
+  progressBarGray: { height: 8, backgroundColor: '#ECEFF1', borderRadius: 5, width: '100%', position: 'absolute' },
+  progressBarFill: { height: 24, minWidth: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', overflow: 'visible' },
+  progressBarColor: { height: 8, borderRadius: 5, width: '100%', position: 'absolute' },
+  progressPaw: { marginRight: -8, textShadowColor: 'rgba(0,0,0,0.15)', textShadowOffset: { width: 0, height: 1.5 }, textShadowRadius: 3, zIndex: 10 },
+  insightSubtext: { fontSize: 11, color: '#90A4AE', marginTop: 4, textAlign: 'right' },
+  insightSubtextLeft: { fontSize: 11, color: '#90A4AE' },
 });
+
+
+
