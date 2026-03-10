@@ -23,6 +23,7 @@ import CatHealthMeter from "../components/CatHealthMeter";
 import styles from "../styles/homeStyles";
 import useCameraData from "../hooks/useCameraData";
 import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
+import AlertRepository from "../services/AlertRepository";
 
 const { width } = Dimensions.get('window');
 
@@ -160,6 +161,59 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
             }
         };
 
+        const checkInactivityAlert = async (userId) => {
+            if (!userId) return;
+
+            try {
+                // Check if we already alerted today to avoid spamming
+                const todayStr = new Date().toISOString().split('T')[0];
+                const lastAlertKey = `last_inactivity_alert_date:${userId}`;
+                const lastAlertDate = await AsyncStorage.getItem(lastAlertKey);
+
+                if (lastAlertDate === todayStr) return;
+
+                // Get all cats for this user
+                const { data: cats } = await supabase
+                    .from('cats')
+                    .select('id')
+                    .eq('owner_id', userId);
+
+                if (!cats || cats.length === 0) return;
+
+                // Find the latest log across all cats
+                const { data: latestLogs, error } = await supabase
+                    .from('daily_logs')
+                    .select('log_date')
+                    .in('cat_id', cats.map(c => c.id))
+                    .order('log_date', { ascending: false })
+                    .limit(1);
+
+                if (error) throw error;
+
+                let daysInactive = 0;
+                if (latestLogs && latestLogs.length > 0) {
+                    const lastLogDate = new Date(latestLogs[0].log_date);
+                    const today = new Date();
+                    const diffTime = Math.abs(today - lastLogDate);
+                    daysInactive = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                }
+
+                if (daysInactive >= 3) {
+                    await AlertRepository.push({
+                        type: 'daily_log_inactivity',
+                        severity: 'warning',
+                        title: 'ลืมบันทึกข้อมูลหรือเปล่า? 🐾',
+                        desc: `คุณไม่ได้บันทึกข้อมูลรายวันมา ${daysInactive} วันแล้ว มาอัปเดตสุขภาพให้น้องแมวกันเถอะ!`,
+                        timestamp: new Date().toISOString(),
+                    });
+                    // Mark as alerted today
+                    await AsyncStorage.setItem(lastAlertKey, todayStr);
+                }
+            } catch (err) {
+                console.log("Inactivity check error:", err);
+            }
+        };
+
         const fetchActiveCat = async () => {
             try {
                 const scopedKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
@@ -192,6 +246,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
         };
 
         fetchActiveCat();
+        checkInactivityAlert(session?.user?.id);
 
         const subscription = DeviceEventEmitter.addListener('catChanged', (cat) => {
             setActiveCat(cat);

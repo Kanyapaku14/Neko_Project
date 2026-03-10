@@ -163,12 +163,13 @@ const AlertRepository = {
         }
     },
 
-    async push(alert) {
+    async push(alert, targetUserId = null) {
         try {
-            const { userId, cameraId } = await this._getContext();
-            if (!userId) return null;
+            const { userId: currentUserId, cameraId } = await this._getContext();
+            const ownerId = targetUserId || currentUserId;
+            if (!ownerId) return null;
 
-            const payload = mapAlertToDb(alert, userId, cameraId);
+            const payload = mapAlertToDb(alert, ownerId, cameraId);
             const { data, error } = await supabase
                 .from('alerts')
                 .upsert(payload, { onConflict: 'id' })

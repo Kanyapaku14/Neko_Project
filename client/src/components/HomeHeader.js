@@ -73,13 +73,13 @@ export default function HomeHeader({
       setModalVisible(false);
       const { data: { session } } = await supabase.auth.getSession();
       const selectedCatKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
-    const scopedLastCatKey = session?.user?.id ? `last_selected_cat_id:${session.user.id}` : 'last_selected_cat_id';
-    await AsyncStorage.multiSet([
-      [selectedCatKey, cat.id.toString()],
-      ['selectedCatId', cat.id.toString()],
-      [scopedLastCatKey, cat.id.toString()],
-      ['last_selected_cat_id', cat.id.toString()],
-    ]);
+      const scopedLastCatKey = session?.user?.id ? `last_selected_cat_id:${session.user.id}` : 'last_selected_cat_id';
+      await AsyncStorage.multiSet([
+        [selectedCatKey, cat.id.toString()],
+        ['selectedCatId', cat.id.toString()],
+        [scopedLastCatKey, cat.id.toString()],
+        ['last_selected_cat_id', cat.id.toString()],
+      ]);
 
       // Broadcast the change to other screens
       DeviceEventEmitter.emit('catChanged', cat);

@@ -129,10 +129,17 @@ export default function SettingScreen({ session, onNavigate, onLogout, onBack })
                                 onLongPress={() => handleDeleteCat(cat)}
                                 delayLongPress={800}
                             >
-                                <Image
-                                    source={{ uri: cat.image_url || 'https://placekitten.com/100/100' }}
-                                    style={styles.catAvatar}
-                                />
+                                <View style={[styles.catAvatar, { backgroundColor: '#D1EFE9', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 1, borderColor: '#8FBAB4' }]}>
+                                    {cat.image_url ? (
+                                        <Image
+                                            source={{ uri: cat.image_url }}
+                                            style={{ width: '100%', height: '100%' }}
+                                        />
+                                    ) : (
+                                        <Ionicons name="paw" size={30} color="#8FBAB4" />
+                                    )}
+                                </View>
+
                                 <Text style={styles.catName}>{cat.name}</Text>
                             </TouchableOpacity>
                         ))}

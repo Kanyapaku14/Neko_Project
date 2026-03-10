@@ -17,6 +17,7 @@ import {
   Alert
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import AlertRepository from "../services/AlertRepository";
 const { width: screenWidth } = Dimensions.get('window');
 // import { currentUser } from "../utils/auth"; // ❌ Removed
 
@@ -109,9 +110,22 @@ export default function PostDetailScreen({
     if (onDeleteComment) onDeleteComment(post.id, id);
   };
 
-  const handleAddFriend = () => {
+  const handleAddFriend = async () => {
     if (friendAdded) return;
     setFriendAdded(true);
+
+    try {
+      await AlertRepository.push({
+        type: 'friend_request',
+        severity: 'info',
+        title: 'คำขอเป็นเพื่อนใหม่! 🐾',
+        desc: `${myProfile?.name || 'ใครบางคน'} อยากเป็นเพื่อนกับคุณ`,
+        timestamp: new Date().toISOString(),
+      }, post.user.id);
+    } catch (e) {
+      console.log("Friend request alert error:", e);
+    }
+
     Alert.alert(
       "ส่งคำขอเป็นเพื่อนแล้ว! 🎉",
       `ส่งคำขอไปยัง ${post.user.name} เรียบร้อย`,

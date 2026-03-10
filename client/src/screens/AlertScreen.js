@@ -56,6 +56,14 @@ const getAlertVisuals = (alert) => {
             return { icon: 'video-off-outline', color: '#E65100', bg: '#FFF3E0', text: 'Camera Moved' };
         case 'assessment_saved':
             return { icon: 'clipboard-check-outline', color: '#2E7D32', bg: '#E8F5E9', text: 'Assessment Saved' };
+        case 'daily_log_inactivity':
+            return { icon: 'calendar-alert', color: '#E65100', bg: '#FFF3E0', text: 'Missed Logging' };
+        case 'friend_request':
+            return { icon: 'account-plus-outline', color: '#7E57C2', bg: '#EDE7F6', text: 'Friend Request' };
+        case 'friend_accepted':
+            return { icon: 'account-check-outline', color: '#2E7D32', bg: '#E8F5E9', text: 'Friend Accepted' };
+        case 'post_like':
+            return { icon: 'heart-outline', color: '#E57373', bg: '#FFEBEE', text: 'Post Liked' };
     }
 
     // Fallback to severity
