@@ -13,6 +13,8 @@ import UserInfoScreen from './src/screens/UserInfoScreen';
 import supabase from './src/screens/config/supabaseClient';
 import Dashboard from './src/screens/Dashbord';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
+import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 
 // 1. Import the LogDailyNormal file
 import LogDailyNormal from './src/screens/LogDailyNormal';
@@ -64,11 +66,12 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState('SignIn');
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [authScreen, setAuthScreen] = useState('Home'); // ✅ เปลี่ยนกลับเป็น Home
+  const [authScreen, setAuthScreen] = useState('Home');
   const [catId, setCatId] = useState(null);
-  const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
-  const [profileLoading, setProfileLoading] = useState(false); // ✅ Track if checking profile
-  const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null); // null until loaded
+  const [catName, setCatName] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null);
+  const [resetPasswordMode, setResetPasswordMode] = useState(false);
 
   // Fix Logout: Should actually sign out
   const handleSignOut = async () => {
@@ -100,6 +103,13 @@ export default function App() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Handle password recovery deep link
+      if (_event === 'PASSWORD_RECOVERY') {
+        setSession(session);
+        setResetPasswordMode(true);
+        setLoading(false);
+        return;
+      }
       setSession(session);
       if (session) {
         checkUserProfileStatus(session);
@@ -388,13 +398,33 @@ export default function App() {
     }
 
     // 2. Guest/SignIn flow
+    // Reset password mode (arrived via deep link from email)
+    if (resetPasswordMode) {
+      return (
+        <ResetPasswordScreen
+          onComplete={() => {
+            setResetPasswordMode(false);
+            setSession(null);
+            supabase.auth.signOut();
+            setCurrentScreen('SignIn');
+          }}
+        />
+      );
+    }
+
     return (
       <>
         {currentScreen === 'SignIn' && (
-          <SignInScreen onNavigate={navigateToSignUp} />
+          <SignInScreen
+            onNavigate={navigateToSignUp}
+            onForgotPassword={() => setCurrentScreen('ForgotPassword')}
+          />
         )}
         {currentScreen === 'SignUp' && (
           <SignUpScreen onNavigate={navigateToSignIn} />
+        )}
+        {currentScreen === 'ForgotPassword' && (
+          <ForgotPasswordScreen onBack={() => setCurrentScreen('SignIn')} />
         )}
       </>
     );

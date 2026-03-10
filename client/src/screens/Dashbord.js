@@ -68,6 +68,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const [rawLogs, setRawLogs] = useState([]);
   const [latestAlerts, setLatestAlerts] = useState([]);
   const [latestRedFlags, setLatestRedFlags] = useState(0);
+  const [pawStats, setPawStats] = useState({ activity: 0, litter: 0, wellness: 0 });
 
   useEffect(() => {
     if (session?.user) {
@@ -76,6 +77,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       setLoading(false);
     }
   }, [session, selectedPeriod]);
+
+  // Fetch paw stats whenever the active cat changes
+  useEffect(() => {
+    if (catDetails?.id) {
+      fetchPawStats(catDetails.id);
+    }
+  }, [catDetails]);
 
   const fetchDashboardData = async () => {
     try {
@@ -170,6 +178,62 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       console.error("Error fetching logs:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ==========================================
+  // 🐾 Fetch Paw Progress Stats from Supabase
+  // ==========================================
+  const fetchPawStats = async (catId) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+
+      // --- Activity & Litter from ai_daily_summary ---
+      const { data: summaryData, error: summaryError } = await supabase
+        .from('ai_daily_summary')
+        .select('count_00_06, count_06_12, count_12_18, count_18_24, total_litter')
+        .eq('cat_id', catId)
+        .eq('summary_date', today)
+        .single();
+
+      let activityPercent = 0;
+      let litterPercent = 0;
+
+      if (!summaryError && summaryData) {
+        const ACTIVITY_GOAL = 20; // target movements per day
+        const totalActivity =
+          (summaryData.count_00_06 || 0) +
+          (summaryData.count_06_12 || 0) +
+          (summaryData.count_12_18 || 0) +
+          (summaryData.count_18_24 || 0);
+        activityPercent = Math.min(100, Math.round((totalActivity / ACTIVITY_GOAL) * 100));
+
+        const LITTER_GOAL = 4; // target litter visits per day
+        litterPercent = Math.min(100, Math.round(((summaryData.total_litter || 0) / LITTER_GOAL) * 100));
+      }
+
+      // --- Wellness from assessments (latest record) ---
+      const { data: assessmentData, error: assessmentError } = await supabase
+        .from('assessments')
+        .select('overall_risk_score')
+        .eq('cat_id', catId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      let wellnessPercent = 0;
+      if (!assessmentError && assessmentData) {
+        wellnessPercent = Math.max(0, 100 - (assessmentData.overall_risk_score || 0));
+      }
+
+      setPawStats({
+        activity: activityPercent,
+        litter: litterPercent,
+        wellness: wellnessPercent,
+      });
+    } catch (err) {
+      console.warn('fetchPawStats error:', err);
+      setPawStats({ activity: 0, litter: 0, wellness: 0 });
     }
   };
 
@@ -465,17 +529,17 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         <View style={styles.riskCard}>
           <PawProgressBar
             label="Activity Level"
-            percent={45}
-            icon="run"
+            percent={pawStats.activity}
+            icon="lightning-bolt"
           />
           <PawProgressBar
             label="Litter Box Usage"
-            percent={85}
-            icon="emoticon-poop"
+            percent={pawStats.litter}
+            icon="cat"
           />
           <PawProgressBar
-            label="Wellness Balance"
-            percent={92}
+            label="Overall Wellness"
+            percent={pawStats.wellness}
             icon="heart-pulse"
           />
           <View style={styles.riskFooter}>
