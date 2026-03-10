@@ -202,8 +202,8 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                     await AlertRepository.push({
                         type: 'daily_log_inactivity',
                         severity: 'warning',
-                        title: 'ลืมบันทึกข้อมูลหรือเปล่า? 🐾',
-                        desc: `คุณไม่ได้บันทึกข้อมูลรายวันมา ${daysInactive} วันแล้ว มาอัปเดตสุขภาพให้น้องแมวกันเถอะ!`,
+                        title: 'Haven’t logged a daily update?',
+                        desc: `You haven’t logged a daily update for ${daysInactive} days. Let’s update your cat’s health.`,
                         timestamp: new Date().toISOString(),
                     });
                     // Mark as alerted today

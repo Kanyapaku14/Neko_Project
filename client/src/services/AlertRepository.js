@@ -118,6 +118,7 @@ const mapIdentityReviewToLocalAlert = (row) => {
 const AlertRepository = {
     _isInit: false,
     _resolvedReviewIdsKey: `${RESOLVED_REVIEW_IDS_KEY_PREFIX}:anonymous`,
+    _subscription: null,
 
     init() {
         if (this._isInit) return;
@@ -138,6 +139,38 @@ const AlertRepository = {
             userId,
             cameraId: isUuid(storedCameraId) ? storedCameraId : null,
         };
+    },
+
+    _subscribeToRemoteAlerts(userId) {
+        if (this._subscription) {
+            supabase.removeChannel(this._subscription);
+        }
+
+        this._subscription = supabase
+            .channel(`public:alerts:${userId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'alerts',
+                    filter: `owner_id=eq.${userId}`,
+                },
+                async (payload) => {
+                    const row = payload.new;
+                    if (row) {
+                        const localIds = new Set(AlertEngine.getHistory().map((a) => String(a.id)));
+                        if (!localIds.has(String(row.id))) {
+                            await AlertEngine.logEvent(mapDbAlertToLocal(row));
+                        }
+                    }
+                }
+            )
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log(`AlertRepository: Subscribed to realtime alerts for user ${userId}`);
+                }
+            });
     },
 
     async _getResolvedReviewIds() {
@@ -209,10 +242,14 @@ const AlertRepository = {
         }
     },
 
-    async syncFromRemote() {
+    async syncFromRemote(options = {}) {
         try {
+            const { skipIdentityReview = false } = options || {};
             const { userId, cameraId } = await this._getContext();
             if (!userId) return false;
+
+            this._subscribeToRemoteAlerts(userId);
+
             this._resolvedReviewIdsKey = `${RESOLVED_REVIEW_IDS_KEY_PREFIX}:${userId}:${cameraId || 'no_camera'}`;
 
             const localIds = new Set(AlertEngine.getHistory().map((a) => String(a.id)));
@@ -241,7 +278,7 @@ const AlertRepository = {
                 await AlertEngine.logEvent(mapDbAlertToLocal(row));
             }
 
-            if (cameraId) {
+            if (cameraId && !skipIdentityReview) {
                 const recentIso = new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString();
                 const { data: reviews, error: reviewErr } = await supabase
                     .from('ai_cat_identity_review')

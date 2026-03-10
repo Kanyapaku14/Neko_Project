@@ -99,6 +99,35 @@ const dedupeAlerts = (items = []) => {
     return Array.from(map.values());
 };
 
+const isAllowedAlertType = (alert) => {
+    const type = String(alert?.type || '').toLowerCase();
+    return (
+        type === 'dashboard_low_score_60'
+        || type === 'dashboard_low_score_40'
+        || type === 'friend_request'
+        || type === 'friend_accepted'
+        || type === 'post_like'
+        || type === 'daily_log_inactivity'
+    );
+};
+
+const collapseAlerts = (items = []) => {
+    const latestLowScore = new Map();
+    const rest = [];
+    for (const alert of items) {
+        const type = String(alert?.type || '').toLowerCase();
+        if (type === 'dashboard_low_score_60' || type === 'dashboard_low_score_40') {
+            const ts = new Date(alert?.timestamp || 0).getTime();
+            const prev = latestLowScore.get(type);
+            const prevTs = prev ? new Date(prev?.timestamp || 0).getTime() : -1;
+            if (!prev || ts >= prevTs) latestLowScore.set(type, alert);
+            continue;
+        }
+        rest.push(alert);
+    }
+    return [...latestLowScore.values(), ...rest];
+};
+
 const getShortDetail = (alert) => {
     const txt = String(alert?.desc || '').trim();
     return txt || 'Tap to view event details.';
@@ -459,21 +488,24 @@ export default function AlertScreen({ onBack, onNavigate }) {
         // 5. Your backend (e.g., Supabase Edge Function) would listen to inserts on the 'alerts' table
         //    and send a push notification to the user's registered tokens.
 
-
         // Avoid re-sync on every AlertScreen mount which can re-trigger auto-popup.
+        // For list refresh (including likes), sync alerts only and skip identity reviews to avoid popups.
+        AlertRepository.syncFromRemote({ skipIdentityReview: true });
     }, []);
 
     useEffect(() => {
         const list = filterMode === 'deleted' && AlertEngine.getDeletedHistory
             ? AlertEngine.getDeletedHistory()
             : AlertEngine.getHistory();
-        setAlerts(dedupeAlerts(list || []));
+        const allowed = (list || []).filter(isAllowedAlertType);
+        setAlerts(dedupeAlerts(collapseAlerts(allowed)));
 
         const handler = () => {
             const next = filterMode === 'deleted' && AlertEngine.getDeletedHistory
                 ? AlertEngine.getDeletedHistory()
                 : AlertEngine.getHistory();
-            setAlerts(dedupeAlerts([...(next || [])]));
+            const allowedNext = (next || []).filter(isAllowedAlertType);
+            setAlerts(dedupeAlerts([...(collapseAlerts(allowedNext) || [])]));
         };
         AlertEngine.on(AlertEvents.UPDATED, handler);
 

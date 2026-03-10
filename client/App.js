@@ -41,6 +41,7 @@ import CommunityProfile from './src/screens/CommunityProfile';
 import { GlobalAlertQueueProvider } from './src/services/GlobalAlertQueue';
 import AlertRepository from './src/services/AlertRepository';
 import NotificationService from './src/services/NotificationService';
+import AlertEngine from './src/services/AlertEngine';
 import AlertScreen from './src/screens/AlertScreen';
 import EventDetailScreen from './src/screens/EventDetailScreen';
 
@@ -252,13 +253,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    AlertRepository.init();
-    if (session?.user?.id) {
-      NotificationService.setScope(session.user.id);
-      AlertRepository.syncFromRemote();
-    } else {
-      NotificationService.setScope('anonymous');
-    }
+    let cancelled = false;
+    const syncAlerts = async () => {
+      AlertRepository.init();
+      const scope = session?.user?.id || 'anonymous';
+      await AlertEngine.setScope(scope);
+      if (cancelled) return;
+      NotificationService.setScope(scope);
+      if (session?.user?.id) {
+        await AlertRepository.syncFromRemote();
+      }
+    };
+    syncAlerts();
+    return () => { cancelled = true; };
   }, [session?.user?.id]);
 
   // Check if user has profile and cat
