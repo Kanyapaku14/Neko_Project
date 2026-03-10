@@ -10,12 +10,22 @@ export const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingTop: 8,
+        paddingBottom: 12,
+        backgroundColor: 'transparent',
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#00695C',
+        fontSize: 16,
+        fontFamily: 'Inter-Bold',
+        color: '#2F6A62',
+        textAlign: 'center',
+        flex: 1
+    },
+    backButton: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'flex-start'
     },
     content: {
         padding: 16, // Reduced from 16 to fit larger items
