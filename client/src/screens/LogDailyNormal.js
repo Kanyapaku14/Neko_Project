@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { View, Text, TouchableOpacity, TextInput, ScrollView, Image, Alert, Platform } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import supabase from "./config/supabaseClient";
 import { styles } from './Style/LogDailyStyle';
 import AlertEngine from '../services/AlertEngine';
@@ -170,17 +171,20 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
 
     return (
         <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+            <StatusBar style="dark" translucent backgroundColor="transparent" />
             <LinearGradient
                 colors={['#FFFFFF', '#B2E1DB']}
                 locations={[0.42, 1]}
-                style={{ flex: 1, paddingTop: Math.max(insets.top, 20) }}
+                style={{ flex: 1 }}
             >
-                <View style={[styles.header, { paddingHorizontal: 15 }]}>
-                    <TouchableOpacity onPress={onBack} style={{ padding: 5 }}>
-                        <Ionicons name="chevron-back" size={28} color="#000" />
+                <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+                    <TouchableOpacity onPress={onBack} style={styles.backButton}>
+                        <Ionicons name="chevron-back" size={28} color="#333" />
                     </TouchableOpacity>
-                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1A3B34' }}>daily log</Text>
-                    <View style={{ width: 38 }} />
+                    <Text style={styles.headerTitle}>Daily Log</Text>
+                    <TouchableOpacity style={[styles.backButton, { alignItems: 'flex-end' }]}>
+                        <Ionicons name="ellipsis-vertical" size={24} color="transparent" />
+                    </TouchableOpacity>
                 </View>
 
                 <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingBottom: insets.bottom + 20 }]}>
@@ -332,7 +336,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                     </TouchableOpacity>
                 </ScrollView>
             </LinearGradient>
-        </View>
+        </View >
     );
 };
 
@@ -369,17 +373,20 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
 
     return (
         <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+            <StatusBar style="dark" translucent backgroundColor="transparent" />
             <LinearGradient
                 colors={['#FFFFFF', '#FFA869']} // ไล่สีส้มตามดีไซน์
                 locations={[0.42, 1]}
-                style={{ flex: 1, paddingTop: Math.max(insets.top, 20) }}
+                style={{ flex: 1 }}
             >
-                <View style={[styles.header, { paddingHorizontal: 15 }]}>
-                    <TouchableOpacity onPress={onBack} style={{ padding: 5 }}>
-                        <Ionicons name="chevron-back" size={28} color="#000" />
+                <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+                    <TouchableOpacity onPress={onBack} style={styles.backButton}>
+                        <Ionicons name="chevron-back" size={28} color="#333" />
                     </TouchableOpacity>
-                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1A3B34' }}>daily log</Text>
-                    <View style={{ width: 38 }} />
+                    <Text style={styles.headerTitle}>Daily Log</Text>
+                    <TouchableOpacity style={[styles.backButton, { alignItems: 'flex-end' }]}>
+                        <Ionicons name="ellipsis-vertical" size={24} color="transparent" />
+                    </TouchableOpacity>
                 </View>
 
                 <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingBottom: insets.bottom + 20 }]}>
@@ -533,7 +540,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                     </TouchableOpacity>
                 </ScrollView>
             </LinearGradient>
-        </View>
+        </View >
     );
 };
 
