@@ -292,12 +292,44 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
 
         {aiRecord.status === 'done' && aiRecord.ai_result && (
           <TouchableOpacity
-            style={{ marginTop: 12 }}
+            style={{
+              position: 'absolute',
+              bottom: -15,
+              left: -5,
+              flexDirection: 'row',
+              alignItems: 'flex-end'
+            }}
             onPress={() => onNavigate({ screen: 'AnalysisResult', params: { recordId: aiRecord.id, result: aiRecord.ai_result } })}
+            activeOpacity={0.8}
           >
-            <Text style={{ color: '#147C78', fontSize: 14, textDecorationLine: 'underline', fontWeight: 'bold' }}>
-              อ่านผลลัพธ์ที่วิเคราะห์
-            </Text>
+            <Image
+              source={require('../../assets/catiecorn.png')}
+              style={{
+                width: 70,
+                height: 70,
+                shadowColor: '#FFFFFF',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 1,
+                shadowRadius: 10,
+              }}
+              resizeMode="contain"
+            />
+            <View style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              paddingHorizontal: 8,
+              paddingVertical: 4,
+              borderRadius: 12,
+              marginBottom: 10,
+              marginLeft: -10,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 4,
+            }}>
+              <Text style={{ color: '#147C78', fontSize: 12, fontWeight: 'bold' }}>
+                click me for read more, nya!
+              </Text>
+            </View>
           </TouchableOpacity>
         )}
       </View>
