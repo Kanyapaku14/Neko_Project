@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     SafeAreaView,
     View,
@@ -13,15 +13,26 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import supabase from './config/supabaseClient';
 
-export default function ResetPasswordScreen({ onComplete }) {
+export default function ResetPasswordScreen({ onComplete, onBack, initialEmail }) {
+    const [email, setEmail] = useState('');
+    const [token, setToken] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
 
+    useEffect(() => {
+        if (!email && initialEmail) {
+            setEmail(String(initialEmail));
+        }
+    }, [email, initialEmail]);
+
     const handleReset = async () => {
-        if (!password || !confirmPassword) {
-            Alert.alert('แจ้งเตือน', 'กรุณากรอกรหัสผ่านให้ครบถ้วน');
+        const cleanEmail = email.trim().toLowerCase();
+        const cleanToken = token.trim();
+
+        if (!cleanEmail || !cleanToken || !password || !confirmPassword) {
+            Alert.alert('แจ้งเตือน', 'กรุณากรอก Email, Token และรหัสผ่านให้ครบถ้วน');
             return;
         }
         if (password.length < 6) {
@@ -35,6 +46,17 @@ export default function ResetPasswordScreen({ onComplete }) {
 
         setLoading(true);
         try {
+            const { error: verifyError } = await supabase.auth.verifyOtp({
+                email: cleanEmail,
+                token: cleanToken,
+                type: 'recovery',
+            });
+
+            if (verifyError) {
+                Alert.alert('Error', verifyError.message);
+                return;
+            }
+
             const { error } = await supabase.auth.updateUser({ password });
 
             if (error) {
@@ -58,6 +80,13 @@ export default function ResetPasswordScreen({ onComplete }) {
         <SafeAreaView style={styles.safeArea}>
             <StatusBar style="auto" />
 
+            {/* Back Button */}
+            {onBack && (
+                <TouchableOpacity style={styles.backButton} onPress={onBack}>
+                    <Text style={styles.backText}>{'< ย้อนกลับ'}</Text>
+                </TouchableOpacity>
+            )}
+
             <View style={styles.container}>
                 {/* Logo */}
                 <View style={styles.headerContainer}>
@@ -74,6 +103,41 @@ export default function ResetPasswordScreen({ onComplete }) {
                 <Text style={styles.title}>ตั้งรหัสผ่านใหม่</Text>
                 <Text style={styles.subtitle}>กรอกรหัสผ่านใหม่ที่ต้องการ (อย่างน้อย 6 ตัวอักษร)</Text>
 
+                {/* Email */}
+                <View style={styles.inputGroup}>
+                    <View style={styles.labelRow}>
+                        <Text style={styles.label}>Email</Text>
+                        <Text style={styles.required}> *</Text>
+                    </View>
+                    <TextInput
+                        style={styles.input}
+                        value={email}
+                        onChangeText={setEmail}
+                        placeholder="กรอกอีเมลที่ใช้สมัคร"
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        editable={!loading}
+                        autoFocus
+                    />
+                </View>
+
+                {/* Reset Token */}
+                <View style={styles.inputGroup}>
+                    <View style={styles.labelRow}>
+                        <Text style={styles.label}>Reset Token</Text>
+                        <Text style={styles.required}> *</Text>
+                    </View>
+                    <TextInput
+                        style={styles.input}
+                        value={token}
+                        onChangeText={setToken}
+                        placeholder="กรอก token จากอีเมล"
+                        autoCapitalize="none"
+                        keyboardType="number-pad"
+                        editable={!loading}
+                    />
+                </View>
+
                 {/* New Password */}
                 <View style={styles.inputGroup}>
                     <View style={styles.labelRow}>
@@ -86,7 +150,7 @@ export default function ResetPasswordScreen({ onComplete }) {
                         onChangeText={setPassword}
                         placeholder="กรอกรหัสผ่านใหม่"
                         secureTextEntry={!showPassword}
-                        autoFocus
+                        editable={!loading}
                     />
                 </View>
 
@@ -102,6 +166,7 @@ export default function ResetPasswordScreen({ onComplete }) {
                         onChangeText={setConfirmPassword}
                         placeholder="กรอกรหัสผ่านอีกครั้ง"
                         secureTextEntry={!showPassword}
+                        editable={!loading}
                     />
                 </View>
 
@@ -136,6 +201,16 @@ const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
         backgroundColor: '#fff',
+    },
+    backButton: {
+        paddingHorizontal: 24,
+        paddingTop: 16,
+        paddingBottom: 8,
+    },
+    backText: {
+        fontSize: 15,
+        color: '#16A085',
+        fontWeight: '500',
     },
     container: {
         flex: 1,

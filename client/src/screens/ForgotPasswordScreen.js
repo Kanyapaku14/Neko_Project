@@ -11,10 +11,9 @@ import {
     ActivityIndicator,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import * as Linking from 'expo-linking';
 import supabase from './config/supabaseClient';
 
-export default function ForgotPasswordScreen({ onBack }) {
+export default function ForgotPasswordScreen({ onBack, onGoToResetPassword }) {
     const [email, setEmail] = useState('');
     const [loading, setLoading] = useState(false);
     const [sent, setSent] = useState(false);
@@ -36,10 +35,7 @@ export default function ForgotPasswordScreen({ onBack }) {
             // Linking.createURL generates:
             //   Expo Go  → exp://192.168.x.x:8081/--/reset-password
             //   Standalone build → nekoapp://reset-password
-            const redirectTo = Linking.createURL('reset-password');
-            const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-                redirectTo,
-            });
+            const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
 
             if (error) {
                 Alert.alert('Error', error.message);
@@ -121,6 +117,13 @@ export default function ForgotPasswordScreen({ onBack }) {
                             <Text style={styles.emailHighlight}>{email}</Text>
                             {'\n\n'}กรุณาตรวจสอบอีเมลของคุณ แล้วกดลิงก์เพื่อตั้งรหัสผ่านใหม่
                         </Text>
+
+                        <TouchableOpacity
+                            style={styles.button}
+                            onPress={() => onGoToResetPassword && onGoToResetPassword(email.trim().toLowerCase())}
+                        >
+                            <Text style={styles.buttonText}>Reset Password</Text>
+                        </TouchableOpacity>
 
                         <TouchableOpacity style={styles.button} onPress={onBack}>
                             <Text style={styles.buttonText}>กลับหน้า Sign In</Text>
