@@ -214,11 +214,24 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
     ];
 
     return (
-      <View style={{ marginBottom: 20 }}>
+      <View style={{
+        marginBottom: 20,
+        backgroundColor: '#ffffff',
+        borderRadius: 16,
+        padding: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 3,
+        borderWidth: 0.5,
+        borderColor: '#E2E8F0',
+        width: '100%'
+      }}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Image
             source={{ uri: aiRecord.image_face_url || aiRecord.image_body_url || aiRecord.image_poop_url || aiRecord.image_vomit_url }}
-            style={{ width: 140, height: 140, borderRadius: 16 }}
+            style={{ width: 130, height: 140, borderRadius: 12 }}
             resizeMode="cover"
           />
           <View style={{
@@ -235,7 +248,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
             shadowOpacity: 0.05,
             shadowRadius: 4,
             elevation: 2,
-            borderWidth: 1,
+            borderWidth: 0.5,
             borderColor: '#F0F0F0'
           }}>
             {items.map((item) => {
