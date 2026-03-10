@@ -7,5 +7,9 @@ export const CAMERA_API_BASE = normalizeBase(
 );
 
 export const CAMERA_STREAM_QUERY = 'fps=12&quality=52&width=720';
-export const CAMERA_STREAM_URL = `${CAMERA_API_BASE}/api/video_feed_raw`;
+export const CAMERA_STREAM_URL_RAW = `${CAMERA_API_BASE}/api/video_feed_raw`;
+export const CAMERA_STREAM_URL_MODEL = `${CAMERA_API_BASE}/api/video_feed_model`;
+
+// Default app stream should be raw/live
+export const CAMERA_STREAM_URL = CAMERA_STREAM_URL_RAW;
 

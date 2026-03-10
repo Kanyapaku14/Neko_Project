@@ -13,7 +13,8 @@ const normalizeBehavior = (value) => {
   if (['eat', 'eating', 'food', 'feeding'].includes(v)) return 'eat';
   if (['litter', 'toilet', 'toileting', 'urine', 'stool'].includes(v)) return 'litter';
   if (['sleep', 'rest', 'resting'].includes(v)) return 'sleep';
-  if (['abnormal', 'warning', 'critical'].includes(v)) return 'abnormal';
+  if (['abnormal', 'warning', 'critical', 'vomiting', 'vomit', 'barf', 'head_pressing', 'head pressing'].includes(v)) return 'abnormal';
+  if (['grooming', 'licking', 'licking_fur'].includes(v)) return 'activity';
   return 'activity';
 };
 
@@ -34,7 +35,8 @@ const hourBinIndex = (iso) => {
   return 3;
 };
 
-export default function useCameraData(session, cameraStatus, selectedCatId = null) {
+export default function useCameraData(session, cameraStatus, selectedCatId = null, options = {}) {
+  const cameraOnly = options?.cameraOnly === true;
   const [data, setData] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
@@ -46,13 +48,18 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
       litter: 0,
       activity: [0, 0, 0, 0, 0],
       posture: {
-        abnormal: { percent: 0, name: 'None' },
-        normal: { percent: 100, name: 'Normal' }
+        abnormal: { percent: 0, name: cameraOnly ? 'No Data' : 'None' },
+        normal: { percent: cameraOnly ? 0 : 100, name: cameraOnly ? 'No Data' : 'Normal' }
       },
       behaviorAnalytics: {
-        energy: { active: 0, resting: 100 },
+        energy: { active: 0, resting: cameraOnly ? 0 : 100 },
         routine: { score: 0, status: 'No Data' },
         wellness: { score: 0, status: 'No Data' }
+      },
+      meta: {
+        source: 'none',
+        hasCameraDetections: false,
+        lastDetectedAt: null,
       },
       settings: { monitoringMode: 'multi', selectedCats: [] },
       recentActivities: [],
@@ -114,7 +121,7 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
                 .eq('summary_date', today),
               supabase
                 .from('ai_cat_events')
-                .select('id, cat_id, camera_id, behavior_label, confidence, abnormal, occurred_at')
+                .select('id, cat_id, camera_id, behavior_label, behavior_detail, confidence, abnormal, occurred_at')
                 .eq('camera_id', storedCameraId)
                 .gte('occurred_at', dayStartIso)
                 .order('occurred_at', { ascending: false })
@@ -128,6 +135,12 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
 
               if (aiEvents.length > 0 || aiSummaries.length > 0) {
                 usedAiData = true;
+                const lastDetectedAt = aiEventsAll[0]?.occurred_at || null;
+                newData.meta = {
+                  source: 'camera',
+                  hasCameraDetections: aiEvents.length > 0,
+                  lastDetectedAt,
+                };
 
                 const bins = [0, 0, 0, 0];
                 let eatCount = 0;
@@ -150,6 +163,28 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
                   if (behavior === 'abnormal' || e.abnormal === true) abnormalCount += 1;
                   if (e.cat_id) detectedCatIds.add(e.cat_id);
                 });
+
+                // Over-capacity: detected cats exceed the number registered in the account
+                const allCatIds = aiEventsAll.map((e) => e?.cat_id).filter(Boolean);
+                const uniqueAllCatIds = new Set(allCatIds);
+                const observedCount = uniqueAllCatIds.size;
+                const allowedCount = alertCatIds.length;
+                if (allowedCount > 0 && observedCount > allowedCount) {
+                  const unknownIds = [...uniqueAllCatIds].filter((cid) => !alertCatIds.includes(cid));
+                  const dedupeKey = `over_capacity:${storedCameraId || 'unknown'}:${toLocalDate()}`;
+                  const details = unknownIds.length > 0
+                    ? `Unknown IDs: ${unknownIds.slice(0, 3).map((id) => String(id).slice(0, 6)).join(', ')}`
+                    : '';
+                  AlertEngine.logEvent({
+                    type: 'camera_over_capacity',
+                    severity: 'warning',
+                    title: 'More cats detected than registered',
+                    desc: `Detected ${observedCount} cat(s) but the account has ${allowedCount}. Please verify camera assignment.`,
+                    details,
+                    dedupeKey,
+                    cooldownMs: 10 * 60 * 1000,
+                  });
+                }
 
                 // à¸à¸£à¸“à¸µ DB à¸¡à¸µ cat_id à¸—à¸µà¹ˆ events à¸šà¸­à¸à¸§à¹ˆà¸²à¹„à¸¡à¹ˆà¹ƒà¸Šà¹ˆà¹à¸¡à¸§à¸‚à¸­à¸‡ user
                 const unknownCatEvents = aiEventsAll.filter((e) => e.cat_id && !alertCatIds.includes(e.cat_id));
@@ -334,8 +369,16 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
                 };
 
                 // à¸ªà¸£à¹‰à¸²à¸‡ recentActivities à¸”à¹‰à¸§à¸¢ icon/color à¸—à¸µà¹ˆà¸–à¸¹à¸à¸•à¹‰à¸­à¸‡ à¸„à¸£à¸šà¸—à¸¸à¸ behavior
-                const behaviorDisplay = (b) => {
-                  switch (normalizeBehavior(b)) {
+                const behaviorDisplay = (b, detail) => {
+                  const raw = String(b || '').toLowerCase();
+                  const det = String(detail || '').toLowerCase();
+                  const hint = det || raw;
+                  if (hint === 'head_pressing' || hint === 'head pressing') return { label: 'Head Pressing', icon: 'alert', color: '#EF4444' };
+                  if (raw === 'grooming') return { label: 'Grooming', icon: 'cat', color: '#4DB6AC' };
+                  if (raw === 'vomiting' || raw === 'vomit' || raw === 'barf') return { label: 'Vomiting', icon: 'emoticon-sick', color: '#EF4444' };
+                  if (det === 'grooming') return { label: 'Grooming', icon: 'cat', color: '#4DB6AC' };
+                  if (det === 'vomiting' || det === 'vomit' || det === 'barf') return { label: 'Vomiting', icon: 'emoticon-sick', color: '#EF4444' };
+                  switch (normalizeBehavior(raw)) {
                     case 'eat': return { label: 'Eating', icon: 'food-apple', color: '#81C784' };
                     case 'litter': return { label: 'Litter Box', icon: 'emoticon-poop', color: '#BA68C8' };
                     case 'sleep': return { label: 'Sleeping', icon: 'sleep', color: '#90A4AE' };
@@ -344,7 +387,7 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
                   }
                 };
                 newData.recentActivities = aiEventsAll.slice(0, 8).map((e, idx) => {
-                  const disp = behaviorDisplay(e.behavior_label);
+                  const disp = behaviorDisplay(e.behavior_label, e.behavior_detail);
                   return {
                     id: e.id || `evt_${idx}`,
                     type: disp.label,
@@ -358,7 +401,7 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
           }
 
           // Fallback: previous local daily_logs analytics if AI tables are not populated yet
-          if (!usedAiData && catIds.length > 0) {
+          if (!usedAiData && !cameraOnly && catIds.length > 0) {
             const { data: logs, error: logsError } = await supabase
               .from('daily_logs')
               .select(`
@@ -425,7 +468,7 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
           if (!usedAiData && !usedFallbackData) {
             newData.recentActivities = [];
             newData.behaviorAnalytics = {
-              energy: { active: 0, resting: 100 },
+              energy: { active: 0, resting: cameraOnly ? 0 : 100 },
               routine: { score: 0, status: 'No Data' },
               wellness: { score: 0, status: 'No Data' },
             };
@@ -433,8 +476,8 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
             newData.food = 0;
             newData.litter = 0;
             newData.posture = {
-              normal: { percent: 100, name: 'No Data' },
-              abnormal: { percent: 0, name: 'None' },
+              normal: { percent: cameraOnly ? 0 : 100, name: 'No Data' },
+              abnormal: { percent: 0, name: cameraOnly ? 'No Data' : 'None' },
             };
           }
         }
