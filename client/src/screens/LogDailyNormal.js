@@ -176,8 +176,8 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                 style={{ flex: 1, paddingTop: Math.max(insets.top, 20) }}
             >
                 <View style={[styles.header, { paddingHorizontal: 15 }]}>
-                    <TouchableOpacity onPress={onBack} style={{ padding: 5 }}>
-                        <Ionicons name="chevron-back" size={28} color="#000" />
+                    <TouchableOpacity onPress={onBack} style={styles.iconBtn}>
+                        <Ionicons name="chevron-back" size={24} color="#37474F" />
                     </TouchableOpacity>
                     <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1A3B34' }}>daily log</Text>
                     <View style={{ width: 38 }} />
@@ -375,8 +375,8 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                 style={{ flex: 1, paddingTop: Math.max(insets.top, 20) }}
             >
                 <View style={[styles.header, { paddingHorizontal: 15 }]}>
-                    <TouchableOpacity onPress={onBack} style={{ padding: 5 }}>
-                        <Ionicons name="chevron-back" size={28} color="#000" />
+                    <TouchableOpacity onPress={onBack} style={styles.iconBtn}>
+                        <Ionicons name="chevron-back" size={24} color="#37474F" />
                     </TouchableOpacity>
                     <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1A3B34' }}>daily log</Text>
                     <View style={{ width: 38 }} />
