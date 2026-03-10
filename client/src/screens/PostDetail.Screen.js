@@ -18,7 +18,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 const { width: screenWidth } = Dimensions.get('window');
-// import { currentUser } from "../utils/auth"; // ❌ Removed
+import supabase from "./config/supabaseClient";
 
 const formatTime = (time) => {
   if (!time || isNaN(time)) return "now";
@@ -109,14 +109,43 @@ export default function PostDetailScreen({
     if (onDeleteComment) onDeleteComment(post.id, id);
   };
 
-  const handleAddFriend = () => {
+  const handleAddFriend = async () => {
     if (friendAdded) return;
-    setFriendAdded(true);
-    Alert.alert(
-      "ส่งคำขอเป็นเพื่อนแล้ว! 🎉",
-      `ส่งคำขอไปยัง ${post.user.name} เรียบร้อย`,
-      [{ text: "ตกลง" }]
-    );
+    try {
+      // 1. ตรวจสอบก่อนว่าเคยส่งไปหรือยัง
+      const { data: existing, error: errCheck } = await supabase
+        .from('friends')
+        .select('id')
+        .match({ user_id: currentUserId, friend_id: post.user.id })
+        .single();
+
+      if (existing) {
+        setFriendAdded(true);
+        Alert.alert("Already Sent", `You have already sent a request to ${post.user.name}.`);
+        return;
+      }
+
+      // 2. ถ้ายังไม่ส่ง ให้เพิ่มลง friends
+      const { error } = await supabase
+        .from('friends')
+        .insert({
+          user_id: currentUserId,
+          friend_id: post.user.id,
+          status: 'pending'
+        });
+
+      if (error) throw error;
+
+      setFriendAdded(true);
+      Alert.alert(
+        "ส่งคำขอเป็นเพื่อนแล้ว! 🎉",
+        `ส่งคำขอไปยัง ${post.user.name} เรียบร้อย`,
+        [{ text: "ตกลง" }]
+      );
+    } catch (e) {
+      console.log("Add friend error:", e);
+      Alert.alert("Error", "Could not send friend request: " + e.message);
+    }
   };
 
   return (

@@ -230,13 +230,29 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                 setFriendsList([]);
             }
 
-            // 2) Fetch Pending Outgoing Requests (Only sensible if viewing our own profile, but we can show it generally)
+            // 2) Fetch Pending Requests (Outgoing + Incoming)
             if (!isReadyOnly) {
-                const { data: pendingRows } = await supabase.from("friends").select("friend_id").eq("user_id", profileId).eq("status", "pending");
-                if (pendingRows && pendingRows.length > 0) {
-                    const pendingIds = pendingRows.map(r => r.friend_id);
-                    const { data: pendingProfiles } = await supabase.from("profiles").select("id, name, avatar_url").in("id", pendingIds);
-                    setPendingList(pendingProfiles || []);
+                // Outgoing
+                const { data: pendingOut } = await supabase.from("friends").select("friend_id").eq("user_id", profileId).eq("status", "pending");
+                // Incoming
+                const { data: pendingIn } = await supabase.from("friends").select("user_id").eq("friend_id", profileId).eq("status", "pending");
+
+                const pendingIds = new Set();
+                if (pendingOut) pendingOut.forEach(r => pendingIds.add(r.friend_id));
+                if (pendingIn) pendingIn.forEach(r => pendingIds.add(r.user_id));
+
+                const pendingIdArr = Array.from(pendingIds);
+
+                if (pendingIdArr.length > 0) {
+                    const { data: pendingProfiles } = await supabase.from("profiles").select("id, name, avatar_url").in("id", pendingIdArr);
+
+                    // Mark profiles so we can potentially show UI differences (Accept/Reject vs Cancel)
+                    const markedProfiles = (pendingProfiles || []).map(p => {
+                        const isIncoming = pendingIn && pendingIn.some(r => r.user_id === p.id);
+                        return { ...p, isIncoming };
+                    });
+
+                    setPendingList(markedProfiles);
                 } else {
                     setPendingList([]);
                 }
@@ -269,6 +285,67 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                 console.log("Error fetching friend score:", e);
                 setUserScore(0);
             }
+        }
+    };
+
+    // ─── Accept & Reject Friend ───
+    const acceptFriend = async (requestorId) => {
+        try {
+            // 1. Update the incoming request (Friend -> Me) to 'accepted'
+            const { error: updateError } = await supabase
+                .from("friends")
+                .update({ status: "accepted" })
+                .match({ user_id: requestorId, friend_id: session.user.id });
+
+            if (updateError) throw updateError;
+
+            // 2. Ensure reciprocal relationship (Me -> Friend) exists and is 'accepted'
+            const { data: existing, error: checkError } = await supabase
+                .from("friends")
+                .select("id")
+                .match({ user_id: session.user.id, friend_id: requestorId })
+                .maybeSingle();
+
+            if (existing) {
+                const { error: revUpdateError } = await supabase
+                    .from("friends")
+                    .update({ status: "accepted" })
+                    .eq("id", existing.id);
+                if (revUpdateError) throw revUpdateError;
+            } else {
+                const { error: insertError } = await supabase
+                    .from("friends")
+                    .insert({
+                        user_id: session.user.id,
+                        friend_id: requestorId,
+                        status: "accepted"
+                    });
+                if (insertError) throw insertError;
+            }
+
+            Alert.alert("Success! 🎉", "You are now friends!");
+            // Refresh friends data
+            fetchFriendsCount();
+            fetchFriendsData();
+        } catch (e) {
+            console.log("Accept error:", e);
+            Alert.alert("Error", `Could not accept request: ${e.message || "Unknown"}`);
+        }
+    };
+
+    const rejectFriend = async (requestorId) => {
+        try {
+            const { error } = await supabase
+                .from("friends")
+                .delete()
+                .match({ user_id: requestorId, friend_id: session.user.id });
+
+            if (error) throw error;
+
+            // Update local state immediately
+            setPendingList(prev => prev.filter(r => r.id !== requestorId));
+        } catch (e) {
+            console.log("Reject error:", e);
         }
     };
 
@@ -961,11 +1038,29 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                                     <View style={styles.resultInfo}>
                                         <Text style={styles.resultName}>{item.name}</Text>
                                     </View>
-                                    <View style={[styles.resultBadge, friendsTab === 'pending' && { backgroundColor: '#FFCC80' }]}>
-                                        <Text style={[styles.resultBadgeText, friendsTab === 'pending' && { color: '#E65100' }]}>
-                                            {friendsTab === 'accepted' ? 'Friend' : 'Pending'}
-                                        </Text>
-                                    </View>
+
+                                    {friendsTab === 'pending' && item.isIncoming ? (
+                                        <View style={styles.requestActions}>
+                                            <TouchableOpacity
+                                                onPress={() => acceptFriend(item.id)}
+                                                style={styles.reqAcceptBtn}
+                                            >
+                                                <Text style={styles.reqAcceptText}>Accept</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                onPress={() => rejectFriend(item.id)}
+                                                style={styles.reqRejectBtn}
+                                            >
+                                                <Text style={styles.reqRejectText}>Reject</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    ) : (
+                                        <View style={[styles.resultBadge, friendsTab === 'pending' && { backgroundColor: '#FFCC80' }]}>
+                                            <Text style={[styles.resultBadgeText, friendsTab === 'pending' && { color: '#E65100' }]}>
+                                                {friendsTab === 'accepted' ? 'Friend' : 'Sent'}
+                                            </Text>
+                                        </View>
+                                    )}
                                 </View>
                             )}
                         />
@@ -1530,8 +1625,37 @@ const styles = StyleSheet.create({
     },
     resultBadgeText: {
         fontSize: 12,
-        fontFamily: "Inter-Bold",
-        color: "#00897B",
+        fontFamily: "Inter-Medium",
+        color: "#26A69A",
+    },
+
+    // ─── Incoming Request Actions ───
+    requestActions: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    reqAcceptBtn: {
+        backgroundColor: "#26A69A",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+    },
+    reqAcceptText: {
+        color: "#FFFFFF",
+        fontFamily: "Inter-Medium",
+        fontSize: 12,
+    },
+    reqRejectBtn: {
+        backgroundColor: "#F5F5F5",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+    },
+    reqRejectText: {
+        color: "#546E7A",
+        fontFamily: "Inter-Medium",
+        fontSize: 12,
     },
     noResult: {
         alignItems: "center",
