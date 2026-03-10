@@ -299,7 +299,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
               flexDirection: 'row',
               alignItems: 'flex-end'
             }}
-            onPress={() => onNavigate({ screen: 'AnalysisResult', params: { recordId: aiRecord.id, result: aiRecord.ai_result } })}
+            onPress={() => onNavigate({ screen: 'AnalysisResult', params: { recordId: aiRecord.id, result: aiRecord.ai_result, isHistory: true } })}
             activeOpacity={0.8}
           >
             <Image
