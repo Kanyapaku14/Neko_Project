@@ -43,7 +43,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
   const [loading, setLoading] = useState(false);
   const [catId, setCatId] = useState(null);
   const [loggedDates, setLoggedDates] = useState([]); // To store dates that have entries
-  const [photos, setPhotos] = useState([]); // To store photos for the selected date
+  const [aiRecord, setAiRecord] = useState(null); // To store AI photo info for selected date
 
 
   // Fetch All Cats first
@@ -110,9 +110,22 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
       if (medicalError) console.error("Error fetching medical events:", medicalError);
       setMedicalEvents(medicalData || []);
 
-      // Disable camera/event photo linkage on Calendar for now.
-      // Keep placeholder UI but do not fetch from ai_cat_identity_review.
-      setPhotos([]);
+      // Fetch AI Photo Check (by user_id and created_at range constraint for the selected day)
+      const nextDate = new Date(selectedDate);
+      nextDate.setDate(nextDate.getDate() + 1);
+      const nextDateString = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
+
+      const { data: aiData, error: aiError } = await supabase
+        .from('ai_photo_checks')
+        .select('*')
+        .eq('user_id', session?.user?.id)
+        .gte('created_at', `${dateString}T00:00:00`)
+        .lt('created_at', `${nextDateString}T00:00:00`)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      setAiRecord(aiData || null);
 
       setLoading(false);
     };
@@ -431,21 +444,31 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
 
                 {/* Photos section for Recorded Log */}
                 <Text style={styles.photosLabel}>Photos</Text>
-                {photos.length > 0 ? (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
-                    {photos.map((photo) => (
-                      <View key={photo.id} style={{ marginRight: 10 }}>
-                        <Image
-                          source={{ uri: photo.snapshot_url }}
-                          style={{ width: 140, height: 140, borderRadius: 16 }}
-                          resizeMode="cover"
-                        />
-                      </View>
-                    ))}
-                  </ScrollView>
+                {aiRecord ? (
+                  <View style={{ marginBottom: 20 }}>
+                    <Image
+                      source={{ uri: aiRecord.image_face_url || aiRecord.image_body_url || aiRecord.image_poop_url || aiRecord.image_vomit_url }}
+                      style={{ width: 140, height: 140, borderRadius: 16 }}
+                      resizeMode="cover"
+                    />
+                    {aiRecord.status === 'done' && aiRecord.ai_result && (
+                      <TouchableOpacity
+                        style={{ marginTop: 8 }}
+                        onPress={() => onNavigate({ screen: 'AnalysisResult', params: { recordId: aiRecord.id, result: aiRecord.ai_result } })}
+                      >
+                        <Text style={{ color: '#147C78', fontSize: 14, textDecorationLine: 'underline', fontWeight: 'bold' }}>
+                          อ่านผลลัพธ์ที่วิเคราะห์
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 ) : (
-                  <TouchableOpacity style={styles.photoPlaceholder}>
+                  <TouchableOpacity
+                    style={styles.photoPlaceholder}
+                    onPress={() => onNavigate({ screen: 'PhotoCheck' })}
+                  >
                     <Ionicons name="camera" size={32} color="#147C78" />
+                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>อัพโหลดรูปภาพเพื่อวิเคราะห์</Text>
                   </TouchableOpacity>
                 )}
 
@@ -501,21 +524,31 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                 )}
 
                 <Text style={styles.photosLabel}>Photos</Text>
-                {photos.length > 0 ? (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
-                    {photos.map((photo) => (
-                      <View key={photo.id} style={{ marginRight: 10 }}>
-                        <Image
-                          source={{ uri: photo.snapshot_url }}
-                          style={{ width: 140, height: 140, borderRadius: 16 }}
-                          resizeMode="cover"
-                        />
-                      </View>
-                    ))}
-                  </ScrollView>
+                {aiRecord ? (
+                  <View style={{ marginBottom: 20 }}>
+                    <Image
+                      source={{ uri: aiRecord.image_face_url || aiRecord.image_body_url || aiRecord.image_poop_url || aiRecord.image_vomit_url }}
+                      style={{ width: 140, height: 140, borderRadius: 16 }}
+                      resizeMode="cover"
+                    />
+                    {aiRecord.status === 'done' && aiRecord.ai_result && (
+                      <TouchableOpacity
+                        style={{ marginTop: 8 }}
+                        onPress={() => onNavigate({ screen: 'AnalysisResult', params: { recordId: aiRecord.id, result: aiRecord.ai_result } })}
+                      >
+                        <Text style={{ color: '#147C78', fontSize: 14, textDecorationLine: 'underline', fontWeight: 'bold' }}>
+                          อ่านผลลัพธ์ที่วิเคราะห์
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 ) : (
-                  <TouchableOpacity style={styles.photoPlaceholder}>
+                  <TouchableOpacity
+                    style={styles.photoPlaceholder}
+                    onPress={() => onNavigate({ screen: 'PhotoCheck' })}
+                  >
                     <Ionicons name="camera" size={32} color="#147C78" />
+                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>อัพโหลดรูปภาพเพื่อวิเคราะห์</Text>
                   </TouchableOpacity>
                 )}
 
