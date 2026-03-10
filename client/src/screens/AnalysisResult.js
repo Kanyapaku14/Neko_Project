@@ -121,14 +121,15 @@ export default function AnalysisResult({ onNavigate, result, recordId }) {
                 {/* Overall Status Card / Image Carousel */}
                 <TouchableOpacity
                     activeOpacity={0.9}
+                    disabled={showImages}
                     onPress={() => {
                         if (showImages) return; // ไม่ให้สลับกลับถ้าแสดงรูปอยู่แล้ว
                         if (images.length === 0) return;
                         setShowImages(true);
                         Animated.timing(fadeAnim, {
                             toValue: 0,
-                            duration: 300,
-                            useNativeDriver: true,
+                            duration: 400, // Smooth transition
+                            useNativeDriver: false, // Must be false for layout/color changes if added later
                         }).start();
                     }}
                 >
@@ -136,10 +137,20 @@ export default function AnalysisResult({ onNavigate, result, recordId }) {
                         backgroundColor: showImages ? '#000' : statusCfg.bg,
                         minHeight: 240,
                         justifyContent: 'center',
-                        padding: showImages ? 0 : 20,
+                        padding: 0, // removed padding here so images reach edges
                         overflow: 'hidden'
                     }]}>
-                        <Animated.View style={{ opacity: fadeAnim, width: '100%', alignItems: 'center', display: showImages ? 'none' : 'flex' }}>
+                        {/* Text Container */}
+                        <Animated.View style={{
+                            opacity: fadeAnim,
+                            width: '100%',
+                            height: '100%',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            position: 'absolute', // sit behind/infront of images
+                            padding: 20,
+                            zIndex: showImages ? 0 : 1
+                        }}>
                             <Ionicons name={statusCfg.icon} size={36} color={statusCfg.text} />
                             <Text style={[styles.overallStatus, { color: statusCfg.text }]}>
                                 {overallStatus}
@@ -149,6 +160,7 @@ export default function AnalysisResult({ onNavigate, result, recordId }) {
                             </Text>
                         </Animated.View>
 
+                        {/* Images Container */}
                         {images.length > 0 && (
                             <Animated.View style={{
                                 opacity: fadeAnim.interpolate({
@@ -156,7 +168,8 @@ export default function AnalysisResult({ onNavigate, result, recordId }) {
                                     outputRange: [1, 0]
                                 }),
                                 width: '100%',
-                                display: showImages ? 'flex' : 'none'
+                                height: 240,
+                                zIndex: showImages ? 1 : 0
                             }}>
                                 <ScrollView
                                     horizontal

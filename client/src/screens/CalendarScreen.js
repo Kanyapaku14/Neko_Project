@@ -43,7 +43,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
   const [loading, setLoading] = useState(false);
   const [catId, setCatId] = useState(null);
   const [loggedDates, setLoggedDates] = useState([]); // To store dates that have entries
-  const [photos, setPhotos] = useState([]); // To store photos for the selected date
+  const [aiRecord, setAiRecord] = useState(null); // To store AI photo info for selected date
 
 
   // Fetch All Cats first
@@ -110,9 +110,22 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
       if (medicalError) console.error("Error fetching medical events:", medicalError);
       setMedicalEvents(medicalData || []);
 
-      // Disable camera/event photo linkage on Calendar for now.
-      // Keep placeholder UI but do not fetch from ai_cat_identity_review.
-      setPhotos([]);
+      // Fetch AI Photo Check (by user_id and created_at range constraint for the selected day)
+      const nextDate = new Date(selectedDate);
+      nextDate.setDate(nextDate.getDate() + 1);
+      const nextDateString = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
+
+      const { data: aiData, error: aiError } = await supabase
+        .from('ai_photo_checks')
+        .select('*')
+        .eq('user_id', session?.user?.id)
+        .gte('created_at', `${dateString}T00:00:00`)
+        .lt('created_at', `${nextDateString}T00:00:00`)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      setAiRecord(aiData || null);
 
       setLoading(false);
     };
@@ -190,6 +203,137 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
       default:
         return { color: '#5856D6', bg: 'rgba(88, 86, 214, 0.1)', icon: 'medical-bag' };
     }
+  };
+
+  const renderAiPhotoSection = (aiRecord) => {
+    const items = [
+      { key: 'face', label: 'Picture Face', url: aiRecord.image_face_url },
+      { key: 'body', label: 'Picture Body', url: aiRecord.image_body_url },
+      { key: 'poop', label: 'Picture Poop', url: aiRecord.image_poop_url },
+      { key: 'vomit', label: 'Picture Vomit', url: aiRecord.image_vomit_url },
+    ];
+
+    return (
+      <View style={{
+        marginBottom: 45,
+        backgroundColor: '#ffffff',
+        borderRadius: 16,
+        padding: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 3,
+        borderWidth: 0.5,
+        borderColor: '#E2E8F0',
+        width: '100%'
+      }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Image
+            source={{ uri: aiRecord.image_face_url || aiRecord.image_body_url || aiRecord.image_poop_url || aiRecord.image_vomit_url }}
+            style={{ width: 130, height: 140, borderRadius: 12 }}
+            resizeMode="cover"
+          />
+          <View style={{
+            flex: 1,
+            marginLeft: 16,
+            height: 140,
+            backgroundColor: '#ffffff',
+            borderRadius: 12,
+            paddingVertical: 12,
+            paddingHorizontal: 16,
+            justifyContent: 'space-between',
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.05,
+            shadowRadius: 4,
+            elevation: 2,
+            borderWidth: 0.5,
+            borderColor: '#F0F0F0'
+          }}>
+            {items.map((item) => {
+              const isUploaded = !!item.url;
+              return (
+                <View key={item.key} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {isUploaded ? (
+                    <Image
+                      source={require('../../assets/foot-print.png')}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        tintColor: '#147C78',
+                      }}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <Image
+                      source={require('../../assets/paw-print.png')}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        tintColor: '#000000ff',
+                      }}
+                      resizeMode="contain"
+                    />
+                  )}
+                  <Text style={{
+                    marginLeft: 12,
+                    fontSize: 13,
+                    fontWeight: isUploaded ? "bold" : "500",
+                    color: isUploaded ? "#147C78" : "#A0AEC0"
+                  }}>
+                    {item.label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        {aiRecord.status === 'done' && aiRecord.ai_result && (
+          <TouchableOpacity
+            style={{
+              position: 'absolute',
+              bottom: -25,
+              left: -15,
+              flexDirection: 'row',
+              alignItems: 'flex-end'
+            }}
+            onPress={() => onNavigate({ screen: 'AnalysisResult', params: { recordId: aiRecord.id, result: aiRecord.ai_result } })}
+            activeOpacity={0.8}
+          >
+            <Image
+              source={require('../../assets/catiecorn.png')}
+              style={{
+                width: 70,
+                height: 70,
+                shadowColor: '#decefaff',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 1,
+                shadowRadius: 10,
+              }}
+              resizeMode="contain"
+            />
+            <View style={{
+              backgroundColor: 'rgba(224, 205, 240, 0.9)',
+              paddingHorizontal: 8,
+              paddingVertical: 4,
+              borderRadius: 12,
+              marginBottom: 10,
+              marginLeft: -10,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 4,
+            }}>
+              <Text style={{ color: '#147C78', fontSize: 12, fontWeight: 'bold' }}>
+                click me for read more, nya!
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
   };
 
   const renderCalendar = () => {
@@ -431,21 +575,15 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
 
                 {/* Photos section for Recorded Log */}
                 <Text style={styles.photosLabel}>Photos</Text>
-                {photos.length > 0 ? (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
-                    {photos.map((photo) => (
-                      <View key={photo.id} style={{ marginRight: 10 }}>
-                        <Image
-                          source={{ uri: photo.snapshot_url }}
-                          style={{ width: 140, height: 140, borderRadius: 16 }}
-                          resizeMode="cover"
-                        />
-                      </View>
-                    ))}
-                  </ScrollView>
+                {aiRecord ? (
+                  renderAiPhotoSection(aiRecord)
                 ) : (
-                  <TouchableOpacity style={styles.photoPlaceholder}>
+                  <TouchableOpacity
+                    style={styles.photoPlaceholder}
+                    onPress={() => onNavigate({ screen: 'PhotoCheck' })}
+                  >
                     <Ionicons name="camera" size={32} color="#147C78" />
+                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>อัพโหลดรูปภาพเพื่อวิเคราะห์</Text>
                   </TouchableOpacity>
                 )}
 
@@ -501,21 +639,15 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                 )}
 
                 <Text style={styles.photosLabel}>Photos</Text>
-                {photos.length > 0 ? (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
-                    {photos.map((photo) => (
-                      <View key={photo.id} style={{ marginRight: 10 }}>
-                        <Image
-                          source={{ uri: photo.snapshot_url }}
-                          style={{ width: 140, height: 140, borderRadius: 16 }}
-                          resizeMode="cover"
-                        />
-                      </View>
-                    ))}
-                  </ScrollView>
+                {aiRecord ? (
+                  renderAiPhotoSection(aiRecord)
                 ) : (
-                  <TouchableOpacity style={styles.photoPlaceholder}>
+                  <TouchableOpacity
+                    style={styles.photoPlaceholder}
+                    onPress={() => onNavigate({ screen: 'PhotoCheck' })}
+                  >
                     <Ionicons name="camera" size={32} color="#147C78" />
+                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>อัพโหลดรูปภาพเพื่อวิเคราะห์</Text>
                   </TouchableOpacity>
                 )}
 
