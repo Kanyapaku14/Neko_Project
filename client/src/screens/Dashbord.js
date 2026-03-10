@@ -69,7 +69,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const isNarrowScreen = screenWidth < 390;
   const radarAnim = useRef(new Animated.Value(0)).current;
   const [currentScore, setCurrentScore] = useState(null);
-  const status = getHealthStatus(currentScore || 100);
+  const statusScore = Number.isFinite(currentScore) ? currentScore : 100;
+  const status = getHealthStatus(statusScore);
 
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -240,18 +241,19 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       setRawLogs(unifiedLogs);
 
       if (unifiedLogs.length > 0) {
+        const logsForCurrentStatus = unifiedLogs.slice(0, 3); // latest 3 days only for current status
         let totalScore = 0;
         let allAlerts = [];
         let totalRedFlags = 0;
 
-        unifiedLogs.forEach(log => {
+        unifiedLogs.forEach((log, idx) => {
           const analysis = analyzeHealthLog(log);
-          totalScore += analysis.score;
+          if (idx < logsForCurrentStatus.length) totalScore += analysis.score;
           allAlerts = [...allAlerts, ...analysis.alerts];
           totalRedFlags += analysis.redFlags;
         });
 
-        const averageScore = Math.round(totalScore / unifiedLogs.length);
+        const averageScore = Math.round(totalScore / logsForCurrentStatus.length);
         setCurrentScore(averageScore);
         // เก็บ alerts ล่าสุดไม่เกิน 3 รายการ (ไม่ซ้ำ)
         setLatestAlerts([...new Set(allAlerts)].slice(0, 4));
@@ -894,9 +896,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                     Level {String(latestAssessment.overall_risk_level || '--').toUpperCase()}
                   </Text>
                   <Text style={styles.inlineMetric}>
-                    Score {Number.isFinite(latestAssessment.overall_risk_score) ? latestAssessment.overall_risk_score : '--'}
-                  </Text>
-                  <Text style={styles.inlineMetric}>
                     Date {latestAssessment.assessment_date || '--'}
                   </Text>
                 </View>
@@ -994,7 +993,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={[styles.metricValue, { color: m.c }]}>{m.t}</Text>
-                      <Text style={styles.metricScoreNum}>{m.value} / 100</Text>
                     </View>
                   </View>
                 ))}
@@ -1663,12 +1661,6 @@ const styles = StyleSheet.create({
   metricValue: {
     fontSize: 12,
     fontWeight: '800',
-  },
-  metricScoreNum: {
-    fontSize: 10,
-    color: '#90A4AE',
-    marginTop: 2,
-    fontWeight: '700',
   },
   chartMiniSurface: {
     borderWidth: 1,

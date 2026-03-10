@@ -149,7 +149,6 @@ export default function CatHealthMeter({ score = 44, centerImageUri = null, cent
           <View style={styles.dashboardCenter}>
             <MaterialCommunityIcons name="cat" size={44} color={status.color} />
             <Text style={[styles.status, { color: status.color }]}>{status.text}</Text>
-            <Text style={[styles.score, { color: status.color }]}>{safeScore}</Text>
           </View>
         )}
 
@@ -204,16 +203,11 @@ const styles = StyleSheet.create({
     resizeMode: "cover",
   },
   status: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: "700",
     letterSpacing: 1,
     marginTop: 2,
-    marginBottom: -4,
-  },
-  score: {
-    fontSize: 36,
-    fontWeight: "800",
-    lineHeight: 40,
+    marginBottom: 0,
   },
   paw: {
     width: 32,
