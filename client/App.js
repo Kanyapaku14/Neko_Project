@@ -68,10 +68,11 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authScreen, setAuthScreen] = useState('Home');
-  const [catId, setCatId] = useState(null);
+	  const [catId, setCatId] = useState(null);
 
-  const [resetPasswordMode, setResetPasswordMode] = useState(false);
-  const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
+	  const [resetPasswordMode, setResetPasswordMode] = useState(false);
+	  const [resetEmail, setResetEmail] = useState('');
+	  const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
   const [profileLoading, setProfileLoading] = useState(false); // ✅ Track if checking profile
   const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null); // null until loaded
   const notificationResponseSubRef = useRef(null);
@@ -311,6 +312,38 @@ export default function App() {
   }
 
 	  const renderScreen = () => {
+	    // Reset password mode (arrived via deep link from email)
+	    // Note: in token-based reset flow, `verifyOtp` creates a session. We must keep showing this screen even if session exists.
+	    if (resetPasswordMode) {
+	      return (
+	        <ResetPasswordScreen
+	          initialEmail={resetEmail}
+	          onComplete={() => {
+	            setResetPasswordMode(false);
+	            setSession(null);
+	            supabase.auth.signOut();
+	            setCurrentScreen('SignIn');
+	          }}
+	        />
+	      );
+	    }
+
+	    if (currentScreen === 'ResetPassword') {
+	      return (
+	        <ResetPasswordScreen
+	          initialEmail={resetEmail}
+	          onBack={() => setCurrentScreen('ForgotPassword')}
+	          onComplete={() => {
+	            setResetPasswordMode(false);
+	            setResetEmail('');
+	            setSession(null);
+	            supabase.auth.signOut();
+	            setCurrentScreen('SignIn');
+	          }}
+	        />
+	      );
+	    }
+
 	    // 1. Session based (if logged in)
 	    if (session) {
 	      // screen can be string or object { screen, params }
@@ -528,37 +561,29 @@ export default function App() {
 	    }
 
 	    // 2. Guest/SignIn flow
-	    // Reset password mode (arrived via deep link from email)
-	    if (resetPasswordMode) {
-	      return (
-	        <ResetPasswordScreen
-	          onComplete={() => {
-	            setResetPasswordMode(false);
-	            setSession(null);
-	            supabase.auth.signOut();
-	            setCurrentScreen('SignIn');
-	          }}
-	        />
-	      );
-	    }
-
 	    return (
 	      <>
 	        {currentScreen === 'SignIn' && (
-          <SignInScreen
-            onNavigate={navigateToSignUp}
-            onForgotPassword={() => setCurrentScreen('ForgotPassword')}
-          />
-        )}
+	          <SignInScreen
+	            onNavigate={navigateToSignUp}
+	            onForgotPassword={() => setCurrentScreen('ForgotPassword')}
+	          />
+	        )}
         {currentScreen === 'SignUp' && (
           <SignUpScreen onNavigate={navigateToSignIn} />
         )}
-        {currentScreen === 'ForgotPassword' && (
-          <ForgotPasswordScreen onBack={() => setCurrentScreen('SignIn')} />
-        )}
-      </>
-    );
-  };
+	        {currentScreen === 'ForgotPassword' && (
+	          <ForgotPasswordScreen
+	            onBack={() => setCurrentScreen('SignIn')}
+	            onGoToResetPassword={(email) => {
+	              setResetEmail(String(email || ''));
+	              setCurrentScreen('ResetPassword');
+	            }}
+	          />
+	        )}
+	      </>
+	    );
+	  };
 
 
   // Wrap everything with SafeAreaProvider here
