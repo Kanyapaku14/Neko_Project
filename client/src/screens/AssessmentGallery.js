@@ -13,11 +13,11 @@ const GRID_PADDING = 16;
 
 // Helper: Get color based on overall risk score
 const getRiskColor = (score) => {
-    if (score === null || score === undefined || score === 'No Data') return '#78909C';
-    if (score >= 80) return '#059669'; // Green - Excellent (Darker)
-    if (score >= 60) return '#2563EB'; // Blue - Good (Darker)
-    if (score >= 40) return '#D97706'; // Orange - Fair (Darker)
-    return '#DC2626'; // Red - Attention (Darker)
+    if (score === null || score === undefined || score === 'No Data') return '#64748B';
+    if (score >= 80) return '#059669'; // Green
+    if (score >= 60) return '#2563EB'; // Blue
+    if (score >= 40) return '#EA580C'; // Orange
+    return '#E11D48'; // Red/Rose darker
 };
 
 const getRiskLabel = (score) => {
@@ -160,22 +160,22 @@ export default function AssessmentGallery({ onBack, session, onNavigate }) {
                     onPress={() => handleSelectAssessment(item)}
                     activeOpacity={0.8}
                 >
-                    <View style={[styles.cardIconScoreContainer, { backgroundColor: scoreColor + '20' }]}>
-                        <MaterialCommunityIcons name="heart-pulse" size={24} color={scoreColor} />
-                        <Text style={[styles.cardScoreText, { color: scoreColor }]}>{displayScore}</Text>
+                    <View style={[styles.cardIconScoreContainer, { backgroundColor: scoreColor }]}>
+                        <MaterialCommunityIcons name="heart-pulse" size={24} color="#FFFFFF" />
+                        <Text style={[styles.cardScoreText, { color: '#FFFFFF' }]}>{displayScore}</Text>
                     </View>
 
                     <View style={styles.cardBody}>
                         <Text style={styles.cardStatusText} numberOfLines={1}>{scoreLabel}</Text>
                         <View style={styles.dateRow}>
-                            <Ionicons name="calendar-outline" size={14} color="#3A4F4A" />
+                            <Ionicons name="calendar-outline" size={14} color="#64748B" />
                             <Text style={styles.cardDateText}>{dateStr}</Text>
                             <Text style={styles.cardTimeText}>• {timeStr}</Text>
                         </View>
                     </View>
 
                     <View style={styles.viewBadge}>
-                        <Ionicons name="chevron-forward" size={18} color="#063E3C" />
+                        <Ionicons name="chevron-forward" size={18} color="#64748B" />
                     </View>
                 </TouchableOpacity>
             </Animated.View>
@@ -322,46 +322,51 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     listContent: {
-        padding: GRID_PADDING,
+        padding: 16,
         paddingBottom: 40,
-        gap: 12,
+        gap: 14,
     },
     cardContainer: {
         backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        borderWidth: 1.5,
-        borderColor: '#CFD8D6',
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#F1F5F9',
         overflow: 'hidden',
-        shadowColor: '#0F172A',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.08,
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.05,
         shadowRadius: 10,
-        elevation: 2,
+        elevation: 3,
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 12,
+        padding: 14,
     },
     cardIconScoreContainer: {
-        width: 64,
-        height: 64,
-        borderRadius: 12,
+        width: 60,
+        height: 60,
+        borderRadius: 16,
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+        elevation: 3,
     },
     cardScoreText: {
         fontSize: 16,
-        fontWeight: '800',
-        marginTop: 4,
+        fontWeight: '900',
+        marginTop: 2,
     },
     cardBody: {
         flex: 1,
         justifyContent: 'center',
     },
     cardStatusText: {
-        fontSize: 16,
+        fontSize: 18,
         fontWeight: '800',
-        color: '#1A2924',
+        color: '#0F172A',
         marginBottom: 6,
     },
     dateRow: {
@@ -371,19 +376,21 @@ const styles = StyleSheet.create({
     },
     cardDateText: {
         fontSize: 13,
-        color: '#3A4F4A',
+        color: '#475569',
         fontWeight: '700',
     },
     cardTimeText: {
         fontSize: 13,
-        color: '#5F7671',
+        color: '#64748B',
         fontWeight: '600',
     },
     viewBadge: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: '#E2EBE8',
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#F8FAFC',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
         justifyContent: 'center',
         alignItems: 'center',
         marginLeft: 12,

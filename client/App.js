@@ -435,7 +435,13 @@ export default function App() {
       }
       if (currentScreenName === 'Result') {
         return <ResultScreen
-          onBack={() => setAuthScreen('Home')}
+          onBack={() => {
+            if (screenParams?.source === 'db') {
+              setAuthScreen('AssessmentGallery');
+            } else {
+              setAuthScreen('Home');
+            }
+          }}
           onSave={() => setAuthScreen('Home')}
           onNavigate={(screen, params) => navigateAuth(screen, params)}
           route={{ params: screenParams }}

@@ -679,7 +679,13 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
       </Modal>
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack}><Text style={styles.backArrow}>‹</Text></TouchableOpacity>
+        <TouchableOpacity onPress={onBack} style={{ padding: 4 }}>
+          {loadFromDb ? (
+            <MaterialCommunityIcons name="close" size={26} color="#0C5A58" />
+          ) : (
+            <Text style={styles.backArrow}>‹</Text>
+          )}
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Assessment</Text>
         <View style={{ width: 24 }} />
       </View>
@@ -847,22 +853,24 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
           )}
         </View>
 
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#1abc9c',
-            width: SCREEN_WIDTH - 60,
-            alignSelf: 'center',
-            paddingVertical: 14,
-            borderRadius: 12,
-            alignItems: 'center',
-            marginTop: 20,
-            marginBottom: 20,
-          }}
-          onPress={handleSaveAssessment}
-          activeOpacity={0.8}
-        >
-          <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Save Assessment</Text>
-        </TouchableOpacity>
+        {!loadFromDb && (
+          <TouchableOpacity
+            style={{
+              backgroundColor: '#1abc9c',
+              width: SCREEN_WIDTH - 60,
+              alignSelf: 'center',
+              paddingVertical: 14,
+              borderRadius: 12,
+              alignItems: 'center',
+              marginTop: 20,
+              marginBottom: 20,
+            }}
+            onPress={handleSaveAssessment}
+            activeOpacity={0.8}
+          >
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Save Assessment</Text>
+          </TouchableOpacity>
+        )}
 
       </ScrollView>
     </LinearGradient >
