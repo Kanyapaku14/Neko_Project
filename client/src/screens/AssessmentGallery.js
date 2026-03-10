@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Animated, Easing, useWindowDimensions, DeviceEventEmitter } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Animated, Easing, useWindowDimensions, DeviceEventEmitter, Image } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -156,26 +156,32 @@ export default function AssessmentGallery({ onBack, session, onNavigate }) {
         return (
             <Animated.View style={{ opacity: itemOpacity, transform: [{ translateY: itemTranslateY }] }}>
                 <TouchableOpacity
-                    style={styles.cardContainer}
+                    style={styles.cardContainerWrapper}
                     onPress={() => handleSelectAssessment(item)}
                     activeOpacity={0.8}
                 >
-                    <View style={[styles.cardIconScoreContainer, { backgroundColor: scoreColor }]}>
-                        <MaterialCommunityIcons name="heart-pulse" size={24} color="#FFFFFF" />
-                        <Text style={[styles.cardScoreText, { color: '#FFFFFF' }]}>{displayScore}</Text>
-                    </View>
-
-                    <View style={styles.cardBody}>
-                        <Text style={styles.cardStatusText} numberOfLines={1}>{scoreLabel}</Text>
-                        <View style={styles.dateRow}>
-                            <Ionicons name="calendar-outline" size={14} color="#64748B" />
-                            <Text style={styles.cardDateText}>{dateStr}</Text>
-                            <Text style={styles.cardTimeText}>• {timeStr}</Text>
+                    {/* Cat Icon with transparent background */}
+                    <View style={styles.cardCatContainer}>
+                        <View style={styles.catImageWrapper}>
+                            <Image source={require('../../assets/cat.png')} style={styles.catImage} resizeMode="contain" />
+                            <Text style={styles.cardScoreTextOverlay}>{displayScore}</Text>
                         </View>
                     </View>
 
-                    <View style={styles.viewBadge}>
-                        <Ionicons name="chevron-forward" size={18} color="#64748B" />
+                    {/* Inner white info pill */}
+                    <View style={styles.cardBodyContainer}>
+                        <View style={styles.cardBody}>
+                            <Text style={styles.cardStatusText} numberOfLines={1}>{scoreLabel}</Text>
+                            <View style={styles.dateRow}>
+                                <Ionicons name="calendar-outline" size={12} color="#64748B" />
+                                <Text style={styles.cardDateText}>{dateStr}</Text>
+                                <Text style={styles.cardTimeText}>• {timeStr}</Text>
+                            </View>
+                        </View>
+
+                        <View style={styles.viewBadge}>
+                            <Ionicons name="chevron-forward" size={16} color="#94A3B8" />
+                        </View>
                     </View>
                 </TouchableOpacity>
             </Animated.View>
@@ -324,76 +330,96 @@ const styles = StyleSheet.create({
     listContent: {
         padding: 16,
         paddingBottom: 40,
-        gap: 14,
+        gap: 16,
     },
-    cardContainer: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: '#F1F5F9',
-        overflow: 'hidden',
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-        elevation: 3,
+    cardContainerWrapper: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 14,
+        backgroundColor: 'transparent', // Changed from #ffffffff to transparent (opacity 0)
+        paddingVertical: 10,
+        marginBottom: 16, // Space between cards
     },
-    cardIconScoreContainer: {
-        width: 60,
-        height: 60,
-        borderRadius: 16,
+    // Removed cardShadowBox
+    cardCatContainer: {
+        width: 72,
+        height: 72,
+        marginRight: 10, // Gap between cat icon and info card
+        zIndex: 2,
+    },
+    catImageWrapper: {
+        width: 72,
+        height: 72,
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.15,
-        shadowRadius: 6,
-        elevation: 3,
+        overflow: 'hidden',
     },
-    cardScoreText: {
-        fontSize: 16,
+    catImage: {
+        width: 70,
+        height: 70,
+        position: 'absolute',
+        top: -2, // Adjusted so cat sits properly
+    },
+    cardScoreTextOverlay: {
+        fontSize: 18,
         fontWeight: '900',
-        marginTop: 2,
+        color: '#FFFFFF',
+        position: 'absolute',
+        bottom: 8,
+        letterSpacing: 0.5,
+        textShadowColor: 'rgba(0,0,0,0.4)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
+    },
+    cardBodyContainer: {
+        flex: 1,
+        backgroundColor: '#FFFFFF', // Pure white inner pill
+        borderRadius: 14, // Milder curves on the inner card
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        height: 58,
+        // Moved the shadow here to ensure the rounded rectangle has a proper shadow
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+        elevation: 3,
     },
     cardBody: {
         flex: 1,
         justifyContent: 'center',
     },
     cardStatusText: {
-        fontSize: 18,
-        fontWeight: '800',
-        color: '#0F172A',
-        marginBottom: 6,
+        fontSize: 20, // slightly bigger status
+        fontWeight: '900',
+        color: '#1E293B', // Solid dark slate
+        marginBottom: 2,
     },
     dateRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: 4,
     },
     cardDateText: {
-        fontSize: 13,
-        color: '#475569',
-        fontWeight: '700',
+        fontSize: 12,
+        color: '#64748B', // Solid slate gray
+        fontWeight: '800',
     },
     cardTimeText: {
-        fontSize: 13,
+        fontSize: 12,
         color: '#64748B',
-        fontWeight: '600',
+        fontWeight: '800',
     },
     viewBadge: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: '#F8FAFC',
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        borderWidth: 1.5,
+        borderColor: '#CBD5E1',
         justifyContent: 'center',
         alignItems: 'center',
-        marginLeft: 12,
+        marginLeft: 4,
     },
     emptyState: {
         flex: 1,
