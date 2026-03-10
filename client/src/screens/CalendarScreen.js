@@ -29,11 +29,17 @@ const MONTHS = [
 export default function CalendarScreen({ onNavigate, session, initialDate }) {
   // ถ้ามี initialDate ให้ใช้เป็นวันที่เริ่มต้น ไม่งั้นใช้วันนี้
   const parseInitialDate = () => {
+    let d;
     if (initialDate) {
-      const d = new Date(initialDate + 'T00:00:00'); // Force local time
-      return isNaN(d.getTime()) ? new Date() : d;
+      d = new Date(initialDate + 'T00:00:00'); // Force local time
+      if (isNaN(d.getTime())) {
+        d = new Date();
+      }
+    } else {
+      d = new Date();
     }
-    return new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
   };
 
   const [currentDate, setCurrentDate] = useState(parseInitialDate);

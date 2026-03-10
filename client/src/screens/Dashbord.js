@@ -77,7 +77,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const isNarrowScreen = screenWidth < 390;
   const radarAnim = useRef(new Animated.Value(0)).current;
   const [currentScore, setCurrentScore] = useState(null);
-  const status = getHealthStatus(currentScore || 100);
+  const statusScore = Number.isFinite(currentScore) ? currentScore : 100;
+  const status = getHealthStatus(statusScore);
 
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -170,43 +171,53 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     persistHealthCache();
   }, [session?.user?.id, catDetails?.id, currentScore]);
 
-  const notifyLowScoreIfNeeded = async (score, catId) => {
+  const notifyLowScoreIfNeeded = async (score, catId, catName) => {
     if (!session?.user?.id || !catId) return;
     if (!Number.isFinite(score)) return;
     const today = new Date().toISOString().slice(0, 10);
     const key = `dashboard_low_score_alert:${session.user.id}:${catId}`;
     if (lowScoreAlertInFlight.has(key)) return;
     lowScoreAlertInFlight.add(key);
-    const lastSent = await AsyncStorage.getItem(key);
-    const lastLevelKey = `${key}:level`;
-    const lastLevel = await AsyncStorage.getItem(lastLevelKey);
-    const lastDateKey = `${key}:date`;
-    const lastDate = await AsyncStorage.getItem(lastDateKey);
+    const lastDateKey60 = `${key}:date:60`;
+    const lastDateKey40 = `${key}:date:40`;
+    const lastDate60 = await AsyncStorage.getItem(lastDateKey60);
+    const lastDate40 = await AsyncStorage.getItem(lastDateKey40);
 
     try {
       if (score >= 60) {
-        // reset level when user recovers
-        await AsyncStorage.multiRemove([lastLevelKey, lastDateKey]);
+        // reset both levels when user recovers to 60+
+        await AsyncStorage.multiRemove([lastDateKey60, lastDateKey40]);
         return;
+      }
+
+      if (score >= 40) {
+        // reset 40-level when user recovers to 40+
+        await AsyncStorage.removeItem(lastDateKey40);
       }
 
       const level = score < 40 ? '40' : '60';
       const type = level === '40' ? 'dashboard_low_score_40' : 'dashboard_low_score_60';
       const severity = level === '40' ? 'critical' : 'warning';
-      if (lastLevel === level && lastDate === today) return;
+      if (level === '60' && lastDate60 === today) return;
+      if (level === '40' && lastDate40 === today) return;
 
+      if (level === '40' && AlertEngine.resolveActiveAlerts) {
+        await AlertEngine.resolveActiveAlerts('dashboard_low_score_40');
+      }
       await AlertEngine.logEvent({
         id: uuidv4(),
         type,
         severity,
         title: level === '40' ? 'Health score is very low' : 'Health score is low',
         desc: `Your dashboard score dropped to ${score}.`,
+        catId,
+        catName: catName || null,
         timestamp: new Date().toISOString(),
         dedupeKey: `${key}:${level}`,
-        cooldownMs: 6 * 60 * 60 * 1000,
+        cooldownMs: 0,
       });
-      await AsyncStorage.setItem(lastLevelKey, level);
-      await AsyncStorage.setItem(lastDateKey, today);
+      if (level === '60') await AsyncStorage.setItem(lastDateKey60, today);
+      if (level === '40') await AsyncStorage.setItem(lastDateKey40, today);
     } finally {
       lowScoreAlertInFlight.delete(key);
     }
@@ -290,20 +301,21 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       setRawLogs(unifiedLogs);
 
       if (unifiedLogs.length > 0) {
+        const logsForCurrentStatus = unifiedLogs.slice(0, 3); // latest 3 days only for current status
         let totalScore = 0;
         let allAlerts = [];
         let totalRedFlags = 0;
 
-        unifiedLogs.forEach(log => {
+        unifiedLogs.forEach((log, idx) => {
           const analysis = analyzeHealthLog(log);
-          totalScore += analysis.score;
+          if (idx < logsForCurrentStatus.length) totalScore += analysis.score;
           allAlerts = [...allAlerts, ...analysis.alerts];
           totalRedFlags += analysis.redFlags;
         });
 
-        const averageScore = Math.round(totalScore / unifiedLogs.length);
+        const averageScore = Math.round(totalScore / logsForCurrentStatus.length);
         setCurrentScore(averageScore);
-        await notifyLowScoreIfNeeded(averageScore, effectiveCat.id);
+        await notifyLowScoreIfNeeded(averageScore, effectiveCat.id, effectiveCat.name);
         // เก็บ alerts ล่าสุดไม่เกิน 3 รายการ (ไม่ซ้ำ)
         setLatestAlerts([...new Set(allAlerts)].slice(0, 4));
         setLatestRedFlags(totalRedFlags);
@@ -945,9 +957,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                     Level {String(latestAssessment.overall_risk_level || '--').toUpperCase()}
                   </Text>
                   <Text style={styles.inlineMetric}>
-                    Score {Number.isFinite(latestAssessment.overall_risk_score) ? latestAssessment.overall_risk_score : '--'}
-                  </Text>
-                  <Text style={styles.inlineMetric}>
                     Date {latestAssessment.assessment_date || '--'}
                   </Text>
                 </View>
@@ -1045,7 +1054,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={[styles.metricValue, { color: m.c }]}>{m.t}</Text>
-                      <Text style={styles.metricScoreNum}>{m.value} / 100</Text>
                     </View>
                   </View>
                 ))}
@@ -1714,12 +1722,6 @@ const styles = StyleSheet.create({
   metricValue: {
     fontSize: 12,
     fontWeight: '800',
-  },
-  metricScoreNum: {
-    fontSize: 10,
-    color: '#90A4AE',
-    marginTop: 2,
-    fontWeight: '700',
   },
   chartMiniSurface: {
     borderWidth: 1,

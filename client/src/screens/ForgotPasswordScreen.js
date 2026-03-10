@@ -9,6 +9,9 @@ import {
     Image,
     StyleSheet,
     ActivityIndicator,
+    KeyboardAvoidingView,
+    ScrollView,
+    Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import supabase from './config/supabaseClient';
@@ -59,7 +62,17 @@ export default function ForgotPasswordScreen({ onBack, onGoToResetPassword }) {
                 <Text style={styles.backText}>{'< ย้อนกลับ'}</Text>
             </TouchableOpacity>
 
-            <View style={styles.container}>
+            <KeyboardAvoidingView
+                style={{ flex: 1 }}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
+            >
+                <ScrollView
+                    contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
+                >
+                    <View style={styles.container}>
                 {/* Logo */}
                 <View style={styles.headerContainer}>
                     <Image
@@ -137,7 +150,9 @@ export default function ForgotPasswordScreen({ onBack, onGoToResetPassword }) {
                         </TouchableOpacity>
                     </View>
                 )}
-            </View>
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
         </SafeAreaView>
     );
 }

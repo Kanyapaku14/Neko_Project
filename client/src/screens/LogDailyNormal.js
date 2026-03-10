@@ -177,6 +177,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                 locations={[0.42, 1]}
                 style={{ flex: 1 }}
             >
+
                 <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
                     <TouchableOpacity onPress={onBack} style={styles.backButton}>
                         <Ionicons name="chevron-back" size={28} color="#333" />
@@ -184,6 +185,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                     <Text style={styles.headerTitle}>Daily Log</Text>
                     <TouchableOpacity style={[styles.backButton, { alignItems: 'flex-end' }]}>
                         <Ionicons name="ellipsis-vertical" size={24} color="transparent" />
+
                     </TouchableOpacity>
                 </View>
 
@@ -379,6 +381,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                 locations={[0.42, 1]}
                 style={{ flex: 1 }}
             >
+
                 <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
                     <TouchableOpacity onPress={onBack} style={styles.backButton}>
                         <Ionicons name="chevron-back" size={28} color="#333" />
@@ -386,6 +389,7 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                     <Text style={styles.headerTitle}>Daily Log</Text>
                     <TouchableOpacity style={[styles.backButton, { alignItems: 'flex-end' }]}>
                         <Ionicons name="ellipsis-vertical" size={24} color="transparent" />
+
                     </TouchableOpacity>
                 </View>
 

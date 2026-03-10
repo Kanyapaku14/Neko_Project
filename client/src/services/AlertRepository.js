@@ -31,7 +31,7 @@ const mapAlertToDb = (alert, ownerId, cameraId) => ({
     id: isUuid(alert.id) ? alert.id : undefined,
     owner_id: ownerId,
     camera_id: isUuid(alert.cameraId) ? alert.cameraId : (isUuid(cameraId) ? cameraId : null),
-    cat_id: isUuid(alert.resolvedCatId) ? alert.resolvedCatId : null,
+    cat_id: isUuid(alert.catId) ? alert.catId : (isUuid(alert.resolvedCatId) ? alert.resolvedCatId : null),
     type: alert.type || 'system',
     severity: mapSeverity(alert.severity),
     title: alert.title || 'Notification',
@@ -55,6 +55,7 @@ const mapAlertToDb = (alert, ownerId, cameraId) => ({
         resolvedAt: alert.resolvedAt || null,
         resolvedCatName: alert.resolvedCatName || null,
         resolutionText: alert.resolutionText || null,
+        catName: alert.catName || null,
     },
 });
 
@@ -82,6 +83,8 @@ const mapDbAlertToLocal = (row) => ({
     resolvedCatName: row?.metadata?.resolvedCatName || null,
     resolutionText: row?.metadata?.resolutionText || null,
     resolvedCatId: row.cat_id || null,
+    catId: row.cat_id || null,
+    catName: row?.metadata?.catName || null,
     _fromRemote: true,
 });
 
@@ -433,6 +436,36 @@ const AlertRepository = {
             if (error) throw error;
         } catch (err) {
             console.warn(`AlertRepository.resolveOnRemote failed: ${err?.message || err}`);
+        }
+    },
+
+    async markAsReadOnRemote(alertId) {
+        try {
+            const { userId } = await this._getContext();
+            if (!userId || !alertId) return;
+            const { error } = await supabase
+                .from('alerts')
+                .update({ is_read: true, updated_at: new Date().toISOString() })
+                .eq('owner_id', userId)
+                .eq('id', alertId);
+            if (error) throw error;
+        } catch (err) {
+            console.warn(`AlertRepository.markAsReadOnRemote failed: ${err?.message || err}`);
+        }
+    },
+
+    async markAllAsReadOnRemote() {
+        try {
+            const { userId } = await this._getContext();
+            if (!userId) return;
+            const { error } = await supabase
+                .from('alerts')
+                .update({ is_read: true, updated_at: new Date().toISOString() })
+                .eq('owner_id', userId)
+                .eq('is_read', false);
+            if (error) throw error;
+        } catch (err) {
+            console.warn(`AlertRepository.markAllAsReadOnRemote failed: ${err?.message || err}`);
         }
     },
 };

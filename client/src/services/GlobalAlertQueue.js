@@ -15,6 +15,7 @@
 
 import React, { createContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import AlertEngine, { AlertEvents } from './AlertEngine';
 import AlertRepository from './AlertRepository';
 import CatPickerModal from '../components/alert/CatPickerModal';
@@ -27,7 +28,7 @@ export const GlobalAlertQueueContext = createContext({
     openPendingQueue: () => { },
 });
 
-export function GlobalAlertQueueProvider({ children, session }) {
+export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
     const AUTO_POPUP_COOLDOWN_MS = 45 * 1000;
     const MAX_PENDING_QUEUE = 6;
     const [queue, setQueue] = useState([]);
@@ -38,6 +39,7 @@ export function GlobalAlertQueueProvider({ children, session }) {
     const [autoPoppedPendingIds, setAutoPoppedPendingIds] = useState({});
     const [snoozedGroupUntil, setSnoozedGroupUntil] = useState({});
     const lastAutoPopupAtRef = useRef(0);
+    const criticalPopupInFlight = useRef(new Set());
 
     const getAlertGroupKey = useCallback((alert) => {
         if (!alert) return null;
@@ -69,8 +71,30 @@ export function GlobalAlertQueueProvider({ children, session }) {
         return criticalList[0];
     }, []);
 
+    const shouldShowCriticalOncePerCat = useCallback(async (candidate) => {
+        if (!candidate?.id) return false;
+        const type = String(candidate?.type || '').toLowerCase();
+        if (type !== 'dashboard_low_score_40') return true;
+        const catId = String(candidate?.catId || '');
+        if (!catId) return true;
+        const today = new Date().toISOString().slice(0, 10);
+        const key = `critical_popup_once:${type}:${catId}`;
+        if (criticalPopupInFlight.current.has(key)) return false;
+        criticalPopupInFlight.current.add(key);
+        try {
+            const last = await AsyncStorage.getItem(key);
+            if (last === today) return false;
+            await AsyncStorage.setItem(key, today);
+            return true;
+        } finally {
+            criticalPopupInFlight.current.delete(key);
+        }
+    }, []);
+
     const openCriticalIfNeeded = useCallback((candidate) => {
         if (!candidate?.id) return;
+        const type = String(candidate?.type || '').toLowerCase();
+        if (type === 'dashboard_low_score_40') return;
         if (dismissedCriticalIds[candidate.id]) return;
         if (currentAlert) return; // do not stack critical over identity modal
         setCriticalAlert((prev) => (prev?.id === candidate.id ? prev : candidate));
@@ -145,13 +169,27 @@ export function GlobalAlertQueueProvider({ children, session }) {
 
     // Global Critical Popup: show on every screen
     useEffect(() => {
-        const handleNewCritical = (alert) => {
-            if (!alert) return;
+        let mounted = true;
+        const handleNewCritical = async (alert) => {
+            if (!alert || !mounted) return;
+            const allowed = await shouldShowCriticalOncePerCat(alert);
+            if (!mounted) return;
+            if (!allowed) {
+                setDismissedCriticalIds((prev) => ({ ...prev, [alert.id]: true }));
+                return;
+            }
             openCriticalIfNeeded(alert);
         };
-        const handleUpdated = () => {
+        const handleUpdated = async () => {
             const topCritical = findTopCritical();
+            if (!mounted) return;
             if (topCritical) {
+                const allowed = await shouldShowCriticalOncePerCat(topCritical);
+                if (!mounted) return;
+                if (!allowed) {
+                    setDismissedCriticalIds((prev) => ({ ...prev, [topCritical.id]: true }));
+                    return;
+                }
                 openCriticalIfNeeded(topCritical);
                 return;
             }
@@ -164,10 +202,11 @@ export function GlobalAlertQueueProvider({ children, session }) {
         AlertEngine.on(AlertEvents.NEW_CRITICAL, handleNewCritical);
         AlertEngine.on(AlertEvents.UPDATED, handleUpdated);
         return () => {
+            mounted = false;
             AlertEngine.off(AlertEvents.NEW_CRITICAL, handleNewCritical);
             AlertEngine.off(AlertEvents.UPDATED, handleUpdated);
         };
-    }, [findTopCritical, openCriticalIfNeeded]);
+    }, [findTopCritical, openCriticalIfNeeded, shouldShowCriticalOncePerCat]);
 
     // 3. Queue Processor: Pop next alert when idle
     useEffect(() => {

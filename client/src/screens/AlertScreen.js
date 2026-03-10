@@ -23,6 +23,7 @@ import * as Haptics from 'expo-haptics';
 import AlertEngine, { AlertEvents } from '../services/AlertEngine';
 import AlertRepository from '../services/AlertRepository';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
+import supabase from './config/supabaseClient';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -117,10 +118,12 @@ const collapseAlerts = (items = []) => {
     for (const alert of items) {
         const type = String(alert?.type || '').toLowerCase();
         if (type === 'dashboard_low_score_60' || type === 'dashboard_low_score_40') {
+            const catKey = String(alert?.catId || 'unknown');
+            const groupKey = `${type}:${catKey}`;
             const ts = new Date(alert?.timestamp || 0).getTime();
-            const prev = latestLowScore.get(type);
+            const prev = latestLowScore.get(groupKey);
             const prevTs = prev ? new Date(prev?.timestamp || 0).getTime() : -1;
-            if (!prev || ts >= prevTs) latestLowScore.set(type, alert);
+            if (!prev || ts >= prevTs) latestLowScore.set(groupKey, alert);
             continue;
         }
         rest.push(alert);
@@ -131,6 +134,12 @@ const collapseAlerts = (items = []) => {
 const getShortDetail = (alert) => {
     const txt = String(alert?.desc || '').trim();
     return txt || 'Tap to view event details.';
+};
+
+const getCatLabel = (alert) => {
+    const name = String(alert?.catName || '').trim();
+    if (name) return name;
+    return '';
 };
 
 const SwipeableNotificationCard = ({
@@ -282,6 +291,7 @@ const SwipeableNotificationCard = ({
     const isPending = alert.pendingIdentityConfirm === true;
     const isIdentityResolved = alert.type === 'pending_identity' && !isPending && alert.resolvedBy && alert.resolvedBy !== 'skipped';
     const isRejectedIdentity = alert.type === 'pending_identity' && !isPending && alert.resolvedBy === 'skipped';
+    const catLabel = getCatLabel(alert);
 
 
     return (
@@ -419,6 +429,11 @@ const SwipeableNotificationCard = ({
                     <View style={styles.alertTextContainer}>
                         <View style={styles.titleRow}>
                             <Text style={[styles.alertTitle, !alert.isRead && styles.unreadText]}>{alert.title}</Text>
+                            {!!catLabel && (
+                                <View style={styles.catBadge}>
+                                    <Text style={styles.catBadgeText}>{catLabel}</Text>
+                                </View>
+                            )}
                             {isPending ? (
                                 <View style={styles.pendingBadge}><Text style={styles.pendingBadgeText}>Pending</Text></View>
                             ) : isRejectedIdentity ? (
@@ -476,6 +491,66 @@ export default function AlertScreen({ onBack, onNavigate }) {
     const menuButtonPressAnim = useRef(new Animated.Value(0)).current;
     const selectionBarAnim = useRef(new Animated.Value(0)).current;
     const { pushAlert } = useContext(GlobalAlertQueueContext);
+    const loadAlertsFromDb = async (mode) => {
+        try {
+            const { data: userRes } = await supabase.auth.getUser();
+            const userId = userRes?.user?.id;
+            if (!userId) return;
+
+            let q = supabase
+                .from('alerts')
+                .select('*')
+                .eq('owner_id', userId);
+            if (mode === 'deleted') q = q.eq('is_deleted', true);
+            else q = q.eq('is_deleted', false);
+
+            const { data, error } = await q.order('timestamp', { ascending: false }).limit(200);
+            if (error) throw error;
+
+            const mapped = (data || []).map((row) => ({
+                id: row.id,
+                type: row.type,
+                severity: row.severity,
+                title: row.title,
+                desc: row.description || '',
+                details: row.details || '',
+                timestamp: row.timestamp || row.created_at || new Date().toISOString(),
+                expiresAt: row.expires_at || undefined,
+                isRead: row.is_read === true,
+                isDeleted: row.is_deleted === true,
+                resolved: row.resolved === true,
+                source: row.source || null,
+                sessionId: row.session_id || null,
+                pendingIdentityConfirm: row?.metadata?.pendingIdentityConfirm === true,
+                behaviorLabel: row?.metadata?.behaviorLabel || null,
+                confidence: row?.metadata?.confidence ?? null,
+                cropSnapshot: row?.metadata?.cropSnapshot || null,
+                isAbnormal: row?.metadata?.isAbnormal === true,
+                resolvedBy: row?.metadata?.resolvedBy || null,
+                resolvedAt: row?.metadata?.resolvedAt || null,
+                resolvedCatName: row?.metadata?.resolvedCatName || null,
+                resolutionText: row?.metadata?.resolutionText || null,
+                resolvedCatId: row.cat_id || null,
+                catId: row.cat_id || null,
+                catName: row?.metadata?.catName || null,
+                _fromRemote: true,
+            }));
+
+            const allowed = mapped.filter(isAllowedAlertType);
+            const ordered = dedupeAlerts(collapseAlerts(allowed))
+                .sort((a, b) => new Date(b?.timestamp || 0) - new Date(a?.timestamp || 0));
+            setAlerts(ordered);
+        } catch (err) {
+            // fallback to local history
+            const list = mode === 'deleted' && AlertEngine.getDeletedHistory
+                ? AlertEngine.getDeletedHistory()
+                : AlertEngine.getHistory();
+            const allowed = (list || []).filter(isAllowedAlertType);
+            const ordered = dedupeAlerts(collapseAlerts(allowed))
+                .sort((a, b) => new Date(b?.timestamp || 0) - new Date(a?.timestamp || 0));
+            setAlerts(ordered);
+        }
+    };
 
     useEffect(() => {
         AlertRepository.init();
@@ -488,24 +563,15 @@ export default function AlertScreen({ onBack, onNavigate }) {
         // 5. Your backend (e.g., Supabase Edge Function) would listen to inserts on the 'alerts' table
         //    and send a push notification to the user's registered tokens.
 
-        // Avoid re-sync on every AlertScreen mount which can re-trigger auto-popup.
         // For list refresh (including likes), sync alerts only and skip identity reviews to avoid popups.
         AlertRepository.syncFromRemote({ skipIdentityReview: true });
     }, []);
 
     useEffect(() => {
-        const list = filterMode === 'deleted' && AlertEngine.getDeletedHistory
-            ? AlertEngine.getDeletedHistory()
-            : AlertEngine.getHistory();
-        const allowed = (list || []).filter(isAllowedAlertType);
-        setAlerts(dedupeAlerts(collapseAlerts(allowed)));
+        loadAlertsFromDb(filterMode);
 
         const handler = () => {
-            const next = filterMode === 'deleted' && AlertEngine.getDeletedHistory
-                ? AlertEngine.getDeletedHistory()
-                : AlertEngine.getHistory();
-            const allowedNext = (next || []).filter(isAllowedAlertType);
-            setAlerts(dedupeAlerts([...(collapseAlerts(allowedNext) || [])]));
+            loadAlertsFromDb(filterMode);
         };
         AlertEngine.on(AlertEvents.UPDATED, handler);
 
@@ -564,7 +630,10 @@ export default function AlertScreen({ onBack, onNavigate }) {
         const shouldOpenIdentify = alert.pendingIdentityConfirm === true;
         if (shouldOpenIdentify) pushAlert(alert);
         else onNavigate('EventDetail', { alertData: alert });
-        if (!alert.isRead && AlertEngine.markAsRead) AlertEngine.markAsRead(alert.id);
+        if (!alert.isRead && AlertEngine.markAsRead) {
+            AlertEngine.markAsRead(alert.id);
+            AlertRepository.markAsReadOnRemote(alert.id);
+        }
     };
 
     const handleDelete = (id) => {
@@ -573,7 +642,10 @@ export default function AlertScreen({ onBack, onNavigate }) {
     };
 
     const handleReadAll = () => {
-        if (AlertEngine.markAllAsRead) AlertEngine.markAllAsRead();
+        if (AlertEngine.markAllAsRead) {
+            AlertEngine.markAllAsRead();
+            AlertRepository.markAllAsReadOnRemote();
+        }
     };
 
     const openDeleteConfirmModal = ({ title, message, confirmText = 'Delete', onConfirm, onCancel }) => {
@@ -701,7 +773,10 @@ export default function AlertScreen({ onBack, onNavigate }) {
                                         onPress={handlePressCard}
                                         onDelete={handleDelete}
                                         onRequestDeleteConfirm={openDeleteConfirmModal}
-                                        onMarkRead={(id) => AlertEngine.markAsRead && AlertEngine.markAsRead(id)}
+                                        onMarkRead={(id) => {
+                                            if (AlertEngine.markAsRead) AlertEngine.markAsRead(id);
+                                            AlertRepository.markAsReadOnRemote(id);
+                                        }}
                                         isSelecting={isSelecting}
                                         isSelected={selectedIds.has(alert.id)}
                                         activeSwipeId={activeSwipeId}
@@ -1018,6 +1093,8 @@ const styles = StyleSheet.create({
     resolvedBadgeText: { color: '#1A56C5', fontSize: 10, fontFamily: 'Inter-Bold' },
     rejectedBadge: { backgroundColor: '#FFE4E6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
     rejectedBadgeText: { color: '#B42318', fontSize: 10, fontFamily: 'Inter-Bold' },
+    catBadge: { backgroundColor: '#E8F0FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
+    catBadgeText: { color: '#1A56C5', fontSize: 10, fontFamily: 'Inter-Bold' },
     timeText: { fontSize: 10, color: '#8E8E93', fontFamily: 'Inter-Medium', marginTop: 2 },
     chevronButton: { paddingLeft: 8, paddingVertical: 8 },
     expandedContent: {
