@@ -14,6 +14,7 @@ import {
     Image,
     DeviceEventEmitter,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,10 +22,12 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import supabase from './config/supabaseClient';
 import AlertEngine from '../services/AlertEngine';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
 
 const AddMedical = ({ navigation, onBack, initialDate }) => {
+    const insets = useSafeAreaInsets();
     const [eventType, setEventType] = useState('vet_visit');
     const [notes, setNotes] = useState('');
     const [eventDate, setEventDate] = useState(initialDate ? new Date(initialDate) : new Date());
@@ -218,18 +221,21 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
     };
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <View style={styles.safeArea}>
+            <StatusBar style="dark" translucent backgroundColor="transparent" />
             <LinearGradient
-                colors={['#E0F2F1', '#B2DFDB']}
+                colors={['#f5fffdff', '#f5fffdff']} // Match AlertScreen colors
                 style={styles.container}
             >
                 {/* Header */}
-                <View style={styles.header}>
+                <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
                     <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-                        <Ionicons name="chevron-back" size={28} color="#2D6A64" />
+                        <Ionicons name="chevron-back" size={28} color="#333" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Add Medical Event</Text>
-                    <View style={{ width: 28 }} />
+                    <TouchableOpacity style={[styles.backButton, { alignItems: 'flex-end' }]}>
+                        <Ionicons name="ellipsis-vertical" size={24} color="transparent" />
+                    </TouchableOpacity>
                 </View>
 
                 <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -316,7 +322,7 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
                     </TouchableOpacity>
                 </ScrollView>
             </LinearGradient>
-        </SafeAreaView>
+        </View>
     );
 };
 
@@ -333,16 +339,22 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: 10,
-        paddingBottom: 15,
+        paddingTop: 8,
+        paddingBottom: 12,
+        backgroundColor: 'transparent',
     },
     headerTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#2D6A64',
+        fontSize: 16,
+        fontFamily: 'Inter-Bold',
+        color: '#2F6A62',
+        textAlign: 'center',
+        flex: 1
     },
     backButton: {
-        padding: 5,
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'flex-start'
     },
     scrollContent: {
         paddingHorizontal: 20,

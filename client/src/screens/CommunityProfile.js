@@ -982,7 +982,7 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
             {/* Top Nav */}
             <View style={styles.topNav}>
                 <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-                    <Ionicons name="arrow-back" size={24} color="#37474F" />
+                    <Ionicons name="chevron-back" size={24} color="#37474F" />
                 </TouchableOpacity>
                 <Text style={styles.topNavTitle}>{isReadyOnly ? `${userProfile?.name || 'User'}'s Profile` : 'My Profile'}</Text>
                 {!isReadyOnly ? (
@@ -1151,15 +1151,40 @@ const styles = StyleSheet.create({
         alignItems: "center",
         justifyContent: "space-between",
         paddingHorizontal: 20,
-        paddingVertical: 14,
-        backgroundColor: "#FFF",
-        borderBottomWidth: 1,
-        borderBottomColor: "#E0F2F1",
+        paddingVertical: 10, // Adjusted padding to fit button size
+        backgroundColor: "#F4FAF9", // Blend with the app background
+        zIndex: 10,
     },
     topNavTitle: {
         fontSize: 18,
         fontFamily: "Inter-Bold",
         color: "#26A69A",
+    },
+    backBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "#FFFFFF",
+        justifyContent: "center",
+        alignItems: "center",
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    settingsBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "#FFFFFF",
+        justifyContent: "center",
+        alignItems: "center",
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
     },
     loadingContainer: {
         flex: 1,

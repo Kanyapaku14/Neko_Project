@@ -54,6 +54,7 @@ import {
   Inter_300Light
 } from '@expo-google-fonts/inter';
 import { Poppins_400Regular } from '@expo-google-fonts/poppins';
+import { Itim_400Regular } from '@expo-google-fonts/itim';
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -63,6 +64,7 @@ export default function App() {
     'Inter-SemiBold': Inter_600SemiBold,
     'Inter-Light': Inter_300Light,
     'Poppins-Regular': Poppins_400Regular,
+    'Itim-Regular': Itim_400Regular,
   });
 
   const [currentScreen, setCurrentScreen] = useState('SignIn');
@@ -503,7 +505,7 @@ export default function App() {
         return <PhotoCheck session={session} onNavigate={(screen, params) => setAuthScreen(params ? { screen, params } : screen)} />;
       }
       if (currentScreenName === 'AnalysisResult') {
-        return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} result={screenParams?.result} recordId={screenParams?.recordId} />;
+        return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} result={screenParams?.result} recordId={screenParams?.recordId} isHistory={screenParams?.isHistory} />;
       }
       if (currentScreenName === 'Alert') {
         return <AlertScreen onBack={() => setAuthScreen(screenParams?.returnTo || 'Camera')} onNavigate={(screen, params) => navigateAuth(screen, params)} />;
