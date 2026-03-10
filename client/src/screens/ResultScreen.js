@@ -576,21 +576,36 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
 
             {isDropdownOpen && (
               <View style={customStyles.dropdownList}>
-                {DISEASE_OPTIONS.map((item, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={[customStyles.dropdownItem, selectedConditionValue === item.value && customStyles.dropdownItemActive]}
-                    onPress={() => {
-                      setSelectedConditionValue(item.value);
-                      setSelectedConditionLabel(item.label);
-                      setIsDropdownOpen(false);
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, color: selectedConditionValue === item.value ? '#1abc9c' : '#333' }}>
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                {(() => {
+                  const elevatedRiskOptions = DISEASE_OPTIONS.filter(option => {
+                    const riskItem = riskData.find(r => r.label === option.value);
+                    return riskItem && riskItem.value !== "Normal" && riskItem.value !== "No Data";
+                  });
+
+                  if (elevatedRiskOptions.length === 0) {
+                    return (
+                      <View style={{ padding: 10 }}>
+                        <Text style={{ fontSize: 11, color: '#888', textAlign: 'center' }}>ไม่มีโรคที่มีความเสี่ยง</Text>
+                      </View>
+                    );
+                  }
+
+                  return elevatedRiskOptions.map((item, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={[customStyles.dropdownItem, selectedConditionValue === item.value && customStyles.dropdownItemActive]}
+                      onPress={() => {
+                        setSelectedConditionValue(item.value);
+                        setSelectedConditionLabel(item.label);
+                        setIsDropdownOpen(false);
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, color: selectedConditionValue === item.value ? '#1abc9c' : '#333' }}>
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ));
+                })()}
               </View>
             )}
           </View>
