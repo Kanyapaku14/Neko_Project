@@ -140,11 +140,13 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                 unifiedLogs.forEach((log) => {
                     total += analyzeHealthLog(log).score;
                 });
-                const nextScore = Math.round(total / unifiedLogs.length);
-                setHomeHealthScore(nextScore);
+                // Calculate average exactly like the Dashboard
+                const averageScore = Math.round(total / unifiedLogs.length);
+                setHomeHealthScore(averageScore);
+
                 const key = healthCacheKey(session?.user?.id, catId);
                 if (key) {
-                    const st = getHealthStatus(nextScore);
+                    const st = getHealthStatus(averageScore);
                     await AsyncStorage.setItem(key, JSON.stringify({
                         score: nextScore,
                         color: st.color,
@@ -250,7 +252,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                     {/* 1. ส่วนรูปแมว (แยกออกมาแล้ว) */}
                     <View style={{ alignItems: 'center', marginTop: 26, marginBottom: 16 }}>
                         <CatHealthMeter
-                            score={computedScore ?? 0}
+                            score={computedScore ?? 100}
                             centerImageUri={activeCat?.image_url || null}
                             centerMode="profile"
                             size={230}
@@ -263,11 +265,9 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                             {((score) => {
                                 const name = activeCat?.name || "Luna";
                                 if (score === null || score === undefined) return `${name} has not been assessed yet.`;
-                                if (score >= 80) return "Everything looks great today!";
-                                if (score >= 60) return `${name} is doing well today.`;
-                                if (score >= 40) return `Keep an eye on ${name} today.`;
-                                return `${name} needs some extra care.`;
-                            })(computedScore)}
+                                const st = getHealthStatus(score);
+                                return `${st.label} - ${st.text}`;
+                            })(computedScore ?? 100)}
                         </Text>
 
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
