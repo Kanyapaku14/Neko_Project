@@ -148,21 +148,21 @@ function CatRiskMeter({ score = 0, color = "#2ecc71", size = 190, mainText = "0"
           </G>
 
           {/* WHITE CAT SHAPE BASE */}
-          <Path d="M 48 50 Q 35 25 42 12 Q 45 8 48 12 Q 65 20 85 28 Z" fill="#FFFFFF" stroke="#F1F5F9" strokeWidth="1" />
-          <Path d="M 142 50 Q 155 25 148 12 Q 146 8 142 12 Q 125 20 105 28 Z" fill="#FFFFFF" stroke="#F1F5F9" strokeWidth="1" />
+          <Path d="M 48 50 Q 35 25 42 12 Q 45 8 48 12 Q 65 20 85 28 Z" fill="#F1F5F9" stroke="#F1F5F9" strokeWidth="1" />
+          <Path d="M 142 50 Q 155 25 148 12 Q 146 8 142 12 Q 125 20 105 28 Z" fill="#F1F5F9" stroke="#F1F5F9" strokeWidth="1" />
           <Path d="M 52 42 Q 42 22 50 16 Q 60 25 72 32" fill="#FFE4E6" opacity="0.6" />
           <Path d="M 138 42 Q 148 22 140 16 Q 130 25 118 32" fill="#FFE4E6" opacity="0.6" />
 
           {/* WHISKERS */}
-          <Path d="M 38 85 Q 15 70 -5 82" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
-          <Path d="M 35 105 Q 15 95 -8 102" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
-          <Path d="M 38 125 Q 15 115 -5 120" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
-          <Path d="M 152 85 Q 175 70 195 82" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
-          <Path d="M 155 105 Q 175 95 198 102" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
-          <Path d="M 152 125 Q 175 115 195 120" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" fill="none" />
-          <Circle cx={SIZE / 2} cy={SIZE / 2} r="76" fill="#FFFFFF" />
+          <Path d="M 38 85 Q 15 70 -5 82" stroke="#F1F5F9" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Path d="M 35 105 Q 15 95 -8 102" stroke="#F1F5F9" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Path d="M 38 125 Q 15 115 -5 120" stroke="#F1F5F9" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Path d="M 152 85 Q 175 70 195 82" stroke="#F1F5F9" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Path d="M 155 105 Q 175 95 198 102" stroke="#F1F5F9" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Path d="M 152 125 Q 175 115 195 120" stroke="#F1F5F9" strokeWidth="8" strokeLinecap="round" fill="none" />
+          <Circle cx={SIZE / 2} cy={SIZE / 2} r="76" fill="#F1F5F9" />
 
-          <Circle cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} stroke="#F1F5F9" fill="none" strokeWidth={STROKE} />
+          <Circle cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} stroke="#FFE4E6" fill="none" strokeWidth={STROKE} />
 
           {safeScore > 0 && (
             <AnimatedCircle
