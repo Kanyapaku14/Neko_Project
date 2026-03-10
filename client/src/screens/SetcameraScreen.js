@@ -42,12 +42,25 @@ const DecorativeCatEars = () => (
 // ==============================================
 // 🚨 Component กล้อง: โครงสร้างเดียวกับ CameraScreen เป๊ะๆ
 // ==============================================
-// ใช้ React.memo คู่กับ () => true เพื่อ "ล็อคตาย" ไม่ให้ Component นี้โหลดใหม่เด็ดขาด (แก้กระพริบ 100%)
+// ใช้ React.memo คู่กับ () => true เพื่อ "ล็อคตาย" ไม่ให้ Component นี้โหลดใหม่เด็ดขาด 
 const LiveCameraStream = React.memo(({ streamUrl }) => {
+    const streamHtml = `<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <style>
+      html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
+      img { width:100%; height:100%; object-fit:cover; display:block; background:#000; }
+    </style>
+  </head>
+  <body>
+    <img src="${streamUrl}" alt="live-stream" />
+  </body>
+</html>`;
     return (
         <View style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#E5E7EB', overflow: 'hidden' }}>
             <WebView
-                source={{ uri: streamUrl }} // ยิงตรงไปที่ URL เลย แก้ปัญหาจอเทาจาก HTML
+                source={{ html: streamHtml, baseUrl: VIDEO_SERVER_BASE }}
                 style={{ flex: 1, backgroundColor: 'transparent' }}
                 scrollEnabled={false}
                 bounces={false}
@@ -56,6 +69,7 @@ const LiveCameraStream = React.memo(({ streamUrl }) => {
                 originWhitelist={['*']}
                 mixedContentMode="always"
                 allowsInlineMediaPlayback={true}
+                mediaPlaybackRequiresUserAction={false}
             />
         </View>
     );
@@ -304,6 +318,20 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
             if (uniqueCatIds.length > 0) {
                 const rows = uniqueCatIds.map((id, idx) => ({ camera_id: targetCameraId, cat_id: id, is_primary: idx === 0 }));
                 await supabase.from('camera_cats').insert(rows);
+            }
+            // Force serverCam to refresh assigned_cats immediately.
+            if (session?.user?.id && dbStreamSource) {
+                const sourceType = isDemoLikeSource(dbStreamSource) ? 'demo' : 'live';
+                await fetch(`${VIDEO_SERVER_BASE}/api/set_source`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source_type: sourceType,
+                        source_url: String(dbStreamSource || '').trim() || null,
+                        camera_id: targetCameraId,
+                        owner_id: session.user.id,
+                    }),
+                });
             }
         } catch (err) { }
     };

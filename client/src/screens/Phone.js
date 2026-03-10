@@ -4,7 +4,6 @@ import {
     Text,
     StyleSheet,
     TouchableOpacity,
-    SafeAreaView,
     ScrollView,
     Animated,
     Easing,
@@ -14,6 +13,7 @@ import {
     Platform,
     Image,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { PanResponder } from "react-native";
@@ -22,12 +22,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient';
 import AlertEngine from '../services/AlertEngine';
 import { WebView } from 'react-native-webview';
+import { CAMERA_API_BASE, CAMERA_STREAM_QUERY, CAMERA_STREAM_URL_MODEL, CAMERA_STREAM_URL_RAW } from '../config/cameraApi';
 
 const { width } = Dimensions.get("window");
 
 // 🚨 URL ของเซิร์ฟเวอร์สตรีมภาพ (ตรวจสอบ IP ให้ตรงกับคอมพิวเตอร์ของคุณ)
-const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed_raw?fps=15&quality=62&width=960';
-const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
+const VIDEO_STREAM_URL = `${CAMERA_STREAM_URL_RAW}?${CAMERA_STREAM_QUERY}`;
+const VIDEO_SERVER_BASE = CAMERA_API_BASE;
 
 // 🚨 ประกาศตัวแปรลิงก์กล้อง RTSP ที่นี่ (เพื่อเอาไปบันทึกลง Database)
 const CAMERA_RTSP_URL = "rtsp://testt1:1234test@192.168.1.102:554/stream2"
@@ -37,6 +38,18 @@ const BRANDS = [
     { id: "xiaomi", name: "Xiaomi Mi Home", icon: "shield-home" },
     { id: "ezviz", name: "EZVIZ", icon: "video-check" },
 ];
+
+const isDemoLikeSource = (source = '') => {
+    const s = String(source || '').toLowerCase();
+    return (
+        s.endsWith('.mp4') ||
+        s.endsWith('.webm') ||
+        s.endsWith('.mov') ||
+        s.endsWith('.mkv') ||
+        s.endsWith('.avi') ||
+        s.includes('/storage/v1/object/public/')
+    );
+};
 
 export default function Phone({
     session,
@@ -94,6 +107,7 @@ export default function Phone({
     const [zoneStatus, setZoneStatus] = useState({ camera_moved: false, zones_configured: 0 });
     const [hasDbCameraSource, setHasDbCameraSource] = useState(false);
     const [cameraGateChecked, setCameraGateChecked] = useState(false);
+    const [dbStreamSource, setDbStreamSource] = useState(null);
 
     // Animations
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -119,6 +133,7 @@ export default function Phone({
         setInlineNotice(null);
         setHasDbCameraSource(false);
         setCameraGateChecked(false);
+        setDbStreamSource(null);
     }, [session?.user?.id]);
 
     const resolveOwnerCamera = async () => {
@@ -135,6 +150,7 @@ export default function Phone({
         const ownedStored = (dbCameras || []).find((c) => c.id === storedCameraId) || null;
         const activeCamera = ownedStored || (dbCameras || [])[0] || null;
         const hasSource = Boolean(String(activeCamera?.stream_source || '').trim());
+        setDbStreamSource(hasSource ? String(activeCamera?.stream_source || '').trim() : null);
         return { camera: activeCamera, hasSource };
     };
 
@@ -153,6 +169,7 @@ export default function Phone({
 
             setConnected(false);
             setCurrentStep(1);
+            setDbStreamSource(null);
             await AsyncStorage.setItem(scopedStatusKey, 'disconnected');
             await AsyncStorage.setItem('camera_status', 'disconnected');
             await AsyncStorage.setItem(scopedSetupKey, 'false');
@@ -164,6 +181,7 @@ export default function Phone({
         } catch (e) {
             console.warn('Failed to validate camera source gate:', e);
             setHasDbCameraSource(false);
+            setDbStreamSource(null);
             setCameraGateChecked(true);
             if (!silent) showNotice('Unable to validate camera source.', 'danger');
             return false;
@@ -219,9 +237,24 @@ export default function Phone({
 
     // 🚨 ส่วนนี้ถูกแยกออกมาเพื่อบังคับการแสดงผลกล้องให้เหมือนกัน 100% ทุกจุด
     const LiveVideoFeed = () => {
+        const isDemo = isDemoLikeSource(dbStreamSource);
+        const activeStreamUrl = `${isDemo ? CAMERA_STREAM_URL_MODEL : CAMERA_STREAM_URL_RAW}?${CAMERA_STREAM_QUERY}&t=${new Date().getTime()}`;
+        const streamHtml = `<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <style>
+      html, body { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
+      img { width:100%; height:100%; object-fit:cover; display:block; background:#000; }
+    </style>
+  </head>
+  <body>
+    <img src="${activeStreamUrl}" alt="live-stream" />
+  </body>
+</html>`;
         return (
             <WebView
-                source={{ uri: stableStreamUrl }}
+                source={{ html: streamHtml, baseUrl: VIDEO_SERVER_BASE }}
                 style={{ flex: 1, width: '100%', height: '100%', backgroundColor: 'transparent' }}
                 scrollEnabled={false}
                 bounces={false}
@@ -230,6 +263,7 @@ export default function Phone({
                 originWhitelist={['*']}
                 mixedContentMode="always"
                 allowsInlineMediaPlayback={true}
+                mediaPlaybackRequiresUserAction={false}
             />
         );
     };
