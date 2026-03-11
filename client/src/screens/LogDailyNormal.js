@@ -359,7 +359,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
 
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Text style={{ width: 85, fontSize: 14, color: theme.textLabel }}>Consume</Text>
-                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="meals" width={85} maxLength={2} />
+                            <UnitInput value={consumeMeals} onChangeText={(val) => setConsumeMeals(val.replace(/\D/g, ''))} unit="meals" width={85} maxLength={2} />
                             <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
