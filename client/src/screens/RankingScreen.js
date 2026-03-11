@@ -21,6 +21,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import supabase from "./config/supabaseClient";
+import AlertRepository from "../services/AlertRepository";
 
 const getLocalDateString = (date) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -785,6 +786,14 @@ export default function RankingScreen({ session, onBack }) {
         if (insertError) throw insertError;
       }
 
+      await AlertRepository.push({
+        type: 'friend_accepted',
+        severity: 'success',
+        title: 'รับคำขอเป็นเพื่อนแล้ว! ✨',
+        desc: `${myProfile?.name || 'เพื่อนใหม่ของคุณ'} ตอบรับคำขอเป็นเพื่อนแล้ว มาเริ่มคุยกันเถอะ`,
+        timestamp: new Date().toISOString(),
+      }, requestorId);
+
       Alert.alert("Success! 🎉", "You are now friends!");
       loadAll(); // Refresh everything (pending, friends list, global status)
     } catch (e) {
@@ -835,6 +844,14 @@ export default function RankingScreen({ session, onBack }) {
         }
         return;
       }
+
+      await AlertRepository.push({
+        type: 'friend_request',
+        severity: 'info',
+        title: 'คำขอเป็นเพื่อนใหม่! 🐾',
+        desc: `${myProfile?.name || 'ใครบางคน'} อยากเป็นเพื่อนกับคุณ`,
+        timestamp: new Date().toISOString(),
+      }, profile.id);
 
       Alert.alert("Request Sent! 🐾", `Wait for ${profile.name} to approve.`);
       setShowAddFriend(false);

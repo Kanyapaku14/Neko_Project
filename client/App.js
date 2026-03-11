@@ -42,6 +42,7 @@ import CommunityProfile from './src/screens/CommunityProfile';
 import { GlobalAlertQueueProvider } from './src/services/GlobalAlertQueue';
 import AlertRepository from './src/services/AlertRepository';
 import NotificationService from './src/services/NotificationService';
+import AlertEngine from './src/services/AlertEngine';
 import AlertScreen from './src/screens/AlertScreen';
 import EventDetailScreen from './src/screens/EventDetailScreen';
 
@@ -275,13 +276,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    AlertRepository.init();
-    if (session?.user?.id) {
-      NotificationService.setScope(session.user.id);
-      AlertRepository.syncFromRemote();
-    } else {
-      NotificationService.setScope('anonymous');
-    }
+    let cancelled = false;
+    const syncAlerts = async () => {
+      AlertRepository.init();
+      const scope = session?.user?.id || 'anonymous';
+      await AlertEngine.setScope(scope);
+      if (cancelled) return;
+      NotificationService.setScope(scope);
+      if (session?.user?.id) {
+        await AlertRepository.syncFromRemote();
+      }
+    };
+    syncAlerts();
+    return () => { cancelled = true; };
   }, [session?.user?.id]);
 
   // Check if user has profile and cat
@@ -336,7 +343,7 @@ export default function App() {
     );
   }
 
-	  const renderScreen = () => {
+  const renderScreen = () => {
 	    // Reset password flow (token-based OR arrived via deep link)
 	    // Note: in token-based reset flow, `verifyOtp` creates a session. Keep showing this flow even if session exists.
 	    if (resetPasswordMode) {
@@ -362,9 +369,9 @@ export default function App() {
 	    }
 
 	    // 1. Session based (if logged in)
-	    if (session) {
-	      // screen can be string or object { screen, params }
-	      const currentScreenName = typeof authScreen === 'object' ? authScreen.screen : authScreen;
+    if (session) {
+      // screen can be string or object { screen, params }
+      const currentScreenName = typeof authScreen === 'object' ? authScreen.screen : authScreen;
       const screenParams = typeof authScreen === 'object' ? authScreen.params : {};
 
       if (currentScreenName === 'CatProfile') {
@@ -606,10 +613,12 @@ export default function App() {
 
 
   // Wrap everything with SafeAreaProvider here
+  const activeScreenName = session ? getCurrentAuthScreenName() : currentScreen;
+
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#f5fffdff' }}>
       <SafeAreaProvider>
-        <GlobalAlertQueueProvider session={session}>
+        <GlobalAlertQueueProvider session={session} activeScreen={activeScreenName}>
           {renderScreen()}
         </GlobalAlertQueueProvider>
       </SafeAreaProvider>

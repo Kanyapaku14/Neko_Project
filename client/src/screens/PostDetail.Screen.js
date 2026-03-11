@@ -17,6 +17,7 @@ import {
   Alert
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import AlertRepository from "../services/AlertRepository";
 const { width: screenWidth } = Dimensions.get('window');
 import supabase from "./config/supabaseClient";
 
