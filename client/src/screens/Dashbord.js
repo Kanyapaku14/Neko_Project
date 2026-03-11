@@ -8,7 +8,7 @@ import HomeHeader from "../components/HomeHeader";
 import CatHealthMeter from "../components/CatHealthMeter";
 import supabase from "./config/supabaseClient";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
+import { analyzeHealthLog, analyzeHealthTrend7d, getHealthStatus } from "../utils/healthLogic";
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
 import Svg, { Line, Circle, Path, Text as SvgText } from 'react-native-svg';
@@ -166,9 +166,10 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   // Fetch paw stats whenever the active cat changes
   useEffect(() => {
     if (catDetails?.id) {
-      fetchPawStats(catDetails.id);
+      const days = selectedPeriod === "1 MONTH" ? 30 : 7;
+      fetchPawStats(catDetails.id, days);
     }
-  }, [catDetails]);
+  }, [catDetails, selectedPeriod]);
 
   const fetchDashboardData = async () => {
     try {
@@ -241,23 +242,42 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       setRawLogs(unifiedLogs);
 
       if (unifiedLogs.length > 0) {
-        const logsForCurrentStatus = unifiedLogs.slice(0, 3); // latest 3 days only for current status
-        let totalScore = 0;
-        let allAlerts = [];
-        let totalRedFlags = 0;
+        // ==========================================
+        // ✅ Two-Tier Analysis
+        // Tier 1: 3-Day Immediate Check (สถานะหลัก)
+        // Tier 2: 7-Day Trend Detection (Alert พิเศษ)
+        // ==========================================
+        const catWeightKg = Number(effectiveCat?.weight);
+        const safeCatWeightKg = Number.isFinite(catWeightKg) && catWeightKg > 0 ? catWeightKg : 4;
+        const analyses = unifiedLogs.map((log) => analyzeHealthLog(log, safeCatWeightKg));
 
-        unifiedLogs.forEach((log, idx) => {
-          const analysis = analyzeHealthLog(log);
-          if (idx < logsForCurrentStatus.length) totalScore += analysis.score;
-          allAlerts = [...allAlerts, ...analysis.alerts];
-          totalRedFlags += analysis.redFlags;
-        });
+        // Tier 1: latest 3 days (Immediate)
+        const recentAnalyses = analyses.slice(0, 3);
+        const recentCount = Math.max(1, recentAnalyses.length);
+        const avg3Score = Math.round(
+          recentAnalyses.reduce((sum, a) => sum + (Number(a?.score) || 0), 0) / recentCount
+        );
+        const hasEmergencyIn3Days = recentAnalyses.some((a) => Boolean(a?.meta?.isEmergency));
 
-        const averageScore = Math.round(totalScore / logsForCurrentStatus.length);
-        setCurrentScore(averageScore);
-        // เก็บ alerts ล่าสุดไม่เกิน 3 รายการ (ไม่ซ้ำ)
+        // หากเจอ Red Flag รุนแรงใน 3 วันนี้ ให้ดีดสถานะเป็น Critical ทันที
+        setCurrentScore(hasEmergencyIn3Days ? Math.min(avg3Score, 19) : avg3Score);
+
+        // Tier 2: 7-day trend alerts (special alerts)
+        const trend7d = analyzeHealthTrend7d(unifiedLogs.slice(0, 7), safeCatWeightKg);
+        const trendAlerts = Array.isArray(trend7d?.alerts) ? trend7d.alerts : [];
+
+        // รวม alert พิเศษ (trend) + alert ปกติ (per-day) แล้วค่อย dedupe
+        const allAlerts = [
+          ...trendAlerts,
+          ...analyses.flatMap((a) => (Array.isArray(a?.alerts) ? a.alerts : [])),
+        ];
+
+        // เก็บ alerts ล่าสุดไม่เกิน 4 รายการ (ไม่ซ้ำ) และให้ trend alerts มาก่อน
         setLatestAlerts([...new Set(allAlerts)].slice(0, 4));
-        setLatestRedFlags(totalRedFlags);
+
+        // red flags (สรุปในช่วง 3 วันล่าสุด เพื่อให้ตรงกับสถานะหลัก)
+        const redFlags3d = recentAnalyses.reduce((sum, a) => sum + (Number(a?.redFlags) || 0), 0);
+        setLatestRedFlags(redFlags3d);
       } else {
         setCurrentScore(100);
         setLatestAlerts([]);
@@ -296,32 +316,72 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   // ==========================================
   // 🐾 Fetch Paw Progress Stats from Supabase
   // ==========================================
-  const fetchPawStats = async (catId) => {
+  const fetchPawStats = async (catId, daysWindow = 7) => {
     try {
+      const windowDays = Number.isFinite(Number(daysWindow)) && Number(daysWindow) > 0 ? Math.floor(Number(daysWindow)) : 7;
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - (windowDays - 1));
+      const startIso = start.toISOString();
+      const startDate = startIso.slice(0, 10);
+      const nowIso = new Date().toISOString();
       const today = new Date().toISOString().split('T')[0];
 
-      // --- Activity & Litter from ai_daily_summary ---
-      const { data: summaryData, error: summaryError } = await supabase
-        .from('ai_daily_summary')
-        .select('count_00_06, count_06_12, count_12_18, count_18_24, total_litter')
-        .eq('cat_id', catId)
-        .eq('summary_date', today)
-        .single();
+      const ACTIVITY_GOAL = 20; // target movements per day
+      const LITTER_GOAL = 4; // target litter visits per day
 
       let activityPercent = 0;
       let litterPercent = 0;
 
-      if (!summaryError && summaryData) {
-        const ACTIVITY_GOAL = 20; // target movements per day
-        const totalActivity =
-          (summaryData.count_00_06 || 0) +
-          (summaryData.count_06_12 || 0) +
-          (summaryData.count_12_18 || 0) +
-          (summaryData.count_18_24 || 0);
-        activityPercent = Math.min(100, Math.round((totalActivity / ACTIVITY_GOAL) * 100));
+      // --- Activity & Litter (Primary) from ai_daily_summary over selected window ---
+      const { data: summaryRows, error: summaryError } = await supabase
+        .from('ai_daily_summary')
+        .select('count_00_06, count_06_12, count_12_18, count_18_24, total_litter, summary_date')
+        .eq('cat_id', catId)
+        .gte('summary_date', startDate)
+        .lte('summary_date', today)
+        .order('summary_date', { ascending: false });
 
-        const LITTER_GOAL = 4; // target litter visits per day
-        litterPercent = Math.min(100, Math.round(((summaryData.total_litter || 0) / LITTER_GOAL) * 100));
+      if (!summaryError && Array.isArray(summaryRows) && summaryRows.length > 0) {
+        const totals = summaryRows.reduce(
+          (acc, row) => {
+            acc.activity +=
+              (row.count_00_06 || 0) +
+              (row.count_06_12 || 0) +
+              (row.count_12_18 || 0) +
+              (row.count_18_24 || 0);
+            acc.litter += (row.total_litter || 0);
+            return acc;
+          },
+          { activity: 0, litter: 0 }
+        );
+
+        activityPercent = Math.min(100, Math.round((totals.activity / (ACTIVITY_GOAL * windowDays)) * 100));
+        litterPercent = Math.min(100, Math.round((totals.litter / (LITTER_GOAL * windowDays)) * 100));
+      } else {
+        // --- Fallback: derive from ai_cat_events (in case ai_daily_summary isn't populated) ---
+        const [activityRes, litterRes] = await Promise.all([
+          supabase
+            .from('ai_cat_events')
+            .select('id', { head: true, count: 'exact' })
+            .eq('cat_id', catId)
+            .eq('behavior_label', 'activity')
+            .gte('occurred_at', startIso)
+            .lt('occurred_at', nowIso),
+          supabase
+            .from('ai_cat_events')
+            .select('id', { head: true, count: 'exact' })
+            .eq('cat_id', catId)
+            .eq('behavior_label', 'litter')
+            .gte('occurred_at', startIso)
+            .lt('occurred_at', nowIso),
+        ]);
+
+        const activityCount = !activityRes?.error && Number.isFinite(activityRes?.count) ? activityRes.count : 0;
+        const litterCount = !litterRes?.error && Number.isFinite(litterRes?.count) ? litterRes.count : 0;
+
+        activityPercent = Math.min(100, Math.round((activityCount / (ACTIVITY_GOAL * windowDays)) * 100));
+        litterPercent = Math.min(100, Math.round((litterCount / (LITTER_GOAL * windowDays)) * 100));
       }
 
       // --- Wellness from assessments (latest record) ---
