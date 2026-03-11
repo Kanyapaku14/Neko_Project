@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { analyzeHealthLog, analyzeHealthTrend7d, getHealthStatus } from "../utils/healthLogic";
 
+
 import AlertEngine from '../services/AlertEngine';
 
 import * as Print from 'expo-print';
@@ -321,7 +322,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
           recentAnalyses.reduce((sum, a) => sum + (Number(a?.score) || 0), 0) / recentCount
         );
         const hasEmergencyIn3Days = recentAnalyses.some((a) => Boolean(a?.meta?.isEmergency));
-
 
         // หากเจอ Red Flag รุนแรงใน 3 วันนี้ ให้ดีดสถานะเป็น Critical ทันที
         setCurrentScore(hasEmergencyIn3Days ? Math.min(avg3Score, 19) : avg3Score);
