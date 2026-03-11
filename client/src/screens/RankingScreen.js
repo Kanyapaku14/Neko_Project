@@ -659,7 +659,7 @@ export default function RankingScreen({ session, onBack }) {
       }
 
       // Notify User
-      Alert.alert("สำเร็จ! 🎉", `เช็คอินต่อเนื่องรับ ${pointsToAward} คะแนน`);
+      Alert.alert("Success! 🎉", `You earned ${pointsToAward} points for consecutive check-ins.`);
 
     } catch (e) {
       console.log("Auto check-in error:", e);

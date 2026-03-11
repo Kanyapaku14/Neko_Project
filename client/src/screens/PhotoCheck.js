@@ -53,12 +53,12 @@ export default function PhotoCheck({ onNavigate, session }) {
     // ── เปิด dialog เลือกแหล่งรูป ────────────────────────────────────────────
     const handlePickImage = async (index) => {
         Alert.alert(
-            'เลือกรูปภาพ',
+            'Select Image',
             PHOTO_SLOTS[index].label,
             [
-                { text: '📷 ถ่ายรูป', onPress: () => openCamera(index) },
-                { text: '🖼️ เลือกจากคลัง', onPress: () => openGallery(index) },
-                { text: 'ยกเลิก', style: 'cancel' },
+                { text: '📷 Take Photo', onPress: () => openCamera(index) },
+                { text: '🖼️ Choose from Library', onPress: () => openGallery(index) },
+                { text: 'Cancel', style: 'cancel' },
             ]
         );
     };
@@ -66,7 +66,7 @@ export default function PhotoCheck({ onNavigate, session }) {
     const openCamera = async (index) => {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('ไม่ได้รับสิทธิ์', 'กรุณาอนุญาตให้แอปเข้าถึงกล้องในการตั้งค่า');
+            Alert.alert('Permission Denied', 'Please allow camera access in settings.');
             return;
         }
         const result = await ImagePicker.launchCameraAsync({
@@ -85,7 +85,7 @@ export default function PhotoCheck({ onNavigate, session }) {
     const openGallery = async (index) => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('ไม่ได้รับสิทธิ์', 'กรุณาอนุญาตให้แอปเข้าถึงคลังภาพในการตั้งค่า');
+            Alert.alert('Permission Denied', 'Please allow photo library access in settings.');
             return;
         }
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -105,7 +105,7 @@ export default function PhotoCheck({ onNavigate, session }) {
     const handleStartAiCheck = async () => {
         const hasAny = images.some(Boolean);
         if (!hasAny) {
-            Alert.alert('ยังไม่มีรูป', 'กรุณาอัปโหลดรูปอย่างน้อย 1 ช่อง');
+            Alert.alert('No images yet', 'Please upload at least 1 image.');
             return;
         }
 
@@ -166,7 +166,7 @@ export default function PhotoCheck({ onNavigate, session }) {
             onNavigate('AnalysisResult', { result: apiJson.result, recordId });
 
         } catch (err) {
-            Alert.alert('เกิดข้อผิดพลาด', err.message);
+            Alert.alert('Error', err.message);
         } finally {
             setLoading(false);
         }

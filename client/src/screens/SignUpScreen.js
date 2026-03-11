@@ -17,17 +17,17 @@ export default function SignUpScreen({ onNavigate }) {
     const handleSignUp = async () => {
         // 1. เช็คความถูกต้อง
         if(!agree) {
-            Alert.alert("ข้อผิดพลาด", "กรุณายอมรับเงื่อนไข (Terms & Privacy)");
+            Alert.alert("Error", "Please accept the Terms & Privacy.");
             return;
         }
         if (!email || !password) {
-            Alert.alert("ข้อผิดพลาด", "กรุณากรอกข้อมูลให้ครบถ้วน");
+            Alert.alert("Error", "Please fill in all required fields.");
             return;
         }
 
         const cleanEmail = email.trim().toLowerCase();
         if (!cleanEmail.endsWith('@gmail.com') && !cleanEmail.endsWith('@hotmail.com')) {
-            Alert.alert("ข้อผิดพลาด", "กรุณาใช้อีเมล @gmail.com หรือ @hotmail.com เท่านั้นในการสมัครสมาชิก");
+            Alert.alert("Error", "Please use an email ending with @gmail.com or @hotmail.com to sign up.");
             return;
         }
 

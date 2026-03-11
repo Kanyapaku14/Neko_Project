@@ -675,7 +675,7 @@ export default function LogDaily(props) {
 
         const missingFields = [];
         const hasInvalidMeals = meals.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === '');
-        if (hasInvalidMeals) missingFields.push("Food meals data (ประเภทหรือปริมาณ)");
+        if (hasInvalidMeals) missingFields.push("Food meals data (type or amount)");
         if (consumeMeals === null || consumeMeals.toString().trim() === '') missingFields.push("Consume amount");
         if (waterIntake === null || waterIntake.toString().trim() === '') missingFields.push("Total water quantity");
         if (urineLevel === null) missingFields.push("Urine level");
@@ -683,7 +683,7 @@ export default function LogDaily(props) {
 
 
         if (missingFields.length > 0) {
-            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก\n(Missing: " + missingFields.join(', ') + ")");
+            return Alert.alert("Incomplete data", "Please complete all fields before saving\n(Missing: " + missingFields.join(', ') + ")");
         }
 
         await saveData();
@@ -697,7 +697,7 @@ export default function LogDaily(props) {
         if (isDiarrheaChecked && !diarrheaColor) missingFields.push("Diarrhea Color");
 
         if (missingFields.length > 0) {
-            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก\n(Missing: " + missingFields.join(', ') + ")");
+            return Alert.alert("Incomplete data", "Please complete all fields before saving\n(Missing: " + missingFields.join(', ') + ")");
         }
 
         setLoading(true);
@@ -731,8 +731,8 @@ export default function LogDaily(props) {
             if (!hasNormalInDB && !isNormalCompleteInState) {
                 setLoading(false);
                 return Alert.alert(
-                    "ไม่สามารถบันทึกได้",
-                    "ต้องกรอกข้อมูลหน้า 'Normal' (อาหาร/น้ำ/ขับถ่าย) ของวันนี้ให้ครบถ้วนก่อน ถึงจะสามารถบันทึก Something off ได้"
+                    "Unable to save",
+                    "Please complete today's 'Normal' (food/water/elimination) data before saving Something Off."
                 );
             }
 
@@ -741,7 +741,7 @@ export default function LogDaily(props) {
 
         } catch (error) {
             console.error("Check normal data error:", error);
-            Alert.alert("Error", "เกิดข้อผิดพลาดในการตรวจสอบข้อมูล");
+            Alert.alert("Error", "An error occurred while validating data.");
             setLoading(false);
         }
     };

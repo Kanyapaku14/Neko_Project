@@ -13,7 +13,7 @@ export default function SignInScreen({ onNavigate, onForgotPassword }) {
         const cleanEmail = email.trim().toLowerCase();
 
         if (!cleanEmail.endsWith('@gmail.com') && !cleanEmail.endsWith('@hotmail.com')) {
-            Alert.alert('ข้อผิดพลาด', 'กรุณาใช้อีเมล @gmail.com หรือ @hotmail.com เท่านั้นในการเข้าสู่ระบบ');
+            Alert.alert('Error', 'Please use an email ending with @gmail.com or @hotmail.com to sign in.');
             return;
         }
 

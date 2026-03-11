@@ -24,15 +24,15 @@ export default function ResetPasswordScreen({ onComplete, onBack }) {
 
     const handleReset = async () => {
         if (!password || !confirmPassword) {
-            Alert.alert('แจ้งเตือน', 'กรุณากรอกรหัสผ่านให้ครบถ้วน');
+            Alert.alert('Alert', 'Please fill in all password fields.');
             return;
         }
         if (password.length < 6) {
-            Alert.alert('แจ้งเตือน', 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
+            Alert.alert('Alert', 'Password must be at least 6 characters.');
             return;
         }
         if (password !== confirmPassword) {
-            Alert.alert('แจ้งเตือน', 'รหัสผ่านทั้งสองช่องไม่ตรงกัน กรุณาตรวจสอบใหม่');
+            Alert.alert('Alert', 'Passwords do not match. Please check again.');
             return;
         }
 
@@ -46,12 +46,12 @@ export default function ResetPasswordScreen({ onComplete, onBack }) {
             }
 
             Alert.alert(
-                'สำเร็จ! 🎉',
-                'ตั้งรหัสผ่านใหม่เรียบร้อยแล้ว กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่',
-                [{ text: 'ตกลง', onPress: onComplete }]
+                'Success! 🎉',
+                'Your password has been reset. Please sign in with your new password.',
+                [{ text: 'OK', onPress: onComplete }]
             );
         } catch (err) {
-            Alert.alert('Error', 'ไม่สามารถตั้งรหัสผ่านใหม่ได้ กรุณาลองใหม่อีกครั้ง');
+            Alert.alert('Error', 'Unable to reset password. Please try again.');
         } finally {
             setLoading(false);
         }

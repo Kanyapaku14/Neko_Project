@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, Image, StyleSheet, Switch, ScrollView, Sa
 import { Ionicons, Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from './config/supabaseClient'; // Adjusted path to existing client
+import NotificationService from '../services/NotificationService';
 
 export default function SettingScreen({ session, onNavigate, onLogout, onBack }) {
     const [userData, setUserData] = useState(null);
@@ -14,6 +15,56 @@ export default function SettingScreen({ session, onNavigate, onLogout, onBack })
     const [privacyEnabled, setPrivacyEnabled] = useState(true);
     const [phoneCameraEnabled, setPhoneCameraEnabled] = useState(true);
 
+    // Initialize defaults (all off) for a new user id
+    useEffect(() => {
+        let alive = true;
+        const initDefaultsForUser = async () => {
+            if (!session?.user?.id) return;
+            try {
+                const [notifRaw, phoneRaw, privacyRaw] = await AsyncStorage.multiGet([
+                    'notifications_enabled',
+                    'phone_camera_enabled',
+                    'privacy_enabled',
+                ]);
+
+                const needsNotifInit = notifRaw?.[1] === null;
+                const needsPhoneInit = phoneRaw?.[1] === null;
+                const needsPrivacyInit = privacyRaw?.[1] === null;
+
+                if (needsNotifInit) {
+                    await NotificationService.setEnabled(false);
+                    await NotificationService.dispose();
+                }
+                if (needsPhoneInit) await AsyncStorage.setItem('phone_camera_enabled', 'false');
+                if (needsPrivacyInit) await AsyncStorage.setItem('privacy_enabled', 'false');
+
+                if (!alive) return;
+                if (needsNotifInit) setNotificationEnabled(false);
+                if (needsPhoneInit) setPhoneCameraEnabled(false);
+                if (needsPrivacyInit) setPrivacyEnabled(false);
+            } catch (_) {
+                // no-op
+            }
+        };
+        initDefaultsForUser();
+        return () => { alive = false; };
+    }, [session?.user?.id]);
+
+    // Load notification toggle from storage
+    useEffect(() => {
+        let alive = true;
+        const load = async () => {
+            try {
+                const enabled = await NotificationService.isEnabled();
+                if (alive) setNotificationEnabled(enabled);
+            } catch (_) {
+                // keep default
+            }
+        };
+        load();
+        return () => { alive = false; };
+    }, []);
+
     // Load phone camera toggle from storage
     useEffect(() => {
         AsyncStorage.getItem('phone_camera_enabled').then(val => {
@@ -21,9 +72,31 @@ export default function SettingScreen({ session, onNavigate, onLogout, onBack })
         });
     }, []);
 
+    // Load privacy toggle from storage
+    useEffect(() => {
+        AsyncStorage.getItem('privacy_enabled').then(val => {
+            if (val !== null) setPrivacyEnabled(val === 'true');
+        });
+    }, []);
+
+    const handleNotificationToggle = async (value) => {
+        setNotificationEnabled(value);
+        await NotificationService.setEnabled(value);
+        if (value) {
+            await NotificationService.init();
+        } else {
+            await NotificationService.dispose();
+        }
+    };
+
     const handlePhoneCameraToggle = async (value) => {
         setPhoneCameraEnabled(value);
         await AsyncStorage.setItem('phone_camera_enabled', String(value));
+    };
+
+    const handlePrivacyToggle = async (value) => {
+        setPrivacyEnabled(value);
+        await AsyncStorage.setItem('privacy_enabled', String(value));
     };
 
     useEffect(() => {
@@ -177,7 +250,7 @@ export default function SettingScreen({ session, onNavigate, onLogout, onBack })
                         </View>
                         <Switch
                             value={notificationEnabled}
-                            onValueChange={setNotificationEnabled}
+                            onValueChange={handleNotificationToggle}
                             trackColor={{ false: "#767577", true: "#004D40" }}
                             thumbColor={notificationEnabled ? "#f4f3f4" : "#f4f3f4"}
                         />
@@ -211,7 +284,7 @@ export default function SettingScreen({ session, onNavigate, onLogout, onBack })
                         </View>
                         <Switch
                             value={privacyEnabled}
-                            onValueChange={setPrivacyEnabled}
+                            onValueChange={handlePrivacyToggle}
                             trackColor={{ false: "#767577", true: "#004D40" }}
                             thumbColor={privacyEnabled ? "#f4f3f4" : "#f4f3f4"}
                         />
