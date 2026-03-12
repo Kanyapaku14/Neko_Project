@@ -24,6 +24,7 @@ import AlertEngine, { AlertEvents } from '../services/AlertEngine';
 import AlertRepository from '../services/AlertRepository';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
 import supabase from './config/supabaseClient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -491,7 +492,21 @@ export default function AlertScreen({ onBack, onNavigate }) {
     const menuButtonPressAnim = useRef(new Animated.Value(0)).current;
     const selectionBarAnim = useRef(new Animated.Value(0)).current;
     const { pushAlert } = useContext(GlobalAlertQueueContext);
+    const [notificationsEnabled, setNotificationsEnabled] = useState(null);
+    const buildAlertsFromLocal = (mode) => {
+        const list = mode === 'deleted' && AlertEngine.getDeletedHistory
+            ? AlertEngine.getDeletedHistory()
+            : AlertEngine.getHistory();
+        const allowed = (list || []).filter(isAllowedAlertType);
+        return dedupeAlerts(collapseAlerts(allowed))
+            .sort((a, b) => new Date(b?.timestamp || 0) - new Date(a?.timestamp || 0));
+    };
     const loadAlertsFromDb = async (mode) => {
+        if (notificationsEnabled === null) return;
+        if (notificationsEnabled === false) {
+            setAlerts(buildAlertsFromLocal(mode));
+            return;
+        }
         try {
             const { data: userRes } = await supabase.auth.getUser();
             const userId = userRes?.user?.id;
@@ -542,17 +557,12 @@ export default function AlertScreen({ onBack, onNavigate }) {
             setAlerts(ordered);
         } catch (err) {
             // fallback to local history
-            const list = mode === 'deleted' && AlertEngine.getDeletedHistory
-                ? AlertEngine.getDeletedHistory()
-                : AlertEngine.getHistory();
-            const allowed = (list || []).filter(isAllowedAlertType);
-            const ordered = dedupeAlerts(collapseAlerts(allowed))
-                .sort((a, b) => new Date(b?.timestamp || 0) - new Date(a?.timestamp || 0));
-            setAlerts(ordered);
+            setAlerts(buildAlertsFromLocal(mode));
         }
     };
 
     useEffect(() => {
+        if (notificationsEnabled === false || notificationsEnabled === null) return;
         AlertRepository.init();
         // syncFromRemote is already handled by GlobalAlertQueueProvider.
         // TODO: For out-of-app (push) notifications, this is where you would register the device token.
@@ -565,19 +575,46 @@ export default function AlertScreen({ onBack, onNavigate }) {
 
         // For list refresh (including likes), sync alerts only and skip identity reviews to avoid popups.
         AlertRepository.syncFromRemote({ skipIdentityReview: true });
+    }, [notificationsEnabled]);
+
+    useEffect(() => {
+        let alive = true;
+        const loadPrefs = async () => {
+            try {
+                const raw = await AsyncStorage.getItem('notifications_enabled');
+                if (!alive) return;
+                if (raw === null) {
+                    setNotificationsEnabled(true);
+                } else {
+                    setNotificationsEnabled(raw === 'true');
+                }
+            } catch (_) {
+                setNotificationsEnabled(true);
+            }
+        };
+        loadPrefs();
+        return () => { alive = false; };
     }, []);
 
     useEffect(() => {
         loadAlertsFromDb(filterMode);
 
         const handler = () => {
-            loadAlertsFromDb(filterMode);
+            // Immediate UI update from local engine; DB sync can lag.
+            setAlerts(buildAlertsFromLocal(filterMode));
+            if (notificationsEnabled === true) {
+                loadAlertsFromDb(filterMode);
+            }
         };
         AlertEngine.on(AlertEvents.UPDATED, handler);
+        AlertEngine.on(AlertEvents.ALERT_ADDED, handler);
 
         Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
-        return () => AlertEngine.off(AlertEvents.UPDATED, handler);
-    }, [filterMode, fadeAnim]);
+        return () => {
+            AlertEngine.off(AlertEvents.UPDATED, handler);
+            AlertEngine.off(AlertEvents.ALERT_ADDED, handler);
+        };
+    }, [filterMode, fadeAnim, notificationsEnabled]);
 
     useEffect(() => {
         Animated.spring(selectionBarAnim, {
@@ -682,8 +719,10 @@ export default function AlertScreen({ onBack, onNavigate }) {
             title: 'Delete Notifications',
             message: 'Are you sure you want to delete all notifications? This cannot be undone.',
             confirmText: 'Delete All',
-            onConfirm: () => {
-                if (AlertEngine.deleteAllAlerts) AlertEngine.deleteAllAlerts();
+            onConfirm: async () => {
+                if (AlertEngine.deleteAllAlerts) await AlertEngine.deleteAllAlerts();
+                await AlertRepository.deleteAllOnRemote();
+                loadAlertsFromDb(filterMode);
             },
         });
     };

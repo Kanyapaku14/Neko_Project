@@ -1,9 +1,11 @@
 import 'react-native-gesture-handler';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, ActivityIndicator, AppState } from 'react-native';
+import { View, ActivityIndicator, AppState, Alert as RNAlert } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 // Import SafeAreaProvider here
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import AppAlertHost from './src/components/AppAlertHost';
+import { alert as appAlert } from './src/services/AppAlert';
 
 import SignInScreen from './src/screens/SignInScreen';
 import SignUpScreen from './src/screens/SignUpScreen';
@@ -56,6 +58,10 @@ import {
 } from '@expo-google-fonts/inter';
 import { Poppins_400Regular } from '@expo-google-fonts/poppins';
 import { Itim_400Regular } from '@expo-google-fonts/itim';
+
+// Replace native Alert.alert with a custom minimal modal (global)
+// หมายเหตุ: Alert.alert ของ RN ปรับ UI ไม่ได้ จึงครอบด้วย custom modal เพื่อให้สวยและคุมธีมทั้งแอป
+RNAlert.alert = appAlert;
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -620,6 +626,7 @@ export default function App() {
       <SafeAreaProvider>
         <GlobalAlertQueueProvider session={session} activeScreen={activeScreenName}>
           {renderScreen()}
+          <AppAlertHost />
         </GlobalAlertQueueProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

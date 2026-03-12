@@ -27,7 +27,14 @@ const tintHex = (hex, amount = 0) => {
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 };
 
-export default function CatHealthMeter({ score = 44, centerImageUri = null, centerMode = "dashboard", size = null }) {
+export default function CatHealthMeter({
+  score = 44,
+  centerImageUri = null,
+  centerMode = "dashboard",
+  size = null,
+  statusText = null,
+  statusColor = null,
+}) {
   const safeScore = Math.max(0, Math.min(100, Number(score) || 0));
   const actualSize = size || (centerMode === "profile" ? 190 : 250);
   const scale = actualSize / 190;
@@ -66,10 +73,21 @@ export default function CatHealthMeter({ score = 44, centerImageUri = null, cent
   });
 
   const health = getHealthStatus(safeScore);
+  const resolvedLabel = (statusText ?? health.label ?? "").toString();
+  const resolvedColor = statusColor ?? health.color;
+  const normalizedLabel = resolvedLabel.trim().toLowerCase();
+
+  const moodByLabel =
+    normalizedLabel === "normal" ? "happy" :
+      normalizedLabel === "monitor" ? "normal" :
+        normalizedLabel === "warning" ? "meh" :
+          normalizedLabel === "critical" ? "sad" :
+            null;
+
   const status = {
-    text: String(health.label || "").toUpperCase(),
-    color: health.color,
-    mood: safeScore >= 80 ? "happy" : safeScore >= 60 ? "normal" : safeScore >= 40 ? "meh" : "sad",
+    text: resolvedLabel.toUpperCase(),
+    color: resolvedColor,
+    mood: moodByLabel || (safeScore >= 80 ? "happy" : safeScore >= 60 ? "normal" : safeScore >= 40 ? "meh" : "sad"),
   };
   const ringStart = tintHex(status.color, 35);
   const ringEnd = tintHex(status.color, -25);

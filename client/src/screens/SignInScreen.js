@@ -3,12 +3,14 @@ import React, { useState } from 'react';
 import { styles } from './Style/authstyle';
 import supabase from './config/supabaseClient';
 import { View, Text, TextInput, TouchableOpacity, Image, Alert, SafeAreaView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { StyleSheet } from 'react-native';
 
 export default function SignInScreen({ onNavigate, onForgotPassword }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
-
+    const [showPassword, setShowPassword] = useState(false);
     const handleSignIn = async () => {
         const cleanEmail = email.trim().toLowerCase();
 
@@ -71,6 +73,7 @@ export default function SignInScreen({ onNavigate, onForgotPassword }) {
                             placeholder="Enter your email"
                             autoCapitalize="none"
                             keyboardType="email-address"
+                            
                         />
                     </View>
 
@@ -79,14 +82,32 @@ export default function SignInScreen({ onNavigate, onForgotPassword }) {
                             <Text style={styles.label}>Password</Text>
                             <Text style={styles.required}> *</Text>
                         </View>
-                        <TextInput
-                            style={styles.input}
-                            value={password}
-                            onChangeText={setPassword}
-                            placeholder="Enter your password"
-                            secureTextEntry
-                        />
+                        <View style={localStyles.inputWithIconContainer}>
+                            <TextInput
+                                style={[styles.input, localStyles.inputWithRightIcon]}
+                                value={password}
+                                onChangeText={setPassword}
+                                placeholder="Enter your password"
+                                secureTextEntry={!showPassword}
+                                autoCapitalize="none"
+                            />
+
+                            <TouchableOpacity
+                                style={localStyles.eyeButton}
+                                onPress={() => setShowPassword((prev) => !prev)}
+                                accessibilityRole="button"
+                                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                                <Ionicons
+                                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                                    size={20}
+                                    color="#607D8B"
+                                />
+                            </TouchableOpacity>
+                        </View>
                     </View>
+                    
 
                     <TouchableOpacity
                         style={{ alignSelf: 'flex-end', marginTop: 8 }}
@@ -109,4 +130,24 @@ export default function SignInScreen({ onNavigate, onForgotPassword }) {
             </View>
         </SafeAreaView>
     );
+  
 }
+const localStyles = StyleSheet.create({
+    inputWithIconContainer: {
+        width: '80%',
+        alignSelf: 'center',
+        justifyContent: 'center',
+    },
+    inputWithRightIcon: {
+        width: '100%',
+        alignSelf: 'stretch',
+        paddingRight: 44,
+    },
+    eyeButton: {
+        position: 'absolute',
+        right: 12,
+        height: 50,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+});
