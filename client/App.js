@@ -524,7 +524,11 @@ export default function App() {
         return <AnalysisResult onNavigate={(screen) => setAuthScreen(screen)} session={session} result={screenParams?.result} recordId={screenParams?.recordId} isHistory={screenParams?.isHistory} />;
       }
       if (currentScreenName === 'Alert') {
-        return <AlertScreen onBack={() => setAuthScreen(screenParams?.returnTo || 'Camera')} onNavigate={(screen, params) => navigateAuth(screen, params)} />;
+        return <AlertScreen
+          onBack={() => setAuthScreen(screenParams?.returnTo || 'Camera')}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
+          returnTo={screenParams?.returnTo}
+        />;
       }
       if (currentScreenName === 'EventDetail') {
         return <EventDetailScreen onBack={() => navigateAuth('Alert', { returnTo: screenParams?.returnTo || 'Camera' })} alertData={screenParams?.alertData} />;

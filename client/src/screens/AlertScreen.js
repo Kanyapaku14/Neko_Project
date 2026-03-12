@@ -473,7 +473,7 @@ const SwipeableNotificationCard = ({
     );
 };
 
-export default function AlertScreen({ onBack, onNavigate }) {
+export default function AlertScreen({ onBack, onNavigate, returnTo }) {
     const [alerts, setAlerts] = useState([]);
     const [filterMode, setFilterMode] = useState('all');
     const [isSelecting, setIsSelecting] = useState(false);
@@ -683,7 +683,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
         setActiveSwipeId(null);
         const shouldOpenIdentify = alert.pendingIdentityConfirm === true;
         if (shouldOpenIdentify) pushAlert(alert);
-        else onNavigate('EventDetail', { alertData: alert });
+        else onNavigate('EventDetail', { alertData: alert, returnTo: returnTo || 'Camera' });
         if (!alert.isRead && AlertEngine.markAsRead) {
             AlertEngine.markAsRead(alert.id);
             AlertRepository.markAsReadOnRemote(alert.id);
