@@ -13,6 +13,7 @@ import { analyzeHealthLog, analyzeHealthTrend7d, getRiskStatus, getHealthStatus 
 
 
 import AlertEngine from '../services/AlertEngine';
+import useCameraData from '../hooks/useCameraData'; // Added useCameraData
 
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
@@ -29,7 +30,7 @@ const lowScoreAlertInFlight = new Set();
 // 🐾 Paw Progress Bar Component
 // ==========================================
 const PawProgressBar = ({ label, percent, icon }) => {
-  const clampedPercent = Math.max(0, Math.min(100, percent));
+  const clampedPercent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
 
   // Custom colors for specific labels to match CameraScreen
   const getBarColor = (label) => {
@@ -102,7 +103,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const [latestDiseases, setLatestDiseases] = useState([]);
   const [isFirstLog, setIsFirstLog] = useState(false);
 
-  const [pawStats, setPawStats] = useState({ activity: 0, litter: 0, wellness: 0 });
+  // Replaced `pawStats` with `useCameraData` hook directly
+  const { data: cameraData, refetch: refetchCameraData } = useCameraData(session, 'connected', catDetails?.id, { cameraOnly: false });
 
   const [eventSummary, setEventSummary] = useState({
     all: { eat: 0, litter: 0, sleep: 0, activity: 0, abnormal: 0, total: 0 },
@@ -241,14 +243,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       lowScoreAlertInFlight.delete(key);
     }
   };
-
-  // Fetch paw stats whenever the active cat changes
-  useEffect(() => {
-    if (catDetails?.id) {
-      const days = selectedPeriod === "1 MONTH" ? 30 : 7;
-      fetchPawStats(catDetails.id, days);
-    }
-  }, [catDetails, selectedPeriod]);
 
   const fetchDashboardData = async () => {
     try {
@@ -436,101 +430,6 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   };
 
 
-  // ==========================================
-  // 🐾 Fetch Paw Progress Stats from Supabase
-  // ==========================================
-  const fetchPawStats = async (catId, daysWindow = 7) => {
-    try {
-      const windowDays = Number.isFinite(Number(daysWindow)) && Number(daysWindow) > 0 ? Math.floor(Number(daysWindow)) : 7;
-      const start = new Date();
-      start.setHours(0, 0, 0, 0);
-      start.setDate(start.getDate() - (windowDays - 1));
-      const startIso = start.toISOString();
-      const startDate = startIso.slice(0, 10);
-      const nowIso = new Date().toISOString();
-      const today = new Date().toISOString().split('T')[0];
-
-      const ACTIVITY_GOAL = 20; // target movements per day
-      const LITTER_GOAL = 4; // target litter visits per day
-
-      let activityPercent = 0;
-      let litterPercent = 0;
-
-      // --- Activity & Litter (Primary) from ai_daily_summary over selected window ---
-      const { data: summaryRows, error: summaryError } = await supabase
-        .from('ai_daily_summary')
-        .select('count_00_06, count_06_12, count_12_18, count_18_24, total_litter, summary_date')
-        .eq('cat_id', catId)
-        .gte('summary_date', startDate)
-        .lte('summary_date', today)
-        .order('summary_date', { ascending: false });
-
-      if (!summaryError && Array.isArray(summaryRows) && summaryRows.length > 0) {
-        const totals = summaryRows.reduce(
-          (acc, row) => {
-            acc.activity +=
-              (row.count_00_06 || 0) +
-              (row.count_06_12 || 0) +
-              (row.count_12_18 || 0) +
-              (row.count_18_24 || 0);
-            acc.litter += (row.total_litter || 0);
-            return acc;
-          },
-          { activity: 0, litter: 0 }
-        );
-
-        activityPercent = Math.min(100, Math.round((totals.activity / (ACTIVITY_GOAL * windowDays)) * 100));
-        litterPercent = Math.min(100, Math.round((totals.litter / (LITTER_GOAL * windowDays)) * 100));
-      } else {
-        // --- Fallback: derive from ai_cat_events (in case ai_daily_summary isn't populated) ---
-        const [activityRes, litterRes] = await Promise.all([
-          supabase
-            .from('ai_cat_events')
-            .select('id', { head: true, count: 'exact' })
-            .eq('cat_id', catId)
-            .eq('behavior_label', 'activity')
-            .gte('occurred_at', startIso)
-            .lt('occurred_at', nowIso),
-          supabase
-            .from('ai_cat_events')
-            .select('id', { head: true, count: 'exact' })
-            .eq('cat_id', catId)
-            .eq('behavior_label', 'litter')
-            .gte('occurred_at', startIso)
-            .lt('occurred_at', nowIso),
-        ]);
-
-        const activityCount = !activityRes?.error && Number.isFinite(activityRes?.count) ? activityRes.count : 0;
-        const litterCount = !litterRes?.error && Number.isFinite(litterRes?.count) ? litterRes.count : 0;
-
-        activityPercent = Math.min(100, Math.round((activityCount / (ACTIVITY_GOAL * windowDays)) * 100));
-        litterPercent = Math.min(100, Math.round((litterCount / (LITTER_GOAL * windowDays)) * 100));
-      }
-
-      // --- Wellness from assessments (latest record) ---
-      const { data: assessmentData, error: assessmentError } = await supabase
-        .from('assessments')
-        .select('overall_risk_score')
-        .eq('cat_id', catId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      let wellnessPercent = 0;
-      if (!assessmentError && assessmentData) {
-        wellnessPercent = Math.max(0, 100 - (assessmentData.overall_risk_score || 0));
-      }
-
-      setPawStats({
-        activity: activityPercent,
-        litter: litterPercent,
-        wellness: wellnessPercent,
-      });
-    } catch (err) {
-      console.warn('fetchPawStats error:', err);
-      setPawStats({ activity: 0, litter: 0, wellness: 0 });
-    }
-  };
 
 
   const fetchAccumulatedEventSummary = async (catId) => {
@@ -1153,22 +1052,22 @@ export default function Dashboard({ onBack, onNavigate, session }) {
           <View style={styles.riskCard}>
             <PawProgressBar
               label="Activity Level"
-              percent={pawStats.activity}
+              percent={cameraData?.behaviorAnalytics?.energy?.active || 0}
               icon="lightning-bolt"
             />
             <PawProgressBar
               label="Litter Box Usage"
-              percent={pawStats.litter}
+              percent={Math.min(100, Math.round(((cameraData?.behaviorAnalytics?.totals?.litter || 0) / 4) * 100))}
               icon="cat"
             />
             <PawProgressBar
               label="Overall Wellness"
-              percent={pawStats.wellness}
+              percent={cameraData?.behaviorAnalytics?.wellness?.score || 0}
               icon="heart-pulse"
             />
             <View style={styles.riskFooter}>
               <MaterialCommunityIcons name="clock-outline" size={14} color="#90A4AE" />
-              <Text style={styles.riskFooterText}>Based on the last {selectedPeriod === '1 MONTH' ? '30' : '7'} days of activity</Text>
+              <Text style={styles.riskFooterText}>Based on today's activity</Text>
             </View>
           </View>
 

@@ -193,15 +193,21 @@ export const evaluateHealthLog = (log, catWeight = 4, history = null) => {
     vomit_type: off.vomit_type || log.vomit_type || null,
     has_diarrhea: off.has_diarrhea ?? log.has_diarrhea ?? false,
     diarrhea_type: off.diarrhea_type || log.diarrhea_type || null,
-    behavior_energy: off.behavior_energy || log.behavior_energy || [],
-    respiratory_physical: off.respiratory_physical || log.respiratory_physical || [],
+    behavior_energy: off.behavior_energy ?? log.behavior_energy ?? [],
+    respiratory_physical: off.respiratory_physical ?? log.respiratory_physical ?? [],
     notes: off.notes || log.notes || null,
   };
 
-  const behaviorTags = normalizeArray(s.behavior_energy);
-  const respiratoryTags = normalizeArray(s.respiratory_physical);
+  // Merge tags from both raw root + child tables (prevents empty child arrays from masking actual tags)
+  const behaviorTags = [...new Set([...normalizeArray(off.behavior_energy), ...normalizeArray(log.behavior_energy)])];
+  const respiratoryTags = [...new Set([...normalizeArray(off.respiratory_physical), ...normalizeArray(log.respiratory_physical)])];
+
+  const hasPanting = respiratoryTags.some((t) => includesAny(t, RED_FLAG_SYMPTOMS.respiratory))
+    || includesAny(s.notes, RED_FLAG_SYMPTOMS.respiratory);
 
   const foodGrams = toSafeNumber(n.total_food_grams, 0);
+  const waterMlRaw = (normal?.water_ml_per_day ?? log?.water_ml_per_day);
+  const hasWaterEntry = waterMlRaw !== undefined && waterMlRaw !== null;
   const waterMl = toSafeNumber(n.water_ml_per_day, 0);
   const mealsFromField = toSafeNumber(n.meals_per_day, 0);
   const mealsFromLogs = mealLogs.length;
@@ -231,6 +237,15 @@ export const evaluateHealthLog = (log, catWeight = 4, history = null) => {
       redFlags += 1;
     }
   };
+
+  // ==========================================
+  // 0) RED FLAG: RESPIRATORY DISTRESS (CRITICAL)
+  // ==========================================
+  if (hasPanting) {
+    clusters.push("Respiratory Distress");
+    addRisk("Emergency: Panting/labored breathing detected. Seek veterinary care immediately.", 60, { emergency: true });
+    forceCritical = true;
+  }
 
   // ==========================================
   // 1) FOOD THRESHOLD LOGIC (meals/day)
@@ -274,12 +289,21 @@ export const evaluateHealthLog = (log, catWeight = 4, history = null) => {
   }
 
   let dehydrationSeverity = null; // 'mild' | 'moderate' | 'severe' | null
-  if (recommendedWaterMl > 0) {
+  let effectiveWaterRatio = null;
+  if (recommendedWaterMl > 0 && (hasNoWaterTag || hasWaterEntry)) {
     const effectiveRatio = hasNoWaterTag ? 0 : (Number.isFinite(waterRatio) ? waterRatio : 0);
+    effectiveWaterRatio = effectiveRatio;
+
     if (effectiveRatio < 0.3) {
       dehydrationSeverity = 'severe';
-      addRisk("Severe dehydration risk detected.", 25, { emergency: true });
-      forceCritical = true; // Critical override: severe dehydration
+      // Low water alone should not instantly force "Critical" in a single day.
+      // Keep strictness only when low water is accompanied by vomiting on the same day.
+      if (hasVomiting) {
+        addRisk("Severe dehydration risk detected with vomiting.", 25, { emergency: true });
+        forceCritical = true;
+      } else {
+        addRisk("Severe dehydration risk detected.", 25);
+      }
     } else if (effectiveRatio < 0.6) {
       dehydrationSeverity = 'moderate';
       addRisk("Moderate dehydration risk detected.", 15);
@@ -393,6 +417,9 @@ export const evaluateHealthLog = (log, catWeight = 4, history = null) => {
   if (urinaryEmergency) {
     recommendations.push("Seek emergency veterinary care immediately (possible urinary obstruction).");
   }
+  if (hasPanting) {
+    recommendations.push("Seek emergency veterinary care immediately (panting/labored breathing).");
+  }
   if (dehydrationSeverity === 'severe') {
     recommendations.push("Seek veterinary care urgently for dehydration; offer fresh water and consider wet food.");
   } else if (dehydrationSeverity) {
@@ -436,6 +463,9 @@ export const evaluateHealthLog = (log, catWeight = 4, history = null) => {
       healthScore,
       recommendedWaterMl: Math.round(recommendedWaterMl),
       waterMl: Math.round(waterMl),
+      waterRecorded: Boolean(hasNoWaterTag || hasWaterEntry),
+      waterRatio: Number.isFinite(waterRatio) ? waterRatio : null,
+      effectiveWaterRatio: Number.isFinite(effectiveWaterRatio) ? effectiveWaterRatio : null,
       mealsCount,
       foodGrams: Math.round(foodGrams),
       wetFoodGrams: Math.round(wetFoodGrams),
@@ -445,6 +475,7 @@ export const evaluateHealthLog = (log, catWeight = 4, history = null) => {
       emergencyAlerts,
       isEmergency: forceCritical,
       redFlags,
+      hasPanting,
       hasLethargy: hasLethargyTag,
       hasInappetence: lowAppetite,
       firstLogStatusOverride: statusLabelOverride,
@@ -498,6 +529,8 @@ export const analyzeHealthTrend7d = (logs = [], catWeight = 4) => {
 
   const scores = analyses.map((a) => (Number.isFinite(a?.score) ? a.score : 0));
   const waters = analyses.map((a) => (Number.isFinite(a?.meta?.waterMl) ? a.meta.waterMl : null));
+  const waterRecordedDays = analyses.map((a) => Boolean(a?.meta?.waterRecorded));
+  const effectiveWaterRatios = analyses.map((a) => (Number.isFinite(a?.meta?.effectiveWaterRatio) ? a.meta.effectiveWaterRatio : null));
   const symptomDays = analyses.map((a) => Boolean(a?.meta?.hasLethargy || a?.meta?.hasInappetence));
 
   const specialAlerts = [];
@@ -531,6 +564,22 @@ export const analyzeHealthTrend7d = (logs = [], catWeight = 4) => {
 
   // 💧 Behavior Drift: น้ำที่ดื่มเพิ่มขึ้นเรื่อย ๆ ภายใน 7 วัน (แบบค่อย ๆ เพิ่ม)
   // - ต้องมีข้อมูลอย่างน้อย 5 วัน และไม่มีวันไหน over-limit (> 500) เพราะเคสนั้นถือว่า Critical override ไปแล้ว
+  // 💧 Persistent Low Water Intake: low water for 3+ consecutive days
+  // Threshold uses "moderate-or-worse" dehydration ratio (< 0.6) and requires that water was actually recorded (or tagged).
+  let lowWaterStreak = 0;
+  let maxLowWaterStreak = 0;
+  for (let i = 0; i < effectiveWaterRatios.length; i += 1) {
+    const ratio = effectiveWaterRatios[i];
+    const recorded = waterRecordedDays[i];
+    const isLow = recorded && Number.isFinite(ratio) && ratio < 0.6;
+    if (isLow) lowWaterStreak += 1;
+    else lowWaterStreak = 0;
+    if (lowWaterStreak > maxLowWaterStreak) maxLowWaterStreak = lowWaterStreak;
+  }
+  if (maxLowWaterStreak >= 3) {
+    specialAlerts.push("Persistent low water intake (3+ days) detected. High risk of dehydration or kidney issues.");
+  }
+
   const hasOverLimitWater = waters.some((w) => Number.isFinite(w) && w > 500);
   const validWaters = waters.filter((w) => Number.isFinite(w) && w > 0);
   if (!hasOverLimitWater && validWaters.length >= 5) {
@@ -569,6 +618,8 @@ export const analyzeHealthTrend7d = (logs = [], catWeight = 4) => {
       waters,
       maxDownStreak,
       maxSymptomStreak,
+      maxLowWaterStreak,
+      effectiveWaterRatios,
     },
   };
 };
