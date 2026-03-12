@@ -9,7 +9,7 @@ import CatHealthMeter from "../components/CatHealthMeter";
 import supabase from "./config/supabaseClient";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { analyzeHealthLog, analyzeHealthTrend7d, getRiskStatus } from "../utils/healthLogic";
+import { analyzeHealthLog, analyzeHealthTrend7d, getRiskStatus, getHealthStatus } from "../utils/healthLogic";
 
 
 import AlertEngine from '../services/AlertEngine';
@@ -84,6 +84,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const statusScore = Number.isFinite(currentScore) ? currentScore : 100;
   const [riskStatusInfo, setRiskStatusInfo] = useState(() => getRiskStatus(0, false));
   const status = riskStatusInfo || getRiskStatus(100 - statusScore, false);
+  // Use original getHealthStatus palette for ring color (same as HomeScreen)
+  const ringStatus = getHealthStatus(statusScore);
 
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -176,6 +178,13 @@ export default function Dashboard({ onBack, onNavigate, session }) {
           text: statusNow.text,
           at: new Date().toISOString(),
         }));
+        // Notify HomeScreen so ring color and status text sync on navigate-back
+        DeviceEventEmitter.emit('healthScoreUpdated', {
+          score: currentScore,
+          color: statusNow.color,
+          label: statusNow.label,
+          text: statusNow.text,
+        });
       } catch (_) { }
     };
     persistHealthCache();
@@ -1017,7 +1026,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                   size={260}
                   score={currentScore}
                   statusText={status.label}
-                  statusColor={status.color}
+                  statusColor={ringStatus.color}
                   note={status.text}
                 />
 
@@ -1053,19 +1062,19 @@ export default function Dashboard({ onBack, onNavigate, session }) {
               </View>
             </View>
             <View style={styles.assessmentButtons}>
-	              <TouchableOpacity
-	                style={styles.viewResultBtn}
-	                onPress={() => onNavigate?.('Result', { source: 'db', catId: catDetails?.id || null })}
-	              >
-	                <Text style={styles.viewResultBtnText}>View Result</Text>
-	                <Ionicons name="chevron-forward" size={16} color="#0C5A58" style={{marginLeft: 4}} />
-	              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.viewResultBtn}
+                onPress={() => onNavigate?.('Result', { source: 'db', catId: catDetails?.id || null })}
+              >
+                <Text style={styles.viewResultBtnText}>View Result</Text>
+                <Ionicons name="chevron-forward" size={16} color="#0C5A58" style={{ marginLeft: 4 }} />
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.viewHistoryBtn}
                 onPress={() => onNavigate?.('Timeline')}
               >
                 <Text style={styles.viewHistoryBtnText}>View History</Text>
-                <Ionicons name="time-outline" size={16} color="#0C5A58" style={{marginLeft: 6}} />
+                <Ionicons name="time-outline" size={16} color="#0C5A58" style={{ marginLeft: 6 }} />
               </TouchableOpacity>
             </View>
             {latestAssessment && (

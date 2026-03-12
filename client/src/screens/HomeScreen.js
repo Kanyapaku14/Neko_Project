@@ -44,8 +44,11 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
     const [homeHealthScore, setHomeHealthScore] = useState(null);
     const [cachedHealthScore, setCachedHealthScore] = useState(null);
     const [cachedHealthColor, setCachedHealthColor] = useState(null);
+    const [cachedHealthLabel, setCachedHealthLabel] = useState(null);
+    const [cachedHealthText, setCachedHealthText] = useState(null);
     const [activeBannerIndex, setActiveBannerIndex] = useState(0);
     const [bannerData, setBannerData] = useState([]);
+    // NOTE: do NOT fall back to 100 — null means "no data", ring should be colorless
     const computedScore = homeHealthScore ?? cachedHealthScore ?? data?.behaviorAnalytics?.wellness?.score ?? null;
     const healthCacheKey = (userId, catId) => (userId && catId ? `health_status_cache:${userId}:${catId}` : null);
 
@@ -57,6 +60,8 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                 const cached = raw ? JSON.parse(raw) : null;
                 if (Number.isFinite(cached?.score)) setCachedHealthScore(cached.score);
                 if (cached?.color) setCachedHealthColor(cached.color);
+                if (cached?.label) setCachedHealthLabel(cached.label);
+                if (cached?.text) setCachedHealthText(cached.text);
             } catch (_) { }
         };
         bootstrapLastHealthColor();
@@ -237,6 +242,8 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                             const cached = raw ? JSON.parse(raw) : null;
                             setCachedHealthScore(Number.isFinite(cached?.score) ? cached.score : null);
                             setCachedHealthColor(cached?.color || null);
+                            setCachedHealthLabel(cached?.label || null);
+                            setCachedHealthText(cached?.text || null);
                         }
                         fetchLastAssessment(data.id);
                         fetchHomeHealthScore(data.id);
@@ -269,7 +276,17 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                 setHomeHealthScore(null);
                 setCachedHealthScore(null);
                 setCachedHealthColor(null);
+                setCachedHealthLabel(null);
+                setCachedHealthText(null);
             }
+        });
+
+        // listen for score updates saved by Dashboard → sync ring & text instantly
+        const scoreUpdatedSub = DeviceEventEmitter.addListener('healthScoreUpdated', ({ score, color, label, text } = {}) => {
+            if (Number.isFinite(score)) setHomeHealthScore(score);
+            if (color) setCachedHealthColor(color);
+            if (label) setCachedHealthLabel(label);
+            if (text) setCachedHealthText(text);
         });
 
         // Setup random banners
@@ -279,6 +296,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
 
         return () => {
             subscription.remove();
+            scoreUpdatedSub.remove();
         };
     }, []);
 
@@ -307,7 +325,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                     {/* 1. ส่วนรูปแมว (แยกออกมาแล้ว) */}
                     <View style={{ alignItems: 'center', marginTop: 26, marginBottom: 16 }}>
                         <CatHealthMeter
-                            score={computedScore ?? 100}
+                            score={computedScore}
                             centerImageUri={activeCat?.image_url || null}
                             centerMode="profile"
                             size={230}
@@ -317,12 +335,15 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                     {/* 2. ส่วนข้อความ (Hero Section เดิม เหลือแค่ Text) */}
                     <View style={styles.heroSection}>
                         <Text style={styles.heroTitle}>
-                            {((score) => {
+                            {(() => {
                                 const name = activeCat?.name || "Luna";
-                                if (score === null || score === undefined) return `${name} has not been assessed yet.`;
-                                const st = getHealthStatus(score);
-                                return `${st.label} - ${st.text}`;
-                            })(computedScore ?? 100)}
+                                if (computedScore === null || computedScore === undefined)
+                                    return `${name} has not been assessed yet.`;
+                                // Prefer the label/text cached from Dashboard (uses getRiskStatus)
+                                const label = cachedHealthLabel || getHealthStatus(computedScore).label;
+                                const text = cachedHealthText || getHealthStatus(computedScore).text;
+                                return `${label} - ${text}`;
+                            })()}
                         </Text>
 
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
