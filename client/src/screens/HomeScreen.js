@@ -22,7 +22,7 @@ import Paw from "../components/Paw";
 import CatHealthMeter from "../components/CatHealthMeter";
 import styles from "../styles/homeStyles";
 import useCameraData from "../hooks/useCameraData";
-import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
+import { analyzeHealthLog, getHealthStatus, getRiskStatus } from "../utils/healthLogic";
 import AlertRepository from "../services/AlertRepository";
 
 const { width } = Dimensions.get('window');
@@ -51,6 +51,26 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
     // NOTE: do NOT fall back to 100 — null means "no data", ring should be colorless
     const computedScore = homeHealthScore ?? cachedHealthScore ?? data?.behaviorAnalytics?.wellness?.score ?? null;
     const healthCacheKey = (userId, catId) => (userId && catId ? `health_status_cache:${userId}:${catId}` : null);
+
+    const getHomeRiskCopy = (score) => {
+        const safeScore = Number(score);
+        if (!Number.isFinite(safeScore)) return null;
+        const clamped = Math.max(0, Math.min(100, safeScore));
+        const risk = 100 - clamped;
+        const status = getRiskStatus(risk, false);
+        const label = String(status?.label || "").trim().toLowerCase();
+
+        if (label === "normal") {
+            return { level: "Normal", message: "Healthy & Active! Keep up the great care." };
+        }
+        if (label === "monitor") {
+            return { level: "Low Risk", message: "Looking Good. Minor changes in behavior noted." };
+        }
+        if (label === "warning") {
+            return { level: "Moderate", message: "Needs Attention. Monitoring behavior is advised." };
+        }
+        return { level: "High / Extreme", message: "High Risk! Consult a veterinarian immediately." };
+    };
 
     useEffect(() => {
         const bootstrapLastHealthColor = async () => {
@@ -154,7 +174,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                 if (key) {
                     const st = getHealthStatus(averageScore);
                     await AsyncStorage.setItem(key, JSON.stringify({
-                        score: nextScore,
+                        score: averageScore,
                         color: st.color,
                         label: st.label,
                         text: st.text,
@@ -339,10 +359,9 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                                 const name = activeCat?.name || "Luna";
                                 if (computedScore === null || computedScore === undefined)
                                     return `${name} has not been assessed yet.`;
-                                // Prefer the label/text cached from Dashboard (uses getRiskStatus)
-                                const label = cachedHealthLabel || getHealthStatus(computedScore).label;
-                                const text = cachedHealthText || getHealthStatus(computedScore).text;
-                                return `${label} - ${text}`;
+                                const copy = getHomeRiskCopy(computedScore);
+                                if (!copy) return `${name} has not been assessed yet.`;
+                                return `${name}\n${copy.message}`;
                             })()}
                         </Text>
 

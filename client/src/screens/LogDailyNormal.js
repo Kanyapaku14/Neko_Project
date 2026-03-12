@@ -186,7 +186,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
     const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
 
     const {
-        meals, consumeMeals, waterIntake, urineLevel, stoolLevel, catName, behaviorTags, catWeightKg
+        meals, consumeMeals, waterIntake, urineLevel, stoolLevel, catName, behaviorTags, catWeightKg, isKitten
     } = state;
 
     const {
@@ -228,6 +228,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
  
     const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34', textLabel: '#333' }; 
     const warnedMealIdsRef = useRef(new Set()); 
+    const warnedConsumeRef = useRef(false);
     const warnedWaterRef = useRef(false);
     const recommendedWaterMl = Math.round((Number(catWeightKg) || 4) * 60); 
     const waterNow = Number(waterIntake);
@@ -359,7 +360,24 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
 
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Text style={{ width: 85, fontSize: 14, color: theme.textLabel }}>Consume</Text>
-                            <UnitInput value={consumeMeals} onChangeText={(val) => setConsumeMeals(val.replace(/\D/g, ''))} unit="meals" width={85} maxLength={2} />
+                            <UnitInput 
+                                value={consumeMeals} 
+                                onChangeText={(val) => setConsumeMeals(val.replace(/\D/g, ''))} 
+                                onEndEditing={() => {
+                                    const mealsCount = Number(consumeMeals);
+                                    if (!Number.isFinite(mealsCount) || mealsCount <= 0) return;
+                                    const adultLimit = 3;
+                                    const kittenLimit = 4;
+                                    if (isKitten && mealsCount > kittenLimit) {
+                                        Alert.alert('จำนวนมื้ออาหารเกินแนะนำ', 'ลูกแมวที่ต้องการพลังงานสูงควรแบ่งเป็น 3-4 มื้อต่อวัน');
+                                    } else if (!isKitten && mealsCount > adultLimit) {
+                                        Alert.alert('จำนวนมื้ออาหารเกินแนะนำ', 'แมวโตควรแบ่งกินอาหารวันละ 2-3 มื้อ (เช้า-เย็น)');
+                                    }
+                                }}
+                                unit="meals" 
+                                width={85} 
+                                maxLength={2} 
+                            />
                             <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
@@ -825,6 +843,7 @@ export default function LogDaily(props) {
     const initialWeight = Number(props.catWeightKg ?? props.catWeight);
     const [catWeightKg, setCatWeightKg] = useState(Number.isFinite(initialWeight) && initialWeight > 0 ? initialWeight : 4);
     const [hasCatWeight, setHasCatWeight] = useState(Number.isFinite(initialWeight) && initialWeight > 0);
+    const [isKitten, setIsKitten] = useState(false);
     const [loading, setLoading] = useState(false);
 
     // --- Normal State ---
@@ -891,10 +910,18 @@ export default function LogDaily(props) {
     };
 
     const fetchCatIdAndLog = async () => {
-        const { data: catData } = await supabase.from('cats').select('id, name, weight').eq('owner_id', session.user.id).single();
+        const { data: catData } = await supabase.from('cats').select('id, name, weight, birthdate').eq('owner_id', session.user.id).single();
         if (catData) {
             setCatId(catData.id);
             setCatName(catData.name || 'your cat');
+            
+            if (catData.birthdate) {
+                const birthDate = new Date(catData.birthdate);
+                const oneYearAgo = new Date();
+                oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+                setIsKitten(birthDate > oneYearAgo);
+            }
+
             const w = Number(catData.weight);
             if (Number.isFinite(w) && w > 0) {
                 setCatWeightKg(w);
@@ -905,8 +932,8 @@ export default function LogDaily(props) {
     };
 
     const maybeLoadCatWeight = async (id) => {
-        if (!id || hasCatWeight) return;
-        const { data } = await supabase.from('cats').select('weight').eq('id', id).maybeSingle();
+        if (!id || (hasCatWeight && isKitten !== null)) return;
+        const { data } = await supabase.from('cats').select('weight, birthdate').eq('id', id).maybeSingle();
         const w = Number(data?.weight);
         if (Number.isFinite(w) && w > 0) {
             setCatWeightKg(w);
@@ -1242,6 +1269,7 @@ export default function LogDaily(props) {
         isVomitChecked, vomitColor, isDiarrheaChecked, diarrheaColor, behaviorTags, respiratoryTags, notes,
         catName,
         catWeightKg,
+        isKitten,
     };
 
     const setters = {
