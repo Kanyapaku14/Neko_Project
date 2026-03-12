@@ -618,7 +618,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                     onPress={() => onNavigate({ screen: 'PhotoCheck' })}
                   >
                     <Ionicons name="camera" size={32} color="#147C78" />
-                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>อัพโหลดรูปภาพเพื่อวิเคราะห์</Text>
+                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>Upload photos for analysis</Text>
                   </TouchableOpacity>
                 )}
 
@@ -682,7 +682,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                     onPress={() => onNavigate({ screen: 'PhotoCheck' })}
                   >
                     <Ionicons name="camera" size={32} color="#147C78" />
-                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>อัพโหลดรูปภาพเพื่อวิเคราะห์</Text>
+                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>Upload photos for analysis</Text>
                   </TouchableOpacity>
                 )}
 
