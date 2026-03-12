@@ -22,7 +22,7 @@ import Paw from "../components/Paw";
 import CatHealthMeter from "../components/CatHealthMeter";
 import styles from "../styles/homeStyles";
 import useCameraData from "../hooks/useCameraData";
-import { analyzeHealthLog, getHealthStatus, getRiskStatus } from "../utils/healthLogic";
+import { analyzeHealthLog, analyzeHealthTrend7d, getHealthStatus, getRiskStatus } from "../utils/healthLogic";
 import AlertRepository from "../services/AlertRepository";
 
 const { width } = Dimensions.get('window');
@@ -135,7 +135,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
             }
         };
 
-        const fetchHomeHealthScore = async (catId) => {
+        const fetchHomeHealthScore = async (catId, catWeightKg = 4) => {
             if (!catId) {
                 setHomeHealthScore(null);
                 return;
@@ -143,7 +143,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
             try {
                 const { data: logsData, error: logsError } = await supabase
                     .from("daily_logs")
-                    .select("*, normal_logs(*), something_off_logs(*)")
+                    .select("*, normal_logs(*), something_off_logs(*), meal_logs(*)")
                     .eq("cat_id", catId)
                     .order("log_date", { ascending: false })
                     .limit(7);
@@ -162,19 +162,34 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                     return;
                 }
 
-                let total = 0;
-                unifiedLogs.forEach((log) => {
-                    total += analyzeHealthLog(log).score;
-                });
-                // Calculate average exactly like the Dashboard
-                const averageScore = Math.round(total / unifiedLogs.length);
-                setHomeHealthScore(averageScore);
+                const safeWeight = Number.isFinite(Number(catWeightKg)) && Number(catWeightKg) > 0
+                    ? Number(catWeightKg) : 4;
+
+                // ==========================================
+                // Two-Tier Analysis (same as Dashboard)
+                // ==========================================
+                const analyses = unifiedLogs.map((log, idx) =>
+                    analyzeHealthLog(log, safeWeight, idx === 0 ? unifiedLogs.slice(1) : null)
+                );
+
+                // Tier 1: 3-day immediate score for ring color
+                const recentAnalyses = analyses.slice(0, 3);
+                const recentCount = Math.max(1, recentAnalyses.length);
+                const avg3Score = Math.round(
+                    recentAnalyses.reduce((sum, a) => sum + (Number(a?.score) || 0), 0) / recentCount
+                );
+                const hasEmergencyIn3Days = recentAnalyses.some((a) => Boolean(a?.meta?.isEmergency));
+                const effectiveScore = hasEmergencyIn3Days ? Math.min(avg3Score, 19) : avg3Score;
+                setHomeHealthScore(effectiveScore);
+
+                // Tier 2: 7-day trend alerts (special alerts — for future badge use)
+                analyzeHealthTrend7d(unifiedLogs.slice(0, 7), safeWeight);
 
                 const key = healthCacheKey(session?.user?.id, catId);
                 if (key) {
-                    const st = getHealthStatus(averageScore);
+                    const st = getHealthStatus(effectiveScore);
                     await AsyncStorage.setItem(key, JSON.stringify({
-                        score: averageScore,
+                        score: effectiveScore,
                         color: st.color,
                         label: st.label,
                         text: st.text,
@@ -266,7 +281,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                             setCachedHealthText(cached?.text || null);
                         }
                         fetchLastAssessment(data.id);
-                        fetchHomeHealthScore(data.id);
+                        fetchHomeHealthScore(data.id, Number(data.weight) || 4);
                     }
                 }
             } catch (error) {
@@ -290,7 +305,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                 };
                 loadCache();
                 fetchLastAssessment(cat.id);
-                fetchHomeHealthScore(cat.id);
+                fetchHomeHealthScore(cat.id, Number(cat.weight) || 4);
             } else {
                 setLastCheckText("Active now");
                 setHomeHealthScore(null);
