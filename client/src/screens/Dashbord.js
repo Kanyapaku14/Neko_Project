@@ -711,7 +711,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
 
   const calculateAge = (birthdate) => {
-    if (!birthdate) return 'N/A';
+    if (!birthdate) return 'Unknown';
     const birth = new Date(birthdate);
     const today = new Date();
     let years = today.getFullYear() - birth.getFullYear();
@@ -730,16 +730,21 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     }
 
     try {
-      const { data: exportLogs, error: exportError } = await supabase
-        .from('daily_logs')
-        .select('log_date, normal_logs(*), something_off_logs(*), meal_logs(*)')
+      let latestWeight = 'Unknown';
+      const { data: weightData, error: weightError } = await supabase
+        .from('cat_weights')
+        .select('weight_kg')
         .eq('cat_id', catDetails.id)
-        .order('log_date', { ascending: false })
-        .limit(7);
+        .order('measured_at', { ascending: false })
+        .limit(1);
+        
+      if (!weightError && weightData && weightData.length > 0) {
+        latestWeight = weightData[0].weight_kg + ' kg';
+      } else if (catDetails.weight) {
+        latestWeight = catDetails.weight + ' kg';
+      }
 
-      if (exportError) throw exportError;
-
-      const logsForExport = exportLogs || [];
+      const logsForExport = rawLogs.slice(0, 7) || [];
       if (logsForExport.length === 0) {
         alert("No data available to export");
         return;
@@ -872,8 +877,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                 <div class="info-row"><span class="label">Name:</span> ${catDetails.name || 'Unknown'}</div>
                 <div class="info-row"><span class="label">Breed:</span> ${catDetails.breed || 'Unknown'}</div>
                 <div class="info-row"><span class="label">Age:</span> ${calculateAge(catDetails.birthdate)}</div>
-                <div class="info-row"><span class="label">Gender:</span> ${catDetails.gender === 'M' ? 'Male' : catDetails.gender === 'F' ? 'Female' : 'Unknown'}</div>
-                <div class="info-row"><span class="label">Weight:</span> ${catDetails.weight ? catDetails.weight + ' kg' : 'Unknown'}</div>
+                <div class="info-row"><span class="label">Gender:</span> ${catDetails.gender || 'Unknown'}</div>
+                <div class="info-row"><span class="label">Weight:</span> ${latestWeight}</div>
                 <div class="info-row"><span class="label">Spayed/Neutered:</span> ${catDetails.spayed_neutered ? 'Yes' : 'No'}</div>
               </div>
             </div>
