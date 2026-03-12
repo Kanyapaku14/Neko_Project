@@ -22,6 +22,7 @@ class SimpleEmitter {
 }
 
 const ALERT_STORAGE_KEY_PREFIX = 'global_alerts';
+const NOTIFICATIONS_ENABLED_KEY = 'notifications_enabled';
 
 /**
  * Global Alert Engine Event Names
@@ -130,6 +131,12 @@ class AlertEngineService {
      *   ttlMs: time-to-live in ms (optional). Defaults: critical=48h, warning=24h, info/success=6h
      */
     async logEvent(alertData) {
+        try {
+            const raw = await AsyncStorage.getItem(NOTIFICATIONS_ENABLED_KEY);
+            if (raw === 'false') return;
+        } catch (_) {
+            // if storage fails, default to allow
+        }
         const normalizedSeverity = (alertData.severity || 'info').toLowerCase();
         const nowMs = Date.now();
         const dedupeKey = alertData.dedupeKey ? String(alertData.dedupeKey) : null;

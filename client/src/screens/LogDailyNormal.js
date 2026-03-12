@@ -1002,7 +1002,7 @@ export default function LogDaily(props) {
 
 
         if (missingFields.length > 0) {
-            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก\n(Missing: " + missingFields.join(', ') + ")");
+            return Alert.alert("Incomplete data", "Please complete all fields before saving\n(Missing: " + missingFields.join(', ') + ")");
         }
 
         await saveData();
@@ -1016,7 +1016,7 @@ export default function LogDaily(props) {
         if (isDiarrheaChecked && !diarrheaColor) missingFields.push("Diarrhea Color");
 
         if (missingFields.length > 0) {
-            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก\n(Missing: " + missingFields.join(', ') + ")");
+            return Alert.alert("Incomplete data", "Please complete all fields before saving\n(Missing: " + missingFields.join(', ') + ")");
         }
 
         setLoading(true);
@@ -1053,8 +1053,8 @@ export default function LogDaily(props) {
             if (!hasNormalInDB && !isNormalCompleteInState) {
                 setLoading(false);
                 return Alert.alert(
-                    "ไม่สามารถบันทึกได้",
-                    "ต้องกรอกข้อมูลหน้า 'Normal' (อาหาร/น้ำ/ขับถ่าย) ของวันนี้ให้ครบถ้วนก่อน ถึงจะสามารถบันทึก Something off ได้"
+                    "Unable to save",
+                    "Please complete today's 'Normal' (food/water/elimination) data before saving Something Off."
                 );
             }
 
@@ -1063,7 +1063,7 @@ export default function LogDaily(props) {
 
         } catch (error) {
             console.error("Check normal data error:", error);
-            Alert.alert("Error", "เกิดข้อผิดพลาดในการตรวจสอบข้อมูล");
+            Alert.alert("Error", "An error occurred while validating data.");
             setLoading(false);
         }
     };
@@ -1126,13 +1126,18 @@ export default function LogDaily(props) {
         const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
 
         try {
+            const isSomethingOffActive = (status === 'Something off') ||
+                isVomitChecked || isDiarrheaChecked ||
+                behaviorTags.length > 0 || respiratoryTags.length > 0 ||
+                (notes && notes.trim() !== '');
+
             // Step 1: UPSERT daily_logs (parent)
             const { data: dailyLog, error: dailyError } = await supabase
                 .from('daily_logs')
                 .upsert({
                     cat_id: catId,
                     log_date: logDateStr,
-                    log_type: (isVomitChecked || isDiarrheaChecked || behaviorTags.length > 0 || respiratoryTags.length > 0) ? 'something_off' : 'normal'
+                    log_type: isSomethingOffActive ? 'something_off' : 'normal'
                 }, { onConflict: 'cat_id, log_date' })
                 .select('id')
                 .single();
@@ -1179,11 +1184,6 @@ export default function LogDaily(props) {
             }
 
             // Step 3: Save Something Off Logs if we are in 'Something off' mode or have data
-            const isSomethingOffActive = (status === 'Something off') ||
-                isVomitChecked || isDiarrheaChecked ||
-                behaviorTags.length > 0 || respiratoryTags.length > 0 ||
-                (notes && notes.trim() !== '');
-
             if (isSomethingOffActive) {
                 const { error: offError } = await supabase
                     .from('something_off_logs')
@@ -1199,6 +1199,9 @@ export default function LogDaily(props) {
                     }, { onConflict: 'daily_log_id' });
 
                 if (offError) throw offError;
+            } else {
+                // If it's not active, delete any existing something_off_logs to ensure clean state
+                await supabase.from('something_off_logs').delete().eq('daily_log_id', dailyLog.id);
             }
 
             try {

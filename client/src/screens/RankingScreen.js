@@ -22,6 +22,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import supabase from "./config/supabaseClient";
 import AlertRepository from "../services/AlertRepository";
+import AlertEngine from "../services/AlertEngine";
 
 const getLocalDateString = (date) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -29,6 +30,7 @@ const getLocalDateString = (date) => {
 
 const { width } = Dimensions.get("window");
 const FRIENDS_KEY = "neko_friends_list";
+const FRIEND_REQUEST_SEEN_KEY_PREFIX = "friend_request_seen";
 
 export default function RankingScreen({ session, onBack }) {
   // v2.1 UI Update Force Reload
@@ -152,6 +154,29 @@ export default function RankingScreen({ session, onBack }) {
 
   const [pendingRequests, setPendingRequests] = useState([]);
 
+  const loadSeenFriendRequests = async () => {
+    try {
+      if (!session?.user?.id) return new Set();
+      const raw = await AsyncStorage.getItem(`${FRIEND_REQUEST_SEEN_KEY_PREFIX}:${session.user.id}`);
+      if (!raw) return new Set();
+      const list = JSON.parse(raw);
+      if (!Array.isArray(list)) return new Set();
+      return new Set(list.map((v) => String(v)));
+    } catch (_) {
+      return new Set();
+    }
+  };
+
+  const saveSeenFriendRequests = async (set) => {
+    try {
+      if (!session?.user?.id) return;
+      await AsyncStorage.setItem(
+        `${FRIEND_REQUEST_SEEN_KEY_PREFIX}:${session.user.id}`,
+        JSON.stringify(Array.from(set))
+      );
+    } catch (_) { }
+  };
+
   const loadPendingRequests = async () => {
     try {
       if (!session?.user?.id) return;
@@ -208,6 +233,23 @@ export default function RankingScreen({ session, onBack }) {
           };
         });
         setPendingRequests(pending);
+
+        // Log local alerts for new incoming requests (so they show in Notifications)
+        const seen = await loadSeenFriendRequests();
+        for (const req of validIncomingRows) {
+          const requesterId = String(req.user_id || "");
+          if (!requesterId || seen.has(requesterId)) continue;
+          const profile = profileMap[req.user_id];
+          await AlertEngine.logEvent({
+            type: "friend_request",
+            severity: "info",
+            title: "Friend request received",
+            desc: `${profile?.name || "Someone"} wants to be your friend`,
+            timestamp: req.created_at || new Date().toISOString(),
+          });
+          seen.add(requesterId);
+        }
+        await saveSeenFriendRequests(seen);
       } else {
         setPendingRequests([]);
       }
@@ -659,7 +701,7 @@ export default function RankingScreen({ session, onBack }) {
       }
 
       // Notify User
-      Alert.alert("สำเร็จ! 🎉", `เช็คอินต่อเนื่องรับ ${pointsToAward} คะแนน`);
+      Alert.alert("Success! 🎉", `You earned ${pointsToAward} points for consecutive check-ins.`);
 
     } catch (e) {
       console.log("Auto check-in error:", e);

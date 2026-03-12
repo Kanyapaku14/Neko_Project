@@ -131,10 +131,11 @@ export default function App() {
     if (targetScreen === 'Alert') {
       const current = getCurrentAuthScreenName();
       const currentParams = typeof authScreen === 'object' ? authScreen.params : {};
-      const computedReturnTo =
+      const baseReturnTo =
         targetParams?.returnTo ||
         (current === 'Alert' ? currentParams?.returnTo : current) ||
         'Camera';
+      const computedReturnTo = baseReturnTo === 'Setcamera' ? 'Camera' : baseReturnTo;
       setAuthScreen({
         screen: 'Alert',
         params: { ...(targetParams || {}), returnTo: computedReturnTo },
@@ -145,10 +146,11 @@ export default function App() {
     if (targetScreen === 'Setting') {
       const current = getCurrentAuthScreenName();
       const currentParams = typeof authScreen === 'object' ? authScreen.params : {};
-      const computedReturnTo =
+      const baseReturnTo =
         targetParams?.returnTo ||
         (current === 'Setting' ? currentParams?.returnTo : current) ||
         'Home';
+      const computedReturnTo = baseReturnTo === 'Setcamera' ? 'Camera' : baseReturnTo;
       setAuthScreen({
         screen: 'Setting',
         params: { ...(targetParams || {}), returnTo: computedReturnTo },

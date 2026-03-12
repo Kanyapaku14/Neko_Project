@@ -733,6 +733,12 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   };
 
   const handleExportPDF = async () => {
+    const privacyRaw = await AsyncStorage.getItem('privacy_enabled');
+    if (privacyRaw === 'false') {
+      alert("Data export is disabled in Privacy settings.");
+      return;
+    }
+
     if (!catDetails || rawLogs.length === 0) {
       alert("No data available to export");
       return;

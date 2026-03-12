@@ -26,11 +26,11 @@ export default function ForgotPasswordScreen({ onBack, onGoToResetPassword }) {
         const cleanEmail = email.trim().toLowerCase();
 
         if (!cleanEmail) {
-            Alert.alert('แจ้งเตือน', 'กรุณากรอกอีเมล');
+            Alert.alert('Alert', 'Please enter your email.');
             return;
         }
         if (!cleanEmail.endsWith('@gmail.com') && !cleanEmail.endsWith('@hotmail.com')) {
-            Alert.alert('แจ้งเตือน', 'กรุณาใช้อีเมลที่ลงท้ายด้วย @gmail.com หรือ @hotmail.com เท่านั้น');
+            Alert.alert('Alert', 'Please use an email ending with @gmail.com or @hotmail.com only.');
             return;
         }
 
@@ -48,7 +48,7 @@ export default function ForgotPasswordScreen({ onBack, onGoToResetPassword }) {
 
             setSent(true);
         } catch (err) {
-            Alert.alert('Error', 'ไม่สามารถส่งอีเมลได้ กรุณาลองใหม่อีกครั้ง');
+            Alert.alert('Error', 'Unable to send email. Please try again.');
         } finally {
             setLoading(false);
         }
