@@ -468,6 +468,21 @@ const AlertRepository = {
             console.warn(`AlertRepository.markAllAsReadOnRemote failed: ${err?.message || err}`);
         }
     },
+
+    async deleteAllOnRemote() {
+        try {
+            const { userId } = await this._getContext();
+            if (!userId) return;
+            const { error } = await supabase
+                .from('alerts')
+                .update({ is_deleted: true, updated_at: new Date().toISOString() })
+                .eq('owner_id', userId)
+                .eq('is_deleted', false);
+            if (error) throw error;
+        } catch (err) {
+            console.warn(`AlertRepository.deleteAllOnRemote failed: ${err?.message || err}`);
+        }
+    },
 };
 
 export default AlertRepository;

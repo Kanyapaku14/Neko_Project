@@ -18,6 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 import ResetPasswordTokenScreen from './src/screens/ResetPasswordTokenScreen';
+import Nekocare from './src/screens/Nekocare';
 
 // 1. Import the LogDailyNormal file
 import LogDailyNormal from './src/screens/LogDailyNormal';
@@ -74,17 +75,17 @@ export default function App() {
     'Itim-Regular': Itim_400Regular,
   });
 
-  const [currentScreen, setCurrentScreen] = useState('SignIn');
+  const [currentScreen, setCurrentScreen] = useState('Welcome');
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authScreen, setAuthScreen] = useState('Home');
-	  const [catId, setCatId] = useState(null);
+  const [catId, setCatId] = useState(null);
 
-	  const [resetPasswordMode, setResetPasswordMode] = useState(false);
-	  const [resetEmail, setResetEmail] = useState('');
-	  const [resetPasswordStep, setResetPasswordStep] = useState('token'); // token -> new
-	  const [resetReturnTo, setResetReturnTo] = useState('SignIn');
-	  const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
+  const [resetPasswordMode, setResetPasswordMode] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetPasswordStep, setResetPasswordStep] = useState('token'); // token -> new
+  const [resetReturnTo, setResetReturnTo] = useState('SignIn');
+  const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
   const [profileLoading, setProfileLoading] = useState(false); // ✅ Track if checking profile
   const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null); // null until loaded
   const notificationResponseSubRef = useRef(null);
@@ -111,7 +112,7 @@ export default function App() {
     await supabase.auth.signOut();
     setSession(null);
     setAuthScreen('Home'); // Reset for next login
-    setCurrentScreen('SignIn');
+    setCurrentScreen('Welcome');
     setLoading(false);
   };
   const navigateToSignIn = () => {
@@ -130,10 +131,11 @@ export default function App() {
     if (targetScreen === 'Alert') {
       const current = getCurrentAuthScreenName();
       const currentParams = typeof authScreen === 'object' ? authScreen.params : {};
-      const computedReturnTo =
+      const baseReturnTo =
         targetParams?.returnTo ||
         (current === 'Alert' ? currentParams?.returnTo : current) ||
         'Camera';
+      const computedReturnTo = baseReturnTo === 'Setcamera' ? 'Camera' : baseReturnTo;
       setAuthScreen({
         screen: 'Alert',
         params: { ...(targetParams || {}), returnTo: computedReturnTo },
@@ -144,10 +146,11 @@ export default function App() {
     if (targetScreen === 'Setting') {
       const current = getCurrentAuthScreenName();
       const currentParams = typeof authScreen === 'object' ? authScreen.params : {};
-      const computedReturnTo =
+      const baseReturnTo =
         targetParams?.returnTo ||
         (current === 'Setting' ? currentParams?.returnTo : current) ||
         'Home';
+      const computedReturnTo = baseReturnTo === 'Setcamera' ? 'Camera' : baseReturnTo;
       setAuthScreen({
         screen: 'Setting',
         params: { ...(targetParams || {}), returnTo: computedReturnTo },
@@ -171,16 +174,16 @@ export default function App() {
     } catch (_) { }
     setSession(null);
     setAuthScreen('Home');
-    setCurrentScreen('SignIn');
+    setCurrentScreen('Welcome');
   };
 
-		useEffect(() => {
-			const handleSessionBootstrap = async () => {
-				try {
-					const { data: { session }, error } = await supabase.auth.getSession();
-	        if (error) {
-	          const msg = String(error?.message || '');
-	          if (msg.includes('Invalid Refresh Token') || msg.includes('Refresh Token Not Found')) {
+  useEffect(() => {
+    const handleSessionBootstrap = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          const msg = String(error?.message || '');
+          if (msg.includes('Invalid Refresh Token') || msg.includes('Refresh Token Not Found')) {
             await clearStaleAuthSession();
           } else {
             setSession(null);
@@ -192,13 +195,13 @@ export default function App() {
       } finally {
         setLoading(false);
       }
-	    };
+    };
 
-			handleSessionBootstrap();
+    handleSessionBootstrap();
 
-			const appStateSub = AppState.addEventListener('change', async (state) => {
-				if (state === 'active') {
-					supabase.auth.startAutoRefresh();
+    const appStateSub = AppState.addEventListener('change', async (state) => {
+      if (state === 'active') {
+        supabase.auth.startAutoRefresh();
         await NotificationService.markUserActiveNow();
       } else {
         supabase.auth.stopAutoRefresh();
@@ -228,11 +231,11 @@ export default function App() {
       }
     });
 
-			return () => {
-				subscription.unsubscribe();
-				appStateSub?.remove?.();
-			};
-		}, []);
+    return () => {
+      subscription.unsubscribe();
+      appStateSub?.remove?.();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -350,31 +353,31 @@ export default function App() {
   }
 
   const renderScreen = () => {
-	    // Reset password flow (token-based OR arrived via deep link)
-	    // Note: in token-based reset flow, `verifyOtp` creates a session. Keep showing this flow even if session exists.
-	    if (resetPasswordMode) {
-	      if (resetPasswordStep === 'token') {
-	        return (
-	          <ResetPasswordTokenScreen
-	            initialEmail={resetEmail}
-	            onBack={() => exitResetFlow(resetReturnTo)}
-	            onVerified={(email) => {
-	              setResetEmail(String(email || ''));
-	              setResetPasswordStep('new');
-	            }}
-	          />
-	        );
-	      }
+    // Reset password flow (token-based OR arrived via deep link)
+    // Note: in token-based reset flow, `verifyOtp` creates a session. Keep showing this flow even if session exists.
+    if (resetPasswordMode) {
+      if (resetPasswordStep === 'token') {
+        return (
+          <ResetPasswordTokenScreen
+            initialEmail={resetEmail}
+            onBack={() => exitResetFlow(resetReturnTo)}
+            onVerified={(email) => {
+              setResetEmail(String(email || ''));
+              setResetPasswordStep('new');
+            }}
+          />
+        );
+      }
 
-	      return (
-	        <ResetPasswordScreen
-	          onBack={() => setResetPasswordStep('token')}
-	          onComplete={() => exitResetFlow('SignIn')}
-	        />
-	      );
-	    }
+      return (
+        <ResetPasswordScreen
+          onBack={() => setResetPasswordStep('token')}
+          onComplete={() => exitResetFlow('SignIn')}
+        />
+      );
+    }
 
-	    // 1. Session based (if logged in)
+    // 1. Session based (if logged in)
     if (session) {
       // screen can be string or object { screen, params }
       const currentScreenName = typeof authScreen === 'object' ? authScreen.screen : authScreen;
@@ -460,15 +463,15 @@ export default function App() {
           initialDate={screenParams?.date || null}
         />;
       }
-	      if (currentScreenName === 'Result') {
-	        return <ResultScreen
-	          onBack={() => setAuthScreen('Home')}
-	          onSave={() => setAuthScreen('Home')}
-	          onNavigate={(screen, params) => navigateAuth(screen, params)}
-	          route={{ params: screenParams }}
-	          session={session}
-	        />;
-	      }
+      if (currentScreenName === 'Result') {
+        return <ResultScreen
+          onBack={() => setAuthScreen('Home')}
+          onSave={() => setAuthScreen('Home')}
+          onNavigate={(screen, params) => navigateAuth(screen, params)}
+          route={{ params: screenParams }}
+          session={session}
+        />;
+      }
       if (currentScreenName === 'Overview') {
         return <Dashboard
           session={session}
@@ -588,34 +591,43 @@ export default function App() {
         onSetting={() => setAuthScreen('Setting')}
         onNavigate={(screen, params) => navigateAuth(screen, params)}
       />;
-	    }
+    }
 
-	    // 2. Guest/SignIn flow
-	    return (
-	      <>
-	        {currentScreen === 'SignIn' && (
-	          <SignInScreen
-	            onNavigate={navigateToSignUp}
-	            onForgotPassword={() => setCurrentScreen('ForgotPassword')}
-	          />
-	        )}
-        {currentScreen === 'SignUp' && (
-          <SignUpScreen onNavigate={navigateToSignIn} />
+    // 2. Guest/SignIn flow
+    return (
+      <>
+        {currentScreen === 'Welcome' && (
+          <Nekocare
+            onSignUp={() => setCurrentScreen('SignUp')}
+            onSignIn={() => setCurrentScreen('SignIn')}
+          />
         )}
-	        {currentScreen === 'ForgotPassword' && (
-	          <ForgotPasswordScreen
-	            onBack={() => setCurrentScreen('SignIn')}
-	            onGoToResetPassword={(email) => {
-	              setResetReturnTo('ForgotPassword');
-	              setResetEmail(String(email || ''));
-	              setResetPasswordStep('token');
-	              setResetPasswordMode(true);
-	            }}
-	          />
-	        )}
-	      </>
-	    );
-	  };
+
+        {currentScreen === 'SignIn' && (
+          <SignInScreen
+            onNavigate={() => setCurrentScreen('SignUp')}
+            onForgotPassword={() => setCurrentScreen('ForgotPassword')}
+          />
+        )}
+
+        {currentScreen === 'SignUp' && (
+          <SignUpScreen onNavigate={() => setCurrentScreen('SignIn')} />
+        )}
+
+        {currentScreen === 'ForgotPassword' && (
+          <ForgotPasswordScreen
+            onBack={() => setCurrentScreen('Welcome')}
+            onGoToResetPassword={(email) => {
+              setResetReturnTo('ForgotPassword');
+              setResetEmail(String(email || ''));
+              setResetPasswordStep('token');
+              setResetPasswordMode(true);
+            }}
+          />
+        )}
+      </>
+    );
+  };
 
 
   // Wrap everything with SafeAreaProvider here

@@ -5,6 +5,24 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from "../screens/config/supabaseClient";
 import styles from "../styles/homeStyles";
 import DropdownProfile from "./DropdownProfile";
+import AlertEngine, { AlertEvents } from "../services/AlertEngine";
+
+const isAllowedAlertType = (alert) => {
+  const type = String(alert?.type || '').toLowerCase();
+  return (
+    type === 'dashboard_low_score_60'
+    || type === 'dashboard_low_score_40'
+    || type === 'friend_request'
+    || type === 'friend_accepted'
+    || type === 'post_like'
+    || type === 'daily_log_inactivity'
+  );
+};
+
+const computeUnreadCount = () => {
+  const list = AlertEngine.getHistory ? AlertEngine.getHistory() : [];
+  return (list || []).filter((a) => !a?.isDeleted && !a?.isRead && isAllowedAlertType(a)).length;
+};
 
 
 export default function HomeHeader({
@@ -20,9 +38,19 @@ export default function HomeHeader({
   const [activeCat, setActiveCat] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [isSwitchingCat, setIsSwitchingCat] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     fetchCats();
+  }, []);
+
+  useEffect(() => {
+    setUnreadCount(computeUnreadCount());
+    const handler = () => {
+      setUnreadCount(computeUnreadCount());
+    };
+    AlertEngine.on(AlertEvents.UPDATED, handler);
+    return () => AlertEngine.off(AlertEvents.UPDATED, handler);
   }, []);
 
   const fetchCats = async () => {
@@ -128,6 +156,7 @@ export default function HomeHeader({
           <View style={styles.iconGroup}>
             <TouchableOpacity style={styles.iconBtn} onPress={onNotify} disabled={isSwitchingCat}>
               <Ionicons name="notifications-outline" size={20} color="#718096" />
+              {unreadCount > 0 && <View style={styles.notificationDot} />}
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconBtn} onPress={onSetting} disabled={isSwitchingCat}>
               <Ionicons name="settings-outline" size={20} color="#718096" />
