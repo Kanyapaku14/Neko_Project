@@ -441,7 +441,8 @@ const SwipeableNotificationCard = ({
                                 <View style={styles.rejectedBadge}><Text style={styles.rejectedBadgeText}>Not Your Cat</Text></View>
                             ) : isIdentityResolved ? (
                                 <View style={styles.resolvedBadge}><Text style={styles.resolvedBadgeText}>Identified</Text></View>
-                            ) : !alert.isRead ? (
+                            ) : null}
+                            {!alert.isRead ? (
                                 <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>
                             ) : null}
                         </View>
@@ -551,7 +552,23 @@ export default function AlertScreen({ onBack, onNavigate }) {
                 _fromRemote: true,
             }));
 
-            const allowed = mapped.filter(isAllowedAlertType);
+            const localById = new Map(
+                AlertEngine.getHistory()
+                    .filter((a) => a?.id != null)
+                    .map((a) => [String(a.id), a])
+            );
+            const merged = mapped.map((row) => {
+                const local = localById.get(String(row.id));
+                if (!local) return row;
+                return {
+                    ...row,
+                    isRead: local.isRead ?? row.isRead,
+                    isDeleted: local.isDeleted ?? row.isDeleted,
+                    resolved: local.resolved ?? row.resolved,
+                };
+            });
+
+            const allowed = merged.filter(isAllowedAlertType);
             const ordered = dedupeAlerts(collapseAlerts(allowed))
                 .sort((a, b) => new Date(b?.timestamp || 0) - new Date(a?.timestamp || 0));
             setAlerts(ordered);

@@ -127,6 +127,22 @@ export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
         AlertRepository.syncFromRemote();
     }, [session?.user?.id]);
 
+    // Background sync to keep unread badge up-to-date even if realtime misses
+    useEffect(() => {
+        if (!session?.user?.id) return;
+        let cancelled = false;
+        const tick = async () => {
+            if (cancelled) return;
+            await AlertRepository.syncFromRemote({ skipIdentityReview: true });
+        };
+        tick();
+        const interval = setInterval(tick, 20000);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [session?.user?.id]);
+
     // 2. Listen for Auto-Popup events from AlertEngine
     useEffect(() => {
         const handleNewPendingAlert = (alert) => {
