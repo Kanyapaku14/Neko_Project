@@ -46,7 +46,7 @@ const confirmDialog = (title, message, okText = 'ยืนยัน') =>
             title,
             message,
             [
-                { text: 'แก้ไข', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Edit', style: 'cancel', onPress: () => resolve(false) },
                 { text: okText, onPress: () => resolve(true) },
             ],
             { cancelable: true }
@@ -605,9 +605,9 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
 
             if (hasAnyFoodInput) {
                 const ok = await confirmDialog(
-                    'ยืนยันการล้างข้อมูลอาหาร',
-                    `คุณเลือก "${NO_FOOD_TAG}" ระบบจะล้างข้อมูลอาหารทั้งหมดเพื่อไม่ให้ข้อมูลขัดแย้งกัน`,
-                    'ล้างข้อมูล'
+                    'Confirm clearing food data',
+                    `You selected "${NO_FOOD_TAG}". The system will clear all food data to avoid conflicts.`,
+                    'Clear data'
                 );
                 if (!ok) return;
             }
@@ -622,9 +622,9 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
             const hasWaterInput = (waterIntake !== null && String(waterIntake).trim() !== '' && Number.isFinite(waterNow) && waterNow > 0);
             if (hasWaterInput) {
                 const ok = await confirmDialog(
-                    'ยืนยันการล้างข้อมูลน้ำ',
-                    `คุณกรอกปริมาณน้ำ ${formatNumber(waterNow)} ml แล้ว หากเลือก "${NO_WATER_TAG}" ระบบจะปรับค่าเป็น 0 ml`,
-                    'ปรับเป็น 0 ml'
+                    'Confirm clearing water data',
+                    `You entered ${formatNumber(waterNow)} ml of water. If you select "${NO_WATER_TAG}", the system will set it to 0 ml.`,
+                    'Set to 0 ml'
                 );
                 if (!ok) return;
             }

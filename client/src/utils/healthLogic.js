@@ -8,6 +8,18 @@
  */
 
 // ==========================================
+// 🍗 Food Recommendation by Weight
+// อ้างอิง: ค่าเฉลี่ยปริมาณอาหารแมวต่อวันตามน้ำหนักตัว
+// ==========================================
+export const getRecommendedFoodRange = (weightKg) => {
+  const w = Number(weightKg) || 4;
+  if (w <= 2) return { min: 40, max: 60, label: '1–2 kg' };   // ลูกแมว/แมวเล็ก
+  if (w <= 4) return { min: 50, max: 70, label: '2–4 kg' };   // แมวโตทั่วไป
+  if (w <= 6) return { min: 60, max: 80, label: '4–6 kg' };   // แมวโตตัวใหญ่
+  return { min: 90, max: 120, label: '7+ kg' };                // แมวอ้วน/ขนาดใหญ่
+};
+
+// ==========================================
 // 🚩 Red Flag Symptoms — อาการฉุกเฉิน
 // ==========================================
 const RED_FLAG_SYMPTOMS = {
@@ -248,13 +260,26 @@ export const evaluateHealthLog = (log, catWeight = 4, history = null) => {
   }
 
   // ==========================================
-  // 1) FOOD THRESHOLD LOGIC (meals/day)
+  // 1) FOOD THRESHOLD LOGIC (meals/day + grams vs weight)
   // 0 meals -> +20 risk, 1 meal -> +10 risk, 2+ meals -> normal
   // ==========================================
+  const foodRange = getRecommendedFoodRange(weightKg);
+  const recommendedFoodMin = foodRange.min;
+  const recommendedFoodMax = foodRange.max;
+
   if (mealsCount === 0) {
     addRisk("No meals recorded today (risk of anorexia).", 20);
   } else if (mealsCount === 1) {
     addRisk("Only 1 meal recorded today (reduced appetite).", 10);
+  }
+
+  // ตรวจสอบปริมาณ (กรัม) vs ค่าแนะนำตามน้ำหนัก
+  if (!hasNoFoodTag && foodGrams > 0 && mealsCount >= 1) {
+    if (foodGrams < recommendedFoodMin * 0.5) {
+      addRisk(`Food intake (${Math.round(foodGrams)}g) is critically low for a ${weightKg}kg cat (recommended ${recommendedFoodMin}–${recommendedFoodMax}g/day).`, 15);
+    } else if (foodGrams < recommendedFoodMin * 0.75) {
+      addRisk(`Food intake (${Math.round(foodGrams)}g) is below the recommended daily amount for a ${weightKg}kg cat.`, 8);
+    }
   }
 
   // Additional rule: food = 0 AND vomiting = true -> +10 risk
@@ -469,6 +494,8 @@ export const evaluateHealthLog = (log, catWeight = 4, history = null) => {
       mealsCount,
       foodGrams: Math.round(foodGrams),
       wetFoodGrams: Math.round(wetFoodGrams),
+      recommendedFoodMin,
+      recommendedFoodMax,
       vomitEpisodes,
       dehydrationSeverity,
       urinaryEmergency,
