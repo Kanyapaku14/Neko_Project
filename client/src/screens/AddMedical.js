@@ -11,14 +11,12 @@ import {
     Alert,
     ActivityIndicator,
     Platform,
-    Image,
     DeviceEventEmitter,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import supabase from './config/supabaseClient';
 import AlertEngine from '../services/AlertEngine';
@@ -32,7 +30,6 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
     const [notes, setNotes] = useState('');
     const [eventDate, setEventDate] = useState(initialDate ? new Date(initialDate) : new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
-    const [image, setImage] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [catId, setCatId] = useState(null);
 
@@ -98,25 +95,6 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
         return 'other';
     };
 
-    const pickImage = async () => {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('Permission Required', 'We need camera roll permissions to upload photos.');
-            return;
-        }
-
-        let result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [4, 3],
-            quality: 0.8,
-        });
-
-        if (!result.canceled) {
-            setImage(result.assets[0].uri);
-        }
-    };
-
     const onDateChange = (event, selectedDate) => {
         const currentDate = selectedDate || eventDate;
         setShowDatePicker(Platform.OS === 'ios');
@@ -131,32 +109,7 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
 
         setUploading(true);
         try {
-            let imageUrl = null;
-
-            // 1. Upload Image to Supabase Storage
-            if (image) {
-                const fileName = `${catId}/${Date.now()}.jpg`;
-                const formData = new FormData();
-                formData.append('file', {
-                    uri: image,
-                    name: fileName,
-                    type: 'image/jpeg',
-                });
-
-                const { data: uploadData, error: uploadError } = await supabase.storage
-                    .from('medical_attachments')
-                    .upload(fileName, formData, { contentType: 'image/jpeg' });
-
-                if (uploadError) throw uploadError;
-
-                const { data: publicUrlData } = supabase.storage
-                    .from('medical_attachments')
-                    .getPublicUrl(fileName);
-
-                imageUrl = publicUrlData.publicUrl;
-            }
-
-            // 2. Insert into medical_events table
+            // Insert into medical_events table
             const formattedEventType = normalizeEventType(eventType);
             const { error: insertError } = await supabase
                 .from('medical_events')
@@ -165,7 +118,7 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
                     event_type: formattedEventType,
                     event_date: eventDate.toISOString().split('T')[0],
                     notes: notes,
-                    attachment_url: imageUrl,
+                    attachment_url: null,
                 });
 
             if (insertError) throw insertError;
@@ -289,21 +242,6 @@ const AddMedical = ({ navigation, onBack, initialDate }) => {
                             textAlignVertical="top"
                         />
                     </View>
-
-                    {/* Upload section */}
-                    <Text style={styles.labelTitle}>Upload</Text>
-                    <TouchableOpacity style={styles.uploadBox} onPress={pickImage}>
-                        {image ? (
-                            <Image source={{ uri: image }} style={styles.previewImage} resizeMode="cover" />
-                        ) : (
-                            <>
-                                <View style={styles.cameraIconCircle}>
-                                    <Ionicons name="camera" size={30} color="#2D6A64" />
-                                </View>
-                                <Text style={styles.uploadText}>Add Photo or Receipt</Text>
-                            </>
-                        )}
-                    </TouchableOpacity>
 
                     {/* Save Button */}
                     <TouchableOpacity
@@ -471,36 +409,6 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 16,
         color: '#2D6A64',
-    },
-    uploadBox: {
-        backgroundColor: 'rgba(255, 255, 255, 0.6)',
-        height: 120,
-        borderRadius: 15,
-        borderStyle: 'dashed',
-        borderWidth: 1.5,
-        borderColor: '#80A4A0',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 40,
-        overflow: 'hidden',
-    },
-    cameraIconCircle: {
-        backgroundColor: 'rgba(255, 255, 255, 0.3)',
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 10,
-    },
-    uploadText: {
-        fontSize: 16,
-        color: '#2D6A64',
-        fontWeight: 'bold',
-    },
-    previewImage: {
-        width: '100%',
-        height: '100%',
     },
     saveButton: {
         backgroundColor: '#147C78',
