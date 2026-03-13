@@ -576,12 +576,12 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
           }
 
         } else {
-          Alert.alert("Error", "ไม่สามารถวิเคราะห์ข้อมูลได้");
+          Alert.alert("Error", "Unable to analyze data.");
           setRiskData(INITIAL_RISK_DATA);
         }
       } catch (error) {
         console.error(error);
-        Alert.alert("Connection Error", "ไม่สามารถติดต่อ Server ได้");
+        Alert.alert("Connection Error", "Unable to reach the server.");
         setRiskData(INITIAL_RISK_DATA);
       }
       finally { setLoadingData(false); }
@@ -605,7 +605,7 @@ export default function ResultScreen({ onBack, onSave, onNavigate, route, sessio
           setPreventionData(result.preventionData);
           setCounselingData(result.counselingData);
         } else {
-          Alert.alert("Connection Error", "ไม่สามารถเชื่อมต่อ Server ได้");
+          Alert.alert("Connection Error", "Unable to connect to the server.");
         }
       } catch (error) { Alert.alert("Error", "Failed to load guidance"); }
       finally { setLoadingGuidance(false); }

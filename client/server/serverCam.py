@@ -129,13 +129,17 @@ BEHAVIOR_MIN_DURATION_SEC = {
     "litter": 10.0,
     "sleep": 20.0,
     "activity": 8.0,
-    "abnormal": 6.0,
+    "grooming": 6.0,
+    "vomiting": 3.0,
+    "abnormal": 3.0,
 }
 BEHAVIOR_EVENT_COOLDOWN_SEC = {
     "eat": 120.0,
     "litter": 120.0,
     "sleep": 300.0,
     "activity": 60.0,
+    "grooming": 90.0,
+    "vomiting": 60.0,
     "abnormal": 20.0,
 }
 _last_committed_by_cat_behavior = {}
@@ -189,6 +193,10 @@ def _normalize_source_url(raw):
     # fix accidental spaces in URLs from app input such as "rtsp:// /user:pass@..."
     if s.startswith(("rtsp://", "http://", "https://")):
         s = "".join(s.split())
+    if s.startswith("file://"):
+        s = s.replace("file://", "", 1)
+    if re.match(r"^[A-Za-z]:[\\\\/]", s):
+        s = os.path.normpath(s)
     return s
 
 
@@ -196,6 +204,16 @@ def _is_valid_source_url(source_url):
     s = _normalize_source_url(source_url)
     if not s:
         return False
+    # allow local demo files (absolute path)
+    if os.path.isabs(s) and os.path.exists(s) and os.path.isfile(s):
+        lower = s.lower()
+        if any(lower.endswith(ext) for ext in (".mp4", ".webm", ".mov", ".mkv", ".avi")):
+            return True
+    # allow Windows absolute video path even if file check fails (e.g., different process cwd)
+    if re.match(r"^[A-Za-z]:[\\\\/]", s):
+        lower = s.lower()
+        if any(lower.endswith(ext) for ext in (".mp4", ".webm", ".mov", ".mkv", ".avi")):
+            return True
     if not s.startswith(("rtsp://", "http://", "https://")):
         return False
     try:
@@ -240,6 +258,17 @@ def _is_temporarily_bad_source(source_url):
         _bad_source_until.pop(s, None)
         return False
     return True
+
+
+@app.route("/api/clear_bad_source", methods=["POST"])
+def clear_bad_source():
+    data = request.get_json(silent=True) or {}
+    source_url = _normalize_source_url(data.get("source_url"))
+    if source_url:
+        _bad_source_until.pop(source_url, None)
+        return jsonify({"status": "ok", "cleared": source_url})
+    _bad_source_until.clear()
+    return jsonify({"status": "ok", "cleared": "all"})
 
 
 def _probe_source_readable(source_url, source_type="live"):
@@ -405,9 +434,9 @@ def _map_behavior_to_db(behavior):
         "toileting": "litter",
         "resting": "sleep",
         "active": "activity",
-        "grooming": "activity",
+        "grooming": "grooming",
         "head_pressing": "abnormal",
-        "vomiting": "abnormal",
+        "vomiting": "vomiting",
         "unknown": "activity",
     }
     return m.get(str(behavior or "").lower(), "activity")
@@ -656,13 +685,15 @@ def _commit_session(cat_uuid, sess, frame=None):
 
     confidence = float(sess["conf_sum"] / max(1, sess["conf_n"]))
     event_iso = datetime.fromtimestamp(sess["last_ts"], tz=timezone.utc).isoformat()
-    abnormal = behavior_db == "abnormal"
+    behavior_detail = str(sess.get("behavior_raw") or behavior_db)
+    abnormal = (behavior_db == "abnormal") or (behavior_detail in _ABNORMAL_BEHAVIORS)
 
     try:
         _supabase.table("ai_cat_events").insert({
             "camera_id": _current_camera_id,
             "cat_id": cat_uuid,
             "behavior_label": behavior_db,
+            "behavior_detail": behavior_detail,
             "confidence": confidence,
             "abnormal": abnormal,
             "occurred_at": event_iso,
@@ -680,6 +711,7 @@ def _commit_session(cat_uuid, sess, frame=None):
             "pred_cat_id": cat_uuid,
             "confidence": confidence,
             "behavior_label": behavior_db,
+            "behavior_detail": behavior_detail,
             "occurred_at": event_iso,
             "snapshot_url": snapshot_url,
             "reviewed": True,
@@ -716,7 +748,8 @@ def _update_activity_sessions(frame, results_this_frame):
         with _zone_lock:
             has_zone_rules = (len(_zones_by_type.get("food") or []) + len(_zones_by_type.get("litter") or [])) > 0
         zone_behavior = _behavior_from_zone(r.get("bbox"), frame.shape if frame is not None else None)
-        pose_behavior = _map_behavior_to_db(r.get("behavior"))
+        raw_behavior = str(r.get("behavior") or "").lower()
+        pose_behavior = _map_behavior_to_db(raw_behavior)
         if has_zone_rules and zone_behavior in ("eat", "litter"):
             # Count eat/litter only when BOTH are true:
             # 1) cat is inside configured zone
@@ -733,6 +766,7 @@ def _update_activity_sessions(frame, results_this_frame):
         if not sess:
             _activity_sessions[cat_uuid] = {
                 "behavior_db": behavior_db,
+                "behavior_raw": raw_behavior or behavior_db,
                 "start_ts": now_ts,
                 "last_ts": now_ts,
                 "conf_sum": conf,
@@ -748,10 +782,13 @@ def _update_activity_sessions(frame, results_this_frame):
             sess["conf_n"] += 1
             sess["frames"] += 1
             sess["bbox"] = bbox
+            if raw_behavior:
+                sess["behavior_raw"] = raw_behavior
         else:
             _commit_session(cat_uuid, sess, frame=frame)
             _activity_sessions[cat_uuid] = {
                 "behavior_db": behavior_db,
+                "behavior_raw": raw_behavior or behavior_db,
                 "start_ts": now_ts,
                 "last_ts": now_ts,
                 "conf_sum": conf,
@@ -784,6 +821,8 @@ def _pick_active_camera_from_db():
     if _supabase is None:
         return None
     try:
+        force_camera_id = (os.getenv("FORCE_CAMERA_ID") or os.getenv("DEMO_CAMERA_ID") or "").strip()
+        force_owner_id = (os.getenv("FORCE_OWNER_ID") or "").strip()
         rows = (
             _supabase.table("cameras")
             .select("id,owner_id,stream_source,stream_source_type,is_primary,is_ai_enabled,ai_connection_status,created_at")
@@ -806,6 +845,17 @@ def _pick_active_camera_from_db():
         if not candidates:
             return None
 
+        # Hard lock to a specific camera/account if provided via env.
+        if force_camera_id:
+            for c in candidates:
+                if str(c.get("id") or "") == force_camera_id:
+                    return c
+            return None
+        if force_owner_id:
+            for c in candidates:
+                if str(c.get("owner_id") or "") == force_owner_id:
+                    return c
+
         # Prefer cameras that already have assigned cats.
         candidate_ids = [c.get("id") for c in candidates if _is_uuid_like(c.get("id"))]
         assigned_map = {}
@@ -824,6 +874,14 @@ def _pick_active_camera_from_db():
                     assigned_map[cid] = assigned_map.get(cid, 0) + 1
             except Exception:
                 assigned_map = {}
+
+        # If app explicitly selected a camera, keep it sticky.
+        with _source_lock:
+            sticky_camera_id = _current_camera_id
+        if _is_uuid_like(sticky_camera_id):
+            for c in candidates:
+                if str(c.get("id") or "") == str(sticky_camera_id):
+                    return c
 
         # Prefer LIVE sources first so demo URLs do not override active RTSP cameras.
         live_first = sorted(
@@ -854,8 +912,14 @@ def _apply_source_from_db(cam_row):
 
     changed = False
     with _source_lock:
-        # Do not let DB demo source hijack a working live camera stream.
-        if _camera_status == "connected" and _source_type == "live" and source_type == "demo":
+        # Do not let DB demo source hijack a working live camera stream,
+        # unless it's the currently selected camera.
+        if (
+            _camera_status == "connected"
+            and _source_type == "live"
+            and source_type == "demo"
+            and str(_current_camera_id or "") != str(camera_id or "")
+        ):
             return False
         # Keep current live stream stable while healthy; don't hot-swap to another DB live URL.
         if (
@@ -929,7 +993,7 @@ def _camera_reader_thread():
             with _source_lock:
                 _camera_status = "disconnected"
                 # Fallback to last known good source if new source cannot be opened
-                if _last_good_source and _current_source != _last_good_source:
+                if _source_type != "demo" and _last_good_source and _current_source != _last_good_source:
                     print(f"↩ [VideoSource] fallback to last good source: {_last_good_source}")
                     _current_source = _last_good_source
                     _source_type = _last_good_type
@@ -1293,6 +1357,18 @@ def video_feed_ai():
         headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"},
     )
 
+@app.route("/api/video_feed_model")
+def video_feed_model():
+    # Alias for AI-processed stream
+    fps = request.args.get("fps")
+    quality = request.args.get("quality")
+    width = request.args.get("width")
+    return Response(
+        _generate_mjpeg_ai(out_fps=fps, jpeg_quality=quality, max_width=width),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"},
+    )
+
 @app.route("/api/latest_frame.jpg")
 def latest_frame_jpg():
     with _ai_results_lock:
@@ -1387,6 +1463,7 @@ def set_source():
                 and str(_current_camera_id or "") == str(camera_id or "")
                 and str(_current_owner_id or "") == str(owner_id or "")
             ):
+                _refresh_camera_context(camera_id=camera_id, owner_id=owner_id)
                 return jsonify({
                     "status": "ok",
                     "message": "unchanged",
