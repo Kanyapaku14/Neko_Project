@@ -56,8 +56,6 @@ BEHAVIOR_MIN_STREAK_FRAMES = {
     "litter": 12,
     "sleep": 16,
     "activity": 20,
-    "grooming": 6,
-    "vomiting": 1,
     "abnormal": 5,
 }
 BEHAVIOR_MIN_CONFIDENCE = {
@@ -65,17 +63,13 @@ BEHAVIOR_MIN_CONFIDENCE = {
     "litter": 0.55,
     "sleep": 0.45,
     "activity": 0.40,
-    "grooming": 0.45,
-    "vomiting": 0.45,
-    "abnormal": 0.55,
+    "abnormal": 0.65,
 }
 BEHAVIOR_EVENT_COOLDOWN_SEC = {
     "eat": 90.0,
     "litter": 120.0,
     "sleep": 300.0,
     "activity": 180.0,
-    "grooming": 90.0,
-    "vomiting": 60.0,
     "abnormal": 60.0,
 }
 
@@ -85,8 +79,6 @@ BEHAVIOR_DAILY_CAP = {
     "litter": 20,
     "sleep": 24,
     "activity": 120,
-    "grooming": 60,
-    "vomiting": 25,
     "abnormal": 25,
 }
 
@@ -115,9 +107,9 @@ def map_behavior_to_db(label):
         "toileting": "litter",
         "resting": "sleep",
         "active": "activity",
-        "grooming": "grooming",
+        "grooming": "activity",
         "head_pressing": "abnormal",
-        "vomiting": "vomiting",
+        "vomiting": "abnormal",
         "unknown": "activity",
         "error": "activity",
     }
@@ -446,82 +438,49 @@ def _zone_rect_pixels(zone_polygon, frame_shape):
     return (x1, y1, x2, y2)
 
 
-def _zone_affinity_score(rect_px, foot_x, foot_y):
-    """
-    Compute 0..1 score based on distance to zone center (higher = deeper inside zone).
-    """
-    x1, y1, x2, y2 = rect_px
-    if foot_x < x1 or foot_x > x2 or foot_y < y1 or foot_y > y2:
-        return 0.0
-    cx = (x1 + x2) / 2.0
-    cy = (y1 + y2) / 2.0
-    half_w = max(1.0, (x2 - x1) / 2.0)
-    half_h = max(1.0, (y2 - y1) / 2.0)
-    dx = abs(foot_x - cx) / half_w
-    dy = abs(foot_y - cy) / half_h
-    return max(0.0, 1.0 - max(dx, dy))
-
-
 def detect_zone_for_bbox(camera_zones, bbox, frame_shape):
     """
-    Return (zone_type, zone_score) for bbox foot point, else (None, 0.0).
+    Return zone_type if bbox foot point lies inside a configured zone, else None.
     """
     if not camera_zones:
-        return None, 0.0
+        return None
     bx1, by1, bx2, by2 = bbox
     fx = int((bx1 + bx2) / 2.0)  # foot center x
     fy = int(by2)  # foot y
-    best_type = None
-    best_score = 0.0
     for z in camera_zones:
         zr = _zone_rect_pixels(z.get("polygon"), frame_shape)
         if not zr:
             continue
-        score = _zone_affinity_score(zr, fx, fy)
-        if score > best_score:
-            best_score = score
-            best_type = z.get("zone_type")
-    return best_type, float(best_score)
+        x1, y1, x2, y2 = zr
+        if x1 <= fx <= x2 and y1 <= fy <= y2:
+            return z.get("zone_type")
+    return None
 
 
-def apply_zone_behavior_prior(db_behavior, confidence, zone_type, zone_score, zones_configured=False):
+def apply_zone_behavior_prior(db_behavior, confidence, zone_type):
     """
-    Rule-based disambiguation with zone affinity score (0..1):
-    - If inside zone, boost confidence toward that zone's behavior
-    - If zones are configured but bbox is outside, suppress eat/litter misfires
+    Rule-based disambiguation:
+    - In food zone, low-confidence activity/sleep tends to be 'eat'
+    - In litter zone, low-confidence activity/sleep tends to be 'litter'
+    - In bed zone, low-confidence eat tends to be 'sleep'
     """
     conf = float(confidence or 0.0)
-    zone_score = float(zone_score or 0.0)
-    boost = 0.18 * zone_score
-    adj_conf = min(1.0, conf + boost)
-
-    if zone_type == "food":
-        if db_behavior in ("activity", "sleep") and adj_conf < 0.78:
-            return "eat"
-        if db_behavior == "litter" and conf < 0.80:
-            return "activity"
-    if zone_type == "litter":
-        if db_behavior in ("activity", "sleep") and adj_conf < 0.80:
-            return "litter"
-        if db_behavior == "eat" and conf < 0.80:
-            return "activity"
-    if zone_type == "bed":
-        if db_behavior == "eat" and adj_conf < 0.70:
-            return "sleep"
-
-    if zones_configured and zone_type is None and db_behavior in ("eat", "litter") and conf < 0.70:
-        return "activity"
+    if zone_type == "food" and db_behavior in ("activity", "sleep") and conf < 0.72:
+        return "eat"
+    if zone_type == "litter" and db_behavior in ("activity", "sleep") and conf < 0.75:
+        return "litter"
+    if zone_type == "bed" and db_behavior == "eat" and conf < 0.65:
+        return "sleep"
     return db_behavior
 
 
-def insert_ai_event(supabase, camera_id, cat_uuid, behavior, confidence, abnormal, behavior_detail=None):
+def insert_ai_event(supabase, camera_id, cat_uuid, behavior, confidence, abnormal):
     if not supabase or not camera_id or not cat_uuid or "-" not in str(cat_uuid):
         return
     payload = {
         "camera_id": camera_id,
         "cat_id": cat_uuid,
         "behavior_label": map_behavior_to_db(behavior),
-        "behavior_detail": behavior_detail or behavior,
         "confidence": round(float(confidence), 4),
         "abnormal": bool(abnormal),
         "occurred_at": datetime.now(timezone.utc).isoformat(),
@@ -549,7 +508,6 @@ def insert_identity_review(
         "pred_cat_id": pred_cat_uuid if pred_cat_uuid and "-" in str(pred_cat_uuid) else None,
         "confidence": round(float(confidence), 4),
         "behavior_label": map_behavior_to_db(behavior),
-        "behavior_detail": behavior,
         "occurred_at": datetime.now(timezone.utc).isoformat(),
         "snapshot_url": snapshot_path,
         "reviewed": bool(reviewed),
@@ -1023,14 +981,8 @@ def run(
                             frame_cat_counts[cat_uuid] += 1
                             frame_cat_last_bbox[cat_uuid] = bbox
                         db_behavior = map_behavior_to_db(behavior)
-                        zone_type, zone_score = detect_zone_for_bbox(camera_zones, bbox, frame_orig.shape)
-                        db_behavior = apply_zone_behavior_prior(
-                            db_behavior,
-                            confidence,
-                            zone_type,
-                            zone_score,
-                            zones_configured=bool(camera_zones),
-                        )
+                        zone_type = detect_zone_for_bbox(camera_zones, bbox, frame_orig.shape)
+                        db_behavior = apply_zone_behavior_prior(db_behavior, confidence, zone_type)
                         cat_event_key = cat_uuid or str(cat_id)
                         should_commit = should_commit_behavior_event(
                             event_state=behavior_event_state,
@@ -1055,15 +1007,7 @@ def run(
                             db_behavior=db_behavior,
                             now_dt_utc=event_time,
                         ):
-                            insert_ai_event(
-                                supabase,
-                                camera_id,
-                                cat_uuid,
-                                behavior,
-                                confidence,
-                                abnormal,
-                                behavior_detail=behavior,
-                            )
+                            insert_ai_event(supabase, camera_id, cat_uuid, behavior, confidence, abnormal)
                             committed = True
                             health_state["events_committed"] += 1
                             health_state["last_event_at"] = event_iso

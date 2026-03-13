@@ -21,8 +21,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import supabase from "./config/supabaseClient";
-import AlertRepository from "../services/AlertRepository";
-import AlertEngine from "../services/AlertEngine";
 
 const getLocalDateString = (date) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -30,7 +28,6 @@ const getLocalDateString = (date) => {
 
 const { width } = Dimensions.get("window");
 const FRIENDS_KEY = "neko_friends_list";
-const FRIEND_REQUEST_SEEN_KEY_PREFIX = "friend_request_seen";
 
 export default function RankingScreen({ session, onBack }) {
   // v2.1 UI Update Force Reload
@@ -154,37 +151,14 @@ export default function RankingScreen({ session, onBack }) {
 
   const [pendingRequests, setPendingRequests] = useState([]);
 
-  const loadSeenFriendRequests = async () => {
-    try {
-      if (!session?.user?.id) return new Set();
-      const raw = await AsyncStorage.getItem(`${FRIEND_REQUEST_SEEN_KEY_PREFIX}:${session.user.id}`);
-      if (!raw) return new Set();
-      const list = JSON.parse(raw);
-      if (!Array.isArray(list)) return new Set();
-      return new Set(list.map((v) => String(v)));
-    } catch (_) {
-      return new Set();
-    }
-  };
-
-  const saveSeenFriendRequests = async (set) => {
-    try {
-      if (!session?.user?.id) return;
-      await AsyncStorage.setItem(
-        `${FRIEND_REQUEST_SEEN_KEY_PREFIX}:${session.user.id}`,
-        JSON.stringify(Array.from(set))
-      );
-    } catch (_) { }
-  };
-
   const loadPendingRequests = async () => {
     try {
       if (!session?.user?.id) return;
 
-      // 1. Fetch pending friends (user_ids and created_at)
+      // 1. Fetch pending friends (just user_ids) to avoid ambiguous embedding
       const { data: incomingRows, error: incomingError } = await supabase
         .from("friends")
-        .select("user_id, created_at")
+        .select("user_id")
         .eq("friend_id", session.user.id)
         .eq("status", "pending");
 
@@ -195,17 +169,9 @@ export default function RankingScreen({ session, onBack }) {
 
       console.log("Raw Incoming Rows:", incomingRows);
 
-      // Filter out requests older than 24 hours
-      const now = new Date();
-      const oneDayInMs = 24 * 60 * 60 * 1000;
-      const validIncomingRows = (incomingRows || []).filter(row => {
-        if (!row.created_at) return true;
-        return (now - new Date(row.created_at)) <= oneDayInMs;
-      });
-
-      if (validIncomingRows && validIncomingRows.length > 0) {
+      if (incomingRows && incomingRows.length > 0) {
         // 2. Fetch profiles for these users
-        const userIds = validIncomingRows.map(r => r.user_id);
+        const userIds = incomingRows.map(r => r.user_id);
         const { data: profiles, error: profileError } = await supabase
           .from("profiles")
           .select("id, name, avatar_url, score")
@@ -223,7 +189,7 @@ export default function RankingScreen({ session, onBack }) {
           });
         }
 
-        const pending = validIncomingRows.map(req => {
+        const pending = incomingRows.map(req => {
           const profile = profileMap[req.user_id];
           return {
             id: req.user_id,
@@ -233,30 +199,13 @@ export default function RankingScreen({ session, onBack }) {
           };
         });
         setPendingRequests(pending);
-
-        // Log local alerts for new incoming requests (so they show in Notifications)
-        const seen = await loadSeenFriendRequests();
-        for (const req of validIncomingRows) {
-          const requesterId = String(req.user_id || "");
-          if (!requesterId || seen.has(requesterId)) continue;
-          const profile = profileMap[req.user_id];
-          await AlertEngine.logEvent({
-            type: "friend_request",
-            severity: "info",
-            title: "Friend request received",
-            desc: `${profile?.name || "Someone"} wants to be your friend`,
-            timestamp: req.created_at || new Date().toISOString(),
-          });
-          seen.add(requesterId);
-        }
-        await saveSeenFriendRequests(seen);
       } else {
         setPendingRequests([]);
       }
     } catch (e) {
       console.log("Error loading pending requests:", e);
     }
-  };
+  }
 
   const loadFriends = async () => {
     try {
@@ -348,19 +297,12 @@ export default function RankingScreen({ session, onBack }) {
       // 3. Include incoming requests check (am I the friend_id?)
       const { data: incoming } = await supabase
         .from("friends")
-        .select("user_id, status, created_at")
+        .select("user_id, status")
         .eq("friend_id", session.user.id)
         .eq("status", "pending");
 
       if (incoming) {
-        const now = new Date();
-        const oneDayInMs = 24 * 60 * 60 * 1000;
-
         incoming.forEach(r => {
-          if (r.created_at && (now - new Date(r.created_at)) > oneDayInMs) {
-            // Skip hiding it from the button if it's older than 1 day so user can send again (though DB might block pending requests)
-            return;
-          }
           relMap[r.user_id] = 'incoming'; // Mark as incoming request
         });
       }
@@ -701,7 +643,7 @@ export default function RankingScreen({ session, onBack }) {
       }
 
       // Notify User
-      Alert.alert("Success! 🎉", `You earned ${pointsToAward} points for consecutive check-ins.`);
+      Alert.alert("สำเร็จ! 🎉", `เช็คอินต่อเนื่องรับ ${pointsToAward} คะแนน`);
 
     } catch (e) {
       console.log("Auto check-in error:", e);
@@ -828,14 +770,6 @@ export default function RankingScreen({ session, onBack }) {
         if (insertError) throw insertError;
       }
 
-      await AlertRepository.push({
-        type: 'friend_accepted',
-        severity: 'success',
-        title: 'รับคำขอเป็นเพื่อนแล้ว! ✨',
-        desc: `${myProfile?.name || 'เพื่อนใหม่ของคุณ'} ตอบรับคำขอเป็นเพื่อนแล้ว มาเริ่มคุยกันเถอะ`,
-        timestamp: new Date().toISOString(),
-      }, requestorId);
-
       Alert.alert("Success! 🎉", "You are now friends!");
       loadAll(); // Refresh everything (pending, friends list, global status)
     } catch (e) {
@@ -886,14 +820,6 @@ export default function RankingScreen({ session, onBack }) {
         }
         return;
       }
-
-      await AlertRepository.push({
-        type: 'friend_request',
-        severity: 'info',
-        title: 'คำขอเป็นเพื่อนใหม่! 🐾',
-        desc: `${myProfile?.name || 'ใครบางคน'} อยากเป็นเพื่อนกับคุณ`,
-        timestamp: new Date().toISOString(),
-      }, profile.id);
 
       Alert.alert("Request Sent! 🐾", `Wait for ${profile.name} to approve.`);
       setShowAddFriend(false);

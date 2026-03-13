@@ -8,29 +8,16 @@ import HomeHeader from "../components/HomeHeader";
 import CatHealthMeter from "../components/CatHealthMeter";
 import supabase from "./config/supabaseClient";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-import { analyzeHealthLog, analyzeHealthTrend7d, getRiskStatus, getHealthStatus } from "../utils/healthLogic";
-
-
-import AlertEngine from '../services/AlertEngine';
-import useCameraData from '../hooks/useCameraData'; // Added useCameraData
-
+import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
 import Svg, { Line, Circle, Path, Text as SvgText } from 'react-native-svg';
-
-const uuidv4 = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-  const r = (Math.random() * 16) | 0;
-  const v = c === 'x' ? r : (r & 0x3) | 0x8;
-  return v.toString(16);
-});
-const lowScoreAlertInFlight = new Set();
 
 // ==========================================
 // 🐾 Paw Progress Bar Component
 // ==========================================
 const PawProgressBar = ({ label, percent, icon }) => {
-  const clampedPercent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+  const clampedPercent = Math.max(0, Math.min(100, percent));
 
   // Custom colors for specific labels to match CameraScreen
   const getBarColor = (label) => {
@@ -82,11 +69,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const isNarrowScreen = screenWidth < 390;
   const radarAnim = useRef(new Animated.Value(0)).current;
   const [currentScore, setCurrentScore] = useState(null);
-  const statusScore = Number.isFinite(currentScore) ? currentScore : 100;
-  const [riskStatusInfo, setRiskStatusInfo] = useState(() => getRiskStatus(0, false));
-  const status = riskStatusInfo || getRiskStatus(100 - statusScore, false);
-  // Use original getHealthStatus palette for ring color (same as HomeScreen)
-  const ringStatus = getHealthStatus(statusScore);
+  const status = getHealthStatus(currentScore || 100);
 
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -98,13 +81,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   const [rawLogs, setRawLogs] = useState([]);
   const [latestAlerts, setLatestAlerts] = useState([]);
   const [latestRedFlags, setLatestRedFlags] = useState(0);
-  const [latestEmergencyAlerts, setLatestEmergencyAlerts] = useState([]);
-  const [latestClusters, setLatestClusters] = useState([]);
-  const [latestDiseases, setLatestDiseases] = useState([]);
-  const [isFirstLog, setIsFirstLog] = useState(false);
 
-  // Replaced `pawStats` with `useCameraData` hook directly
-  const { data: cameraData, refetch: refetchCameraData } = useCameraData(session, 'connected', catDetails?.id, { cameraOnly: false });
+  const [pawStats, setPawStats] = useState({ activity: 0, litter: 0, wellness: 0 });
 
   const [eventSummary, setEventSummary] = useState({
     all: { eat: 0, litter: 0, sleep: 0, activity: 0, abnormal: 0, total: 0 },
@@ -161,8 +139,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
     const persistHealthCache = async () => {
       try {
         if (!session?.user?.id || !catDetails?.id || !Number.isFinite(currentScore)) return;
-        const riskNow = Math.max(0, 100 - currentScore);
-        const statusNow = getRiskStatus(riskNow, false);
+        const statusNow = getHealthStatus(currentScore);
         const key = healthCacheKey(session.user.id, catDetails.id);
         if (!key) return;
         await AsyncStorage.setItem(key, JSON.stringify({
@@ -180,69 +157,17 @@ export default function Dashboard({ onBack, onNavigate, session }) {
           text: statusNow.text,
           at: new Date().toISOString(),
         }));
-        // Notify HomeScreen so ring color and status text sync on navigate-back
-        DeviceEventEmitter.emit('healthScoreUpdated', {
-          score: currentScore,
-          color: statusNow.color,
-          label: statusNow.label,
-          text: statusNow.text,
-        });
       } catch (_) { }
     };
     persistHealthCache();
   }, [session?.user?.id, catDetails?.id, currentScore]);
 
-  const notifyLowScoreIfNeeded = async (score, catId, catName) => {
-    if (!session?.user?.id || !catId) return;
-    if (!Number.isFinite(score)) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const key = `dashboard_low_score_alert:${session.user.id}:${catId}`;
-    if (lowScoreAlertInFlight.has(key)) return;
-    lowScoreAlertInFlight.add(key);
-    const lastDateKey60 = `${key}:date:60`;
-    const lastDateKey40 = `${key}:date:40`;
-    const lastDate60 = await AsyncStorage.getItem(lastDateKey60);
-    const lastDate40 = await AsyncStorage.getItem(lastDateKey40);
-
-    try {
-      if (score >= 60) {
-        // reset both levels when user recovers to 60+
-        await AsyncStorage.multiRemove([lastDateKey60, lastDateKey40]);
-        return;
-      }
-
-      if (score >= 40) {
-        // reset 40-level when user recovers to 40+
-        await AsyncStorage.removeItem(lastDateKey40);
-      }
-
-      const level = score < 40 ? '40' : '60';
-      const type = level === '40' ? 'dashboard_low_score_40' : 'dashboard_low_score_60';
-      const severity = level === '40' ? 'critical' : 'warning';
-      if (level === '60' && lastDate60 === today) return;
-      if (level === '40' && lastDate40 === today) return;
-
-      if (level === '40' && AlertEngine.resolveActiveAlerts) {
-        await AlertEngine.resolveActiveAlerts('dashboard_low_score_40');
-      }
-      await AlertEngine.logEvent({
-        id: uuidv4(),
-        type,
-        severity,
-        title: level === '40' ? 'Health score is very low' : 'Health score is low',
-        desc: `Your dashboard score dropped to ${score}.`,
-        catId,
-        catName: catName || null,
-        timestamp: new Date().toISOString(),
-        dedupeKey: `${key}:${level}`,
-        cooldownMs: 0,
-      });
-      if (level === '60') await AsyncStorage.setItem(lastDateKey60, today);
-      if (level === '40') await AsyncStorage.setItem(lastDateKey40, today);
-    } finally {
-      lowScoreAlertInFlight.delete(key);
+  // Fetch paw stats whenever the active cat changes
+  useEffect(() => {
+    if (catDetails?.id) {
+      fetchPawStats(catDetails.id);
     }
-  };
+  }, [catDetails]);
 
   const fetchDashboardData = async () => {
     try {
@@ -315,88 +240,32 @@ export default function Dashboard({ onBack, onNavigate, session }) {
       setRawLogs(unifiedLogs);
 
       if (unifiedLogs.length > 0) {
-        // ==========================================
-        // ✅ Two-Tier Analysis
-        // Tier 1: 3-Day Immediate Check (สถานะหลัก)
-        // Tier 2: 7-Day Trend Detection (Alert พิเศษ)
-        // ==========================================
-        const catWeightKg = Number(effectiveCat?.weight);
-        const safeCatWeightKg = Number.isFinite(catWeightKg) && catWeightKg > 0 ? catWeightKg : 4;
-        const analyses = unifiedLogs.map((log, idx) =>
-          analyzeHealthLog(log, safeCatWeightKg, idx === 0 ? unifiedLogs.slice(1) : null)
-        );
+        let totalScore = 0;
+        let allAlerts = [];
+        let totalRedFlags = 0;
 
-        // Tier 1: latest 3 days (Immediate)
-        const recentAnalyses = analyses.slice(0, 3);
-        const recentCount = Math.max(1, recentAnalyses.length);
-        const avg3Score = Math.round(
-          recentAnalyses.reduce((sum, a) => sum + (Number(a?.score) || 0), 0) / recentCount
-        );
-        const hasEmergencyIn3Days = recentAnalyses.some((a) => Boolean(a?.meta?.isEmergency));
+        unifiedLogs.forEach(log => {
+          const analysis = analyzeHealthLog(log);
+          totalScore += analysis.score;
+          allAlerts = [...allAlerts, ...analysis.alerts];
+          totalRedFlags += analysis.redFlags;
+        });
 
-        // หากเจอ Red Flag รุนแรงใน 3 วันนี้ ให้ดีดสถานะเป็น Critical ทันที
-        const effectiveScore = hasEmergencyIn3Days ? Math.min(avg3Score, 19) : avg3Score;
-        setCurrentScore(effectiveScore);
-        const avg3Risk = Math.round(
-          recentAnalyses.reduce((sum, a) => sum + (Number(a?.riskScore) || (100 - (Number(a?.score) || 0))), 0) / recentCount
-        );
-        const latest = analyses[0] || null;
-        setIsFirstLog(Boolean(latest?.isFirstLog));
-        if (latest?.isFirstLog) {
-          setRiskStatusInfo(getRiskStatus(Number(latest?.riskScore) || avg3Risk, hasEmergencyIn3Days, latest?.riskStatus));
-        } else {
-          setRiskStatusInfo(getRiskStatus(avg3Risk, hasEmergencyIn3Days));
-        }
-        await notifyLowScoreIfNeeded(effectiveScore, effectiveCat.id, effectiveCat.name);
-
-        // Tier 2: 7-day trend alerts (special alerts)
-        const trend7d = analyzeHealthTrend7d(unifiedLogs.slice(0, 7), safeCatWeightKg);
-        const trendAlerts = Array.isArray(trend7d?.alerts) ? trend7d.alerts : [];
-
-        // รวม alert พิเศษ (trend) + alert ปกติ (per-day) แล้วค่อย dedupe
-        const allAlerts = [
-          ...trendAlerts,
-          ...analyses.flatMap((a) => (Array.isArray(a?.alerts) ? a.alerts : [])),
-        ];
-
-        // เก็บ alerts ล่าสุดไม่เกิน 4 รายการ (ไม่ซ้ำ) และให้ trend alerts มาก่อน
-
+        const averageScore = Math.round(totalScore / unifiedLogs.length);
+        setCurrentScore(averageScore);
+        // เก็บ alerts ล่าสุดไม่เกิน 3 รายการ (ไม่ซ้ำ)
         setLatestAlerts([...new Set(allAlerts)].slice(0, 4));
-
-        // red flags (สรุปในช่วง 3 วันล่าสุด เพื่อให้ตรงกับสถานะหลัก)
-        const redFlags3d = recentAnalyses.reduce((sum, a) => sum + (Number(a?.redFlags) || 0), 0);
-        setLatestRedFlags(redFlags3d);
-
-        setLatestEmergencyAlerts(
-          Array.isArray(latest?.meta?.emergencyAlerts) ? latest.meta.emergencyAlerts.slice(0, 4) : []
-        );
-        setLatestClusters(Array.isArray(latest?.clusters) ? latest.clusters : []);
-        setLatestDiseases(Array.isArray(latest?.diseases) ? latest.diseases : []);
+        setLatestRedFlags(totalRedFlags);
       } else {
         setCurrentScore(100);
-        setRiskStatusInfo(getRiskStatus(0, false));
         setLatestAlerts([]);
         setLatestRedFlags(0);
-        setLatestEmergencyAlerts([]);
-        setLatestClusters([]);
-        setLatestDiseases([]);
-        setIsFirstLog(false);
       }
 
       const chartLogs = [...unifiedLogs].reverse();
 
       const labels = chartLogs.map((log) => {
-        const raw = log?.log_date;
-        if (typeof raw === 'string') {
-          const isoDate = raw.split('T')[0];
-          const parts = isoDate.split('-');
-          if (parts.length === 3) {
-            const month = Number(parts[1]);
-            const day = Number(parts[2]);
-            if (Number.isFinite(month) && Number.isFinite(day)) return `${day}/${month}`;
-          }
-        }
-        const date = raw ? new Date(raw) : new Date();
+        const date = new Date(log.log_date);
         return `${date.getDate()}/${date.getMonth() + 1}`;
       });
 
@@ -404,15 +273,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
         const meals = log.meal_logs || [];
         return meals.reduce((sum, meal) => sum + (Number(meal.amount_grams) || 0), 0);
       });
-      const waterData = chartLogs.map((log) => {
-        const direct = Number(log?.water_ml_per_day);
-        if (Number.isFinite(direct)) return direct;
-
-        const nested = log?.normal_logs;
-        const candidate = Array.isArray(nested) ? nested?.[0]?.water_ml_per_day : nested?.water_ml_per_day;
-        const parsed = Number(candidate);
-        return Number.isFinite(parsed) ? parsed : 0;
-      });
+      const waterData = chartLogs.map((log) => log.normal_logs?.water_ml_per_day || 0);
 
       setChartData({
         labels: labels,
@@ -430,6 +291,61 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   };
 
 
+  // ==========================================
+  // 🐾 Fetch Paw Progress Stats from Supabase
+  // ==========================================
+  const fetchPawStats = async (catId) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+
+      // --- Activity & Litter from ai_daily_summary ---
+      const { data: summaryData, error: summaryError } = await supabase
+        .from('ai_daily_summary')
+        .select('count_00_06, count_06_12, count_12_18, count_18_24, total_litter')
+        .eq('cat_id', catId)
+        .eq('summary_date', today)
+        .single();
+
+      let activityPercent = 0;
+      let litterPercent = 0;
+
+      if (!summaryError && summaryData) {
+        const ACTIVITY_GOAL = 20; // target movements per day
+        const totalActivity =
+          (summaryData.count_00_06 || 0) +
+          (summaryData.count_06_12 || 0) +
+          (summaryData.count_12_18 || 0) +
+          (summaryData.count_18_24 || 0);
+        activityPercent = Math.min(100, Math.round((totalActivity / ACTIVITY_GOAL) * 100));
+
+        const LITTER_GOAL = 4; // target litter visits per day
+        litterPercent = Math.min(100, Math.round(((summaryData.total_litter || 0) / LITTER_GOAL) * 100));
+      }
+
+      // --- Wellness from assessments (latest record) ---
+      const { data: assessmentData, error: assessmentError } = await supabase
+        .from('assessments')
+        .select('overall_risk_score')
+        .eq('cat_id', catId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      let wellnessPercent = 0;
+      if (!assessmentError && assessmentData) {
+        wellnessPercent = Math.max(0, 100 - (assessmentData.overall_risk_score || 0));
+      }
+
+      setPawStats({
+        activity: activityPercent,
+        litter: litterPercent,
+        wellness: wellnessPercent,
+      });
+    } catch (err) {
+      console.warn('fetchPawStats error:', err);
+      setPawStats({ activity: 0, litter: 0, wellness: 0 });
+    }
+  };
 
 
   const fetchAccumulatedEventSummary = async (catId) => {
@@ -619,7 +535,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
 
 
   const calculateAge = (birthdate) => {
-    if (!birthdate) return 'Unknown';
+    if (!birthdate) return 'N/A';
     const birth = new Date(birthdate);
     const today = new Date();
     let years = today.getFullYear() - birth.getFullYear();
@@ -632,33 +548,22 @@ export default function Dashboard({ onBack, onNavigate, session }) {
   };
 
   const handleExportPDF = async () => {
-    const privacyRaw = await AsyncStorage.getItem('privacy_enabled');
-    if (privacyRaw === 'false') {
-      alert("Data export is disabled in Privacy settings.");
-      return;
-    }
-
     if (!catDetails || rawLogs.length === 0) {
       alert("No data available to export");
       return;
     }
 
     try {
-      let latestWeight = 'Unknown';
-      const { data: weightData, error: weightError } = await supabase
-        .from('cat_weights')
-        .select('weight_kg')
+      const { data: exportLogs, error: exportError } = await supabase
+        .from('daily_logs')
+        .select('log_date, normal_logs(*), something_off_logs(*), meal_logs(*)')
         .eq('cat_id', catDetails.id)
-        .order('measured_at', { ascending: false })
-        .limit(1);
-        
-      if (!weightError && weightData && weightData.length > 0) {
-        latestWeight = weightData[0].weight_kg + ' kg';
-      } else if (catDetails.weight) {
-        latestWeight = catDetails.weight + ' kg';
-      }
+        .order('log_date', { ascending: false })
+        .limit(7);
 
-      const logsForExport = rawLogs.slice(0, 7) || [];
+      if (exportError) throw exportError;
+
+      const logsForExport = exportLogs || [];
       if (logsForExport.length === 0) {
         alert("No data available to export");
         return;
@@ -791,8 +696,8 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                 <div class="info-row"><span class="label">Name:</span> ${catDetails.name || 'Unknown'}</div>
                 <div class="info-row"><span class="label">Breed:</span> ${catDetails.breed || 'Unknown'}</div>
                 <div class="info-row"><span class="label">Age:</span> ${calculateAge(catDetails.birthdate)}</div>
-                <div class="info-row"><span class="label">Gender:</span> ${catDetails.gender || 'Unknown'}</div>
-                <div class="info-row"><span class="label">Weight:</span> ${latestWeight}</div>
+                <div class="info-row"><span class="label">Gender:</span> ${catDetails.gender === 'M' ? 'Male' : catDetails.gender === 'F' ? 'Female' : 'Unknown'}</div>
+                <div class="info-row"><span class="label">Weight:</span> ${catDetails.weight ? catDetails.weight + ' kg' : 'Unknown'}</div>
                 <div class="info-row"><span class="label">Spayed/Neutered:</span> ${catDetails.spayed_neutered ? 'Yes' : 'No'}</div>
               </div>
             </div>
@@ -930,7 +835,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                   size={260}
                   score={currentScore}
                   statusText={status.label}
-                  statusColor={ringStatus.color}
+                  statusColor={status.color}
                   note={status.text}
                 />
 
@@ -968,10 +873,10 @@ export default function Dashboard({ onBack, onNavigate, session }) {
             <View style={styles.assessmentButtons}>
               <TouchableOpacity
                 style={styles.viewResultBtn}
-                onPress={() => onNavigate?.('Result', { source: 'db', catId: catDetails?.id || null })}
+                onPress={() => onNavigate?.('AssessmentGallery')}
               >
                 <Text style={styles.viewResultBtnText}>View Result</Text>
-                <Ionicons name="chevron-forward" size={16} color="#0C5A58" style={{ marginLeft: 4 }} />
+                <Ionicons name="chevron-forward" size={16} color="#FFFFFF" style={{ marginLeft: 4 }} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.viewHistoryBtn}
@@ -989,60 +894,15 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                     Level {String(latestAssessment.overall_risk_level || '--').toUpperCase()}
                   </Text>
                   <Text style={styles.inlineMetric}>
+                    Score {Number.isFinite(latestAssessment.overall_risk_score) ? latestAssessment.overall_risk_score : '--'}
+                  </Text>
+                  <Text style={styles.inlineMetric}>
                     Date {latestAssessment.assessment_date || '--'}
                   </Text>
                 </View>
               </View>
             )}
           </View>
-
-          {/* หมายเหตุ: First log จะบังคับสถานะขั้นต่ำเป็น Monitor และเพิ่มคำเตือนเพื่อความปลอดภัย */}
-          {isFirstLog && (
-            <View style={[styles.summaryCard, styles.firstLogCard]}>
-              <Text style={styles.summaryCardTitle}>First Log Notification</Text>
-              <Text style={styles.signalItem}>• First health log recorded. More data will improve health assessment accuracy.</Text>
-            </View>
-          )}
-
-          {/* ===== Veterinary Safety Signals ===== */}
-          {!loading && (
-            <>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryCardTitle}>🚨 Emergency Alerts</Text>
-                {latestEmergencyAlerts.length > 0 ? (
-                  latestEmergencyAlerts.map((msg, idx) => (
-                    <Text key={`em-${idx}`} style={styles.signalItem}>• {msg}</Text>
-                  ))
-                ) : (
-                  <Text style={styles.signalEmpty}>No emergency alerts.</Text>
-                )}
-              </View>
-
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryCardTitle}>🔬 Symptom Clusters</Text>
-                {latestClusters.length > 0 ? (
-                  latestClusters.map((name, idx) => (
-                    <Text key={`cl-${idx}`} style={styles.signalItem}>• {name}</Text>
-                  ))
-                ) : (
-                  <Text style={styles.signalEmpty}>No clusters detected.</Text>
-                )}
-              </View>
-
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryCardTitle}>🧬 Possible Conditions</Text>
-                {latestDiseases.length > 0 ? (
-                  latestDiseases.map((d, idx) => (
-                    <Text key={`dz-${idx}`} style={styles.signalItem}>
-                      • {d?.disease}{d?.risk ? ` (${String(d.risk).charAt(0).toUpperCase()}${String(d.risk).slice(1)} risk)` : ''}
-                    </Text>
-                  ))
-                ) : (
-                  <Text style={styles.signalEmpty}>No disease patterns detected.</Text>
-                )}
-              </View>
-            </>
-          )}
 
           {/* ===== 🐾 System Risk Analysis (Paw Progress) ===== */}
           <View style={styles.sectionHeader}>
@@ -1058,22 +918,22 @@ export default function Dashboard({ onBack, onNavigate, session }) {
           <View style={styles.riskCard}>
             <PawProgressBar
               label="Activity Level"
-              percent={cameraData?.behaviorAnalytics?.energy?.active || 0}
+              percent={pawStats.activity}
               icon="lightning-bolt"
             />
             <PawProgressBar
               label="Litter Box Usage"
-              percent={Math.min(100, Math.round(((cameraData?.behaviorAnalytics?.totals?.litter || 0) / 4) * 100))}
+              percent={pawStats.litter}
               icon="cat"
             />
             <PawProgressBar
               label="Overall Wellness"
-              percent={cameraData?.behaviorAnalytics?.wellness?.score || 0}
+              percent={pawStats.wellness}
               icon="heart-pulse"
             />
             <View style={styles.riskFooter}>
               <MaterialCommunityIcons name="clock-outline" size={14} color="#90A4AE" />
-              <Text style={styles.riskFooterText}>Based on today's activity</Text>
+              <Text style={styles.riskFooterText}>Based on the last {selectedPeriod === '1 MONTH' ? '30' : '7'} days of activity</Text>
             </View>
           </View>
 
@@ -1134,6 +994,7 @@ export default function Dashboard({ onBack, onNavigate, session }) {
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={[styles.metricValue, { color: m.c }]}>{m.t}</Text>
+                      <Text style={styles.metricScoreNum}>{m.value} / 100</Text>
                     </View>
                   </View>
                 ))}
@@ -1673,10 +1534,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 1,
   },
-  firstLogCard: {
-    backgroundColor: '#FFF7ED',
-    borderColor: '#FDBA74',
-  },
   summaryCardTitle: {
     fontSize: 15,
     fontWeight: '800',
@@ -1689,18 +1546,6 @@ const styles = StyleSheet.create({
     marginTop: -6,
     marginBottom: 10,
     fontWeight: '600',
-  },
-  signalItem: {
-    fontSize: 13,
-    color: '#2D4A47',
-    fontWeight: '600',
-    lineHeight: 18,
-    marginBottom: 6,
-  },
-  signalEmpty: {
-    fontSize: 13,
-    color: '#94A3B8',
-    fontWeight: '700',
   },
   summaryCardHeadRow: {
     flexDirection: 'row',
@@ -1818,6 +1663,12 @@ const styles = StyleSheet.create({
   metricValue: {
     fontSize: 12,
     fontWeight: '800',
+  },
+  metricScoreNum: {
+    fontSize: 10,
+    color: '#90A4AE',
+    marginTop: 2,
+    fontWeight: '700',
   },
   chartMiniSurface: {
     borderWidth: 1,

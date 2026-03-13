@@ -191,7 +191,7 @@ export default function TimelineScreen({ session, onBack }) {
       const label = String(row.behavior_label || 'activity').toLowerCase();
       let title = 'Cat activity detected';
       let icon = 'paw';
-
+      
       if (label === 'eat') { title = 'Cat is eating'; icon = 'restaurant'; }
       if (label === 'litter') { title = 'Cat used litter box'; icon = 'trash-bin'; }
       if (label === 'sleep') { title = 'Cat is resting'; icon = 'moon'; }

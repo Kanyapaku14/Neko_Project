@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     View, Text, SafeAreaView, ScrollView,
     TouchableOpacity, Image, Alert, ActivityIndicator,
@@ -8,7 +8,6 @@ import BottomNav from '../components/BottomNav';
 import styles from '../styles/homeStyles';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import supabase from './config/supabaseClient';
 
@@ -50,40 +49,24 @@ async function uploadImage(uri, slotKey) {
 export default function PhotoCheck({ onNavigate, session }) {
     const [images, setImages] = useState([null, null, null, null]);
     const [loading, setLoading] = useState(false);
-    const [phoneCameraEnabled, setPhoneCameraEnabled] = useState(true);
-
-    useEffect(() => {
-        let alive = true;
-        const load = async () => {
-            const val = await AsyncStorage.getItem('phone_camera_enabled');
-            if (!alive) return;
-            if (val !== null) setPhoneCameraEnabled(val === 'true');
-        };
-        load();
-        return () => { alive = false; };
-    }, []);
 
     // ── เปิด dialog เลือกแหล่งรูป ────────────────────────────────────────────
     const handlePickImage = async (index) => {
         Alert.alert(
-            'Select Image',
+            'เลือกรูปภาพ',
             PHOTO_SLOTS[index].label,
             [
-                { text: '📷 Take Photo', onPress: () => openCamera(index) },
-                { text: '🖼️ Choose from Library', onPress: () => openGallery(index) },
-                { text: 'Cancel', style: 'cancel' },
+                { text: '📷 ถ่ายรูป', onPress: () => openCamera(index) },
+                { text: '🖼️ เลือกจากคลัง', onPress: () => openGallery(index) },
+                { text: 'ยกเลิก', style: 'cancel' },
             ]
         );
     };
 
     const openCamera = async (index) => {
-        if (!phoneCameraEnabled) {
-            Alert.alert('Camera is off', 'Enable Phone Camera in Settings to take photos.');
-            return;
-        }
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission Denied', 'Please allow camera access in settings.');
+            Alert.alert('ไม่ได้รับสิทธิ์', 'กรุณาอนุญาตให้แอปเข้าถึงกล้องในการตั้งค่า');
             return;
         }
         const result = await ImagePicker.launchCameraAsync({
@@ -102,7 +85,7 @@ export default function PhotoCheck({ onNavigate, session }) {
     const openGallery = async (index) => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission Denied', 'Please allow photo library access in settings.');
+            Alert.alert('ไม่ได้รับสิทธิ์', 'กรุณาอนุญาตให้แอปเข้าถึงคลังภาพในการตั้งค่า');
             return;
         }
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -122,7 +105,7 @@ export default function PhotoCheck({ onNavigate, session }) {
     const handleStartAiCheck = async () => {
         const hasAny = images.some(Boolean);
         if (!hasAny) {
-            Alert.alert('No images yet', 'Please upload at least 1 image.');
+            Alert.alert('ยังไม่มีรูป', 'กรุณาอัปโหลดรูปอย่างน้อย 1 ช่อง');
             return;
         }
 
@@ -183,7 +166,7 @@ export default function PhotoCheck({ onNavigate, session }) {
             onNavigate('AnalysisResult', { result: apiJson.result, recordId });
 
         } catch (err) {
-            Alert.alert('Error', err.message);
+            Alert.alert('เกิดข้อผิดพลาด', err.message);
         } finally {
             setLoading(false);
         }
@@ -192,15 +175,13 @@ export default function PhotoCheck({ onNavigate, session }) {
 
 
     // ── Render ────────────────────────────────────────────────────────────────
-    const isCameraDisabled = !phoneCameraEnabled;
-
     return (
         <SafeAreaView style={styles.container}>
             <HomeHeader
                 profileImage={null}
                 profileName={null}
                 onNotify={() => onNavigate && onNavigate('Alert')}
-                onSetting={() => onNavigate('Setting')}
+                onSetting={() => onNavigate('UserInfo')}
             />
 
             <ScrollView
@@ -235,34 +216,21 @@ export default function PhotoCheck({ onNavigate, session }) {
                         <TouchableOpacity
                             key={slot.key}
                             onPress={() => handlePickImage(index)}
-                            disabled={loading || isCameraDisabled}
+                            disabled={loading}
                             style={{
                                 width: '45%',
                                 aspectRatio: 1,
-                                backgroundColor: isCameraDisabled ? '#D1D5DB' : '#FFF',
+                                backgroundColor: '#FFF',
                                 borderRadius: 15,
-                                borderStyle: isCameraDisabled ? 'dashed' : (images[index] ? 'solid' : 'dashed'),
+                                borderStyle: images[index] ? 'solid' : 'dashed',
                                 borderWidth: 2,
-                                borderColor: isCameraDisabled ? '#9CA3AF' : (images[index] ? '#00897B' : '#00796B'),
+                                borderColor: images[index] ? '#00897B' : '#00796B',
                                 justifyContent: 'center',
                                 alignItems: 'center',
                                 overflow: 'hidden',
                             }}
                         >
-                            {isCameraDisabled ? (
-                                <>
-                                    <View style={{
-                                        backgroundColor: '#9CA3AF',
-                                        borderRadius: 8,
-                                        padding: 10,
-                                        marginBottom: 6,
-                                    }}>
-                                        <Ionicons name="help" size={22} color="#F3F4F6" />
-                                    </View>
-                                    <Text style={{ fontSize: 11, color: '#6B7280', fontWeight: '600' }}>Camera disabled</Text>
-                                    <Text style={{ fontSize: 10, color: '#6B7280' }}>Enable in Settings</Text>
-                                </>
-                            ) : images[index] ? (
+                            {images[index] ? (
                                 <>
                                     <Image
                                         source={{ uri: images[index] }}

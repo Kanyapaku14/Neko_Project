@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, SafeAreaView, Alert, ActivityIndicator, Platform, Modal, Pressable, FlatList } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Image, ScrollView, SafeAreaView, Alert, ActivityIndicator, Platform } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from './Style/authstyle';
@@ -56,14 +56,6 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
         }
     }, [catId]);
 
-    // แปลง Date -> YYYY-MM-DD แบบไม่เพี้ยนจาก timezone (กันวันเลื่อน +/- 1 วันบนมือถือ)
-    const formatDateYMD = (date) => {
-        const d = date instanceof Date ? date : new Date(date);
-        if (Number.isNaN(d.getTime())) return '';
-        const local = new Date(d.getTime() - d.getTimezoneOffset() * 60 * 1000);
-        return local.toISOString().slice(0, 10);
-    };
-
     const fetchCatData = async () => {
         try {
             setLoading(true);
@@ -78,8 +70,7 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
 
             if (cat) {
                 setCatName(cat.name || '');
-                // เก็บเป็น date-only เสมอ (YYYY-MM-DD) เพื่อไม่ให้แสดง/คำนวณเพี้ยน
-                setBirthDate(cat.birthdate ? String(cat.birthdate).split('T')[0] : '');
+                setBirthDate(cat.birthdate || '');
                 setGender(cat.gender || 'Male');
                 setBreed(cat.breed || '');
                 if (cat.image_url) {
@@ -248,12 +239,10 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
 
     const getPickerDateValue = () => {
         if (!birthDate) return new Date();
-        const safe = String(birthDate).split('T')[0];
-        const parts = safe.split('-').map((v) => parseInt(v, 10));
+        const parts = birthDate.split('-').map((v) => parseInt(v, 10));
         if (parts.length !== 3 || parts.some((v) => Number.isNaN(v))) return new Date();
         const [year, month, day] = parts;
-        // ตั้งเวลาเป็นเที่ยงวันเพื่อเลี่ยง edge-case DST/Timezone ทำให้วันเลื่อน
-        return new Date(year, month - 1, day, 12, 0, 0);
+        return new Date(year, month - 1, day);
     };
 
     const handlePickerChange = (event, selectedDate) => {
@@ -265,28 +254,19 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
             return;
         }
 
-        setBirthDate(formatDateYMD(selectedDate));
+        const yyyy = selectedDate.getFullYear();
+        const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(selectedDate.getDate()).padStart(2, '0');
+        setBirthDate(`${yyyy}-${mm}-${dd}`);
 
         if (Platform.OS === 'ios') {
             setShowDatePicker(false);
         }
     };
 
-    // ปิด modal + reset ช่องค้นหา (ให้ UX ดูคลีนและไม่ค้างค่าเดิม)
-    const closeBreedModal = () => {
-        setIsBreedDropdownOpen(false);
-        setBreedSearchQuery('');
-    };
-
     return (
         <SafeAreaView style={styles.safeArea}>
-            <ScrollView
-                contentContainerStyle={{ paddingBottom: 40 }}
-                // แก้ปัญหา nested scroll: เวลาเปิด dropdown ให้ list เลื่อนได้ ไม่โดน ScrollView หลักแย่ง gesture
-                nestedScrollEnabled={true}
-                keyboardShouldPersistTaps="handled"
-                scrollEnabled={!isBreedDropdownOpen && !isGenderDropdownOpen}
-            >
+            <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
                 <StatusBar style="auto" />
 
                 {/* Header with Back Button */}
@@ -439,7 +419,7 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
                         <View style={{ width: '100%', position: 'relative' }}>
                             <TouchableOpacity
                                 activeOpacity={0.8}
-                                onPress={() => setIsBreedDropdownOpen(true)}
+                                onPress={() => setIsBreedDropdownOpen(!isBreedDropdownOpen)}
                                 style={[styles.input, {
                                     flexDirection: 'row',
                                     justifyContent: 'space-between',
@@ -458,71 +438,41 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
                                 </Text>
                                 <Text style={{ fontSize: 12, color: '#666' }}>{isBreedDropdownOpen ? "▲" : "▼"}</Text>
                             </TouchableOpacity>
-                        </View>
-                    </View>
 
-                    {/* Breed Modal (Clean / Minimal) */}
-                    <Modal
-                        visible={isBreedDropdownOpen}
-                        transparent
-                        animationType="fade"
-                        onRequestClose={closeBreedModal}
-                    >
-                        <Pressable style={localStyles.modalOverlay} onPress={closeBreedModal}>
-                            <Pressable style={localStyles.sheet} onPress={() => { }}>
-                                <View style={localStyles.sheetHeader}>
-                                    <Text style={localStyles.sheetTitle}>Select Breed</Text>
-                                    <TouchableOpacity
-                                        onPress={closeBreedModal}
-                                        accessibilityRole="button"
-                                        accessibilityLabel="Close breed selector"
-                                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                    >
-                                        <Ionicons name="close" size={22} color="#607D8B" />
-                                    </TouchableOpacity>
-                                </View>
-
-                                <View style={localStyles.searchWrap}>
-                                    <Ionicons name="search" size={16} color="#94A3B8" />
-                                    <TextInput
-                                        style={localStyles.searchInput}
-                                        placeholder="Search breed"
-                                        placeholderTextColor="#94A3B8"
-                                        value={breedSearchQuery}
-                                        onChangeText={setBreedSearchQuery}
-                                        autoFocus
-                                    />
-                                </View>
-
-                                <FlatList
-                                    data={filteredBreeds}
-                                    keyExtractor={(item) => item}
-                                    keyboardShouldPersistTaps="handled"
-                                    contentContainerStyle={{ paddingBottom: 10 }}
-                                    renderItem={({ item }) => {
-                                        const active = breed === item;
-                                        return (
+                            {isBreedDropdownOpen && (
+                                <View style={{ backgroundColor: '#fff', borderRadius: 10, marginTop: 5, borderWidth: 1, borderColor: '#eee', position: 'absolute', top: 50, left: 0, right: 0, zIndex: 3000, elevation: 5, maxHeight: 250 }}>
+                                    <View style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: '#eee' }}>
+                                        <TextInput
+                                            style={{ backgroundColor: '#f9f9f9', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, fontSize: 14 }}
+                                            placeholder="ค้นหาพันธุ์"
+                                            value={breedSearchQuery}
+                                            onChangeText={setBreedSearchQuery}
+                                        />
+                                    </View>
+                                    <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200 }}>
+                                        {filteredBreeds.map((item, index) => (
                                             <TouchableOpacity
-                                                style={[localStyles.breedRow, active && localStyles.breedRowActive]}
+                                                key={index}
+                                                style={{ padding: 12, borderBottomWidth: index === filteredBreeds.length - 1 ? 0 : 1, borderBottomColor: '#f0f0f0' }}
                                                 onPress={() => {
                                                     setBreed(item);
-                                                    closeBreedModal();
+                                                    setIsBreedDropdownOpen(false);
+                                                    setBreedSearchQuery('');
                                                 }}
                                             >
-                                                <Text style={[localStyles.breedText, active && localStyles.breedTextActive]} numberOfLines={2}>
+                                                <Text style={{ fontSize: 14, color: breed === item ? '#2F6A62' : '#333' }}>
                                                     {item}
                                                 </Text>
-                                                {active && <Ionicons name="checkmark" size={18} color="#2F6A62" />}
                                             </TouchableOpacity>
-                                        );
-                                    }}
-                                    ListEmptyComponent={
-                                        <Text style={localStyles.emptyText}>No breeds found.</Text>
-                                    }
-                                />
-                            </Pressable>
-                        </Pressable>
-                    </Modal>
+                                        ))}
+                                        {filteredBreeds.length === 0 && (
+                                            <Text style={{ padding: 12, color: '#999', textAlign: 'center' }}>ไม่พบสายพันธุ์</Text>
+                                        )}
+                                    </ScrollView>
+                                </View>
+                            )}
+                        </View>
+                    </View>
                 </View>
 
                 <Text style={styles.sectionTitle}>PHYSICAL METRICS</Text>
@@ -594,83 +544,3 @@ export default function CatProfile({ session, catId, onBack, onNavigateToHome })
         </SafeAreaView>
     );
 }
-
-const localStyles = {
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(15, 23, 42, 0.35)',
-        justifyContent: 'flex-end',
-        paddingHorizontal: 14,
-        paddingBottom: 14,
-    },
-    sheet: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 18,
-        padding: 14,
-        maxHeight: '78%',
-        borderWidth: 1,
-        borderColor: '#E6EFEB',
-    },
-    sheetHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 10,
-    },
-    sheetTitle: {
-        fontSize: 16,
-        fontWeight: '800',
-        color: '#1F3B37',
-    },
-    searchWrap: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        backgroundColor: '#F8FAFC',
-        borderRadius: 12,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
-        marginBottom: 10,
-    },
-    searchInput: {
-        flex: 1,
-        fontSize: 14,
-        color: '#0F172A',
-        paddingVertical: 0,
-    },
-    breedRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingVertical: 12,
-        paddingHorizontal: 10,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#F1F5F9',
-        marginBottom: 8,
-        backgroundColor: '#FFFFFF',
-    },
-    breedRowActive: {
-        backgroundColor: '#E6FFFA',
-        borderColor: '#99F6E4',
-    },
-    breedText: {
-        flex: 1,
-        paddingRight: 10,
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#334155',
-    },
-    breedTextActive: {
-        color: '#0F766E',
-        fontWeight: '800',
-    },
-    emptyText: {
-        paddingVertical: 16,
-        textAlign: 'center',
-        color: '#94A3B8',
-        fontWeight: '700',
-    },
-};

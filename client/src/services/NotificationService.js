@@ -7,7 +7,6 @@ const LAST_ACTIVE_AT_KEY = 'smart_alert:last_active_at';
 const INACTIVITY_NOTIFICATION_ID_KEY = 'smart_alert:inactivity_notification_id';
 const NOTIFIED_ALERTS_KEY_PREFIX = 'smart_alert:notified_alert_ids';
 const LAST_CATCHUP_ALERT_AT_KEY = 'smart_alert:last_catchup_alert_at';
-const NOTIFICATIONS_ENABLED_KEY = 'notifications_enabled';
 const DEFAULT_SCOPE = 'anonymous';
 const INACTIVITY_HOURS = 24;
 const REMOTE_ALERT_MAX_AGE_MIN = 20;
@@ -95,11 +94,6 @@ class NotificationServiceClass {
   }
 
   async init() {
-    const enabled = await this.isEnabled();
-    if (!enabled) {
-      await this.dispose();
-      return false;
-    }
     if (this.started) return true;
     this.started = true;
 
@@ -145,50 +139,7 @@ class NotificationServiceClass {
     this.started = false;
   }
 
-  async isEnabled() {
-    try {
-      const raw = await AsyncStorage.getItem(NOTIFICATIONS_ENABLED_KEY);
-      if (raw === null) return true;
-      return String(raw) === 'true';
-    } catch (_) {
-      return true;
-    }
-  }
-
-  async setEnabled(enabled) {
-    try {
-      await AsyncStorage.setItem(NOTIFICATIONS_ENABLED_KEY, String(!!enabled));
-    } catch (_) {
-      // no-op
-    }
-    if (!enabled) {
-      await this.cancelAllNotifications();
-    }
-  }
-
-  async cancelAllNotifications() {
-    const Notifications = this._loadNotificationsModule();
-    if (!Notifications) return;
-    try {
-      await Notifications.cancelAllScheduledNotificationsAsync();
-    } catch (_) {
-      // no-op
-    }
-    try {
-      await Notifications.dismissAllNotificationsAsync?.();
-    } catch (_) {
-      // no-op
-    }
-    try {
-      await AsyncStorage.removeItem(INACTIVITY_NOTIFICATION_ID_KEY);
-    } catch (_) {
-      // no-op
-    }
-  }
-
   async requestPermission() {
-    const enabled = await this.isEnabled();
-    if (!enabled) return false;
     const Notifications = this._loadNotificationsModule();
     if (!Notifications) return false;
 
@@ -206,8 +157,6 @@ class NotificationServiceClass {
     if (!alert || alert.isDeleted) return;
     if (!alert.id) return;
 
-    const enabled = await this.isEnabled();
-    if (!enabled) return;
     const Notifications = this._loadNotificationsModule();
     if (!Notifications) return;
 
@@ -265,8 +214,6 @@ class NotificationServiceClass {
   }
 
   async scheduleInactivityReminder() {
-    const enabled = await this.isEnabled();
-    if (!enabled) return null;
     const Notifications = this._loadNotificationsModule();
     if (!Notifications) return null;
 
@@ -300,8 +247,6 @@ class NotificationServiceClass {
   }
 
   async maybeSendCatchupReminder() {
-    const enabled = await this.isEnabled();
-    if (!enabled) return;
     const Notifications = this._loadNotificationsModule();
     if (!Notifications) return;
 
@@ -347,8 +292,6 @@ class NotificationServiceClass {
   }
 
   async getInitialNotificationTarget() {
-    const enabled = await this.isEnabled();
-    if (!enabled) return null;
     const Notifications = this._loadNotificationsModule();
     if (!Notifications) return null;
     try {

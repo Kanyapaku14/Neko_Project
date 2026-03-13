@@ -14,7 +14,7 @@ export default function MainTabNavigator({ session, onNavigate, onBack }) {
 
             {/* ⬅️ Back Button */}
             <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                <Ionicons name="chevron-back" size={24} color="#37474F" />
+                <Ionicons name="arrow-back" size={24} color="#37474F" />
             </TouchableOpacity>
 
             <View style={styles.content}>
@@ -125,19 +125,19 @@ const styles = StyleSheet.create({
 
     // ⬅️ Back Button
     backButton: {
-        width: 40,
-        height: 40,
+        width: 44,
+        height: 44,
         justifyContent: "center",
         alignItems: "center",
         backgroundColor: "#FFFFFF",
-        borderRadius: 20, // Full circle
-        marginBottom: 32, // Preserving margin for layout
-        // Shadow
+        borderRadius: 22, // Full circle
+        marginBottom: 32, // Reduced margin
+        // Soft Shadow
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
+        shadowRadius: 8,
+        elevation: 3,
     },
 
     content: {

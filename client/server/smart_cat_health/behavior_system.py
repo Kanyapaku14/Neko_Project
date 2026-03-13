@@ -49,14 +49,6 @@ class BehaviorSystem:
         self.MIN_CONFIDENCE = 0.40
         self.ABNORMAL_CONFIDENCE = 0.70
         self.ABNORMAL_STREAK_NEEDED = 4
-        self.ABNORMAL_CONFIDENCE_BY_LABEL = {
-            "vomiting": 0.45,
-            "head_pressing": self.ABNORMAL_CONFIDENCE,
-        }
-        self.ABNORMAL_STREAK_BY_LABEL = {
-            "vomiting": 1,
-            "head_pressing": self.ABNORMAL_STREAK_NEEDED,
-        }
         self.FALLBACK_BEHAVIOR = "active"
         self.behavior_history = {}
         self.abnormal_streak = {}
@@ -106,19 +98,15 @@ class BehaviorSystem:
         except Exception:
             return "error", 0.0
 
-    def _update_abnormal_streak(self, track_id, raw_label, raw_conf):
+    def _update_abnormal_streak(self, track_id, raw_label):
         if track_id not in self.abnormal_streak:
             self.abnormal_streak[track_id] = {}
         streak = self.abnormal_streak[track_id]
         if raw_label in ABNORMAL_BEHAVIORS:
-            min_conf = self.ABNORMAL_CONFIDENCE_BY_LABEL.get(raw_label, self.ABNORMAL_CONFIDENCE)
-            if raw_conf >= min_conf:
-                streak[raw_label] = streak.get(raw_label, 0) + 1
-                for lbl in list(streak.keys()):
-                    if lbl != raw_label:
-                        streak[lbl] = 0
-            else:
-                streak[raw_label] = 0
+            streak[raw_label] = streak.get(raw_label, 0) + 1
+            for lbl in list(streak.keys()):
+                if lbl != raw_label:
+                    streak[lbl] = 0
         else:
             for lbl in streak:
                 streak[lbl] = 0
@@ -132,7 +120,7 @@ class BehaviorSystem:
                 return self.FALLBACK_BEHAVIOR, raw_conf
             return raw_label, raw_conf
 
-        self._update_abnormal_streak(track_id, raw_label, raw_conf)
+        self._update_abnormal_streak(track_id, raw_label)
         if track_id not in self.behavior_history:
             self.behavior_history[track_id] = deque(maxlen=self.SMOOTHING_WINDOW)
         self.behavior_history[track_id].append((raw_label, raw_conf))
@@ -146,16 +134,6 @@ class BehaviorSystem:
         if not vote_weights:
             return self.FALLBACK_BEHAVIOR, 0.0
 
-        # Abnormal override: if a recent abnormal signal is strong enough, surface it
-        for abnormal_label in ABNORMAL_BEHAVIORS:
-            min_conf = self.ABNORMAL_CONFIDENCE_BY_LABEL.get(abnormal_label, self.ABNORMAL_CONFIDENCE)
-            min_streak = self.ABNORMAL_STREAK_BY_LABEL.get(abnormal_label, self.ABNORMAL_STREAK_NEEDED)
-            recent_hits = [conf for label, conf in history if label == abnormal_label and conf >= min_conf]
-            streak_count = self.abnormal_streak.get(track_id, {}).get(abnormal_label, 0)
-            if len(recent_hits) >= min_streak or streak_count >= min_streak:
-                avg_conf = sum(recent_hits) / len(recent_hits) if recent_hits else 0.0
-                return abnormal_label, avg_conf
-
         sorted_labels = sorted(vote_weights.items(), key=lambda x: x[1], reverse=True)
         best_label = sorted_labels[0][0]
         confs = [c for l, c in history if l == best_label]
@@ -165,9 +143,7 @@ class BehaviorSystem:
 
         if best_label in ABNORMAL_BEHAVIORS:
             streak_count = self.abnormal_streak.get(track_id, {}).get(best_label, 0)
-            min_conf = self.ABNORMAL_CONFIDENCE_BY_LABEL.get(best_label, self.ABNORMAL_CONFIDENCE)
-            min_streak = self.ABNORMAL_STREAK_BY_LABEL.get(best_label, self.ABNORMAL_STREAK_NEEDED)
-            if avg_conf < min_conf or streak_count < min_streak:
+            if avg_conf < self.ABNORMAL_CONFIDENCE or streak_count < self.ABNORMAL_STREAK_NEEDED:
                 return self.FALLBACK_BEHAVIOR, avg_conf
         return best_label, avg_conf
 

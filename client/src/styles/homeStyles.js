@@ -64,18 +64,6 @@ const styles = StyleSheet.create({
 
   iconBtn: {
     padding: 5,
-    position: 'relative',
-  },
-  notificationDot: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FF3B30',
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
   },
 
   /* ====== HERO SECTION (Circle Cat) ====== */

@@ -24,7 +24,6 @@ import supabase from './config/supabaseClient';
 import HomeHeader from '../components/HomeHeader';
 
 import { WebView } from 'react-native-webview'; // <-- ต้องมี WebView
-import { CAMERA_API_BASE, CAMERA_STREAM_QUERY, CAMERA_STREAM_URL_MODEL, CAMERA_STREAM_URL_RAW } from '../config/cameraApi';
 import BottomNav from '../components/BottomNav';
 import useCameraData from '../hooks/useCameraData';
 import ActivityLevelChart from '../components/ActivityLevelChart';
@@ -36,9 +35,9 @@ const { width } = Dimensions.get('window');
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 // 🚨 เปลี่ยน 192.168.1.159 เป็น IP จริงของคอมพิวเตอร์คุณเสมอ
-const VIDEO_STREAM_URL = CAMERA_STREAM_URL_RAW;
-const VIDEO_STREAM_QUERY = CAMERA_STREAM_QUERY;
-const VIDEO_SERVER_BASE = CAMERA_API_BASE;
+const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed_raw';
+const VIDEO_STREAM_QUERY = 'fps=15&quality=62&width=960';
+const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
 
 const isDemoLikeSource = (source = '') => {
   const s = String(source || '').toLowerCase();
@@ -136,44 +135,6 @@ export default function CameraScreen({ onNavigate, session }) {
     </div>
   </body>
 </html>`, [streamWebViewUrl]);
-  const modelStreamUrl = useMemo(() => `${CAMERA_STREAM_URL_MODEL}?${VIDEO_STREAM_QUERY}&t=${Date.now()}`, []);
-  const modelStreamHtml = useMemo(() => `<!doctype html>
-<html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-    <style>
-      html, body {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #000;
-      }
-      .wrap {
-        width: 100%;
-        height: 100%;
-        background: #000;
-      }
-      img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-        background: #000;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <img src="${modelStreamUrl}" alt="model-stream" />
-    </div>
-  </body>
-</html>`, [modelStreamUrl]);
-  const streamSource = useMemo(() => ({
-    html: isDemoLikeSource(dbStreamUrl) ? modelStreamHtml : streamWebViewHtml,
-    baseUrl: VIDEO_SERVER_BASE,
-  }), [dbStreamUrl, modelStreamHtml, streamWebViewHtml]);
   const lastAppliedSourceRef = useRef('');
   const cameraScreenCatKey = session?.user?.id
     ? `camera_screen_selected_cat_id:${session.user.id}`
@@ -187,9 +148,7 @@ export default function CameraScreen({ onNavigate, session }) {
   const healthMissCountRef = useRef(0);
   const lastConnectedAtRef = useRef(0);
 
-  const { data, refetch } = useCameraData(session, cameraStatus, selectedCat?.id || null, { cameraOnly: true });
-  const hasCameraAnalytics = data?.meta?.source === 'camera' && data?.meta?.hasCameraDetections;
-  const isDisplayConnected = !requireSetcamera && cameraStatus === 'connected';
+  const { data, refetch } = useCameraData(session, cameraStatus, selectedCat?.id || null);
   const frameWidth = width - 28; // scrollContent horizontal padding (14 + 14)
   const videoFrameHeight = Math.max(220, Math.min(340, Math.round(frameWidth * 9 / 16)));
 
@@ -337,9 +296,7 @@ export default function CameraScreen({ onNavigate, session }) {
             const source = String(activeCam.stream_source || '').trim();
             hasValidSource = Boolean(source);
             setDbStreamUrl(hasValidSource ? source : null);
-            if (!(hasValidSource && isSetupComplete)) {
-              setCameraStatus('disconnected');
-            }
+            setCameraStatus(hasValidSource && isSetupComplete ? 'connected' : 'disconnected');
 
             if (hasValidSource && isSetupComplete) {
               try {
@@ -373,9 +330,7 @@ export default function CameraScreen({ onNavigate, session }) {
           // เก็บ URL เพื่อใส่ใน WebView — ไม่เปลี่ยน connection logic
           if (hasValidSource) {
             setDbStreamUrl(source);
-            if (!isSetupComplete) {
-              setCameraStatus('disconnected');
-            }
+            setCameraStatus(isSetupComplete ? 'connected' : 'disconnected');
             if (isSetupComplete) {
               try {
                 await applySourceToBackend({
@@ -439,18 +394,18 @@ export default function CameraScreen({ onNavigate, session }) {
           if (healthMissCountRef.current >= 3 && (Date.now() - lastConnectedAtRef.current) > 15000) {
             setCameraStatus('disconnected');
           } else {
-            setCameraStatus('disconnected');
+            setCameraStatus('connected');
           }
         } else {
-          // Unknown status: keep last known state, but avoid forcing connected.
-          if (healthMissCountRef.current >= 3) {
-            setCameraStatus('disconnected');
-          }
+          setCameraStatus('connected');
         }
       } catch (_e) {
         healthMissCountRef.current += 1;
-        // If backend is unreachable, stay disconnected to prevent flip-flopping.
-        setCameraStatus('disconnected');
+        if (healthMissCountRef.current >= 3 && (Date.now() - lastConnectedAtRef.current) > 15000) {
+          setCameraStatus('disconnected');
+        } else {
+          setCameraStatus('connected');
+        }
       }
     };
 
@@ -541,15 +496,6 @@ export default function CameraScreen({ onNavigate, session }) {
       if (timer) clearInterval(timer);
     };
   }, [cameraStatus, scopedCameraIdKey]);
-
-  // Poll camera analytics only when camera is connected
-  useEffect(() => {
-    if (!isDisplayConnected) return undefined;
-    const timer = setInterval(() => {
-      refetch();
-    }, 10000);
-    return () => clearInterval(timer);
-  }, [isDisplayConnected, refetch]);
 
   // Sync selected cat with HomeHeader dropdown
   useEffect(() => {
@@ -701,6 +647,8 @@ export default function CameraScreen({ onNavigate, session }) {
   const modeDisplay = effectiveMode.charAt(0).toUpperCase() + effectiveMode.slice(1);
   const selectedCatsCount = data.cats <= 1 ? 1 : (data.settings?.selectedCats?.length ?? 0);
   const householdCatsCount = selectedCatsCount > 0 ? selectedCatsCount : data.cats;
+  const isDisplayConnected = !requireSetcamera && cameraStatus === 'connected';
+
   const translateY = entryAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [50, 0]
@@ -732,7 +680,7 @@ export default function CameraScreen({ onNavigate, session }) {
                   {isDisplayConnected ? (
                     <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#000' }}>
                       <WebView
-                        source={streamSource}
+                        source={{ html: streamWebViewHtml, baseUrl: VIDEO_SERVER_BASE }}
                         style={{ width: '100%', height: '100%', backgroundColor: '#000' }}
                         cacheEnabled={false}
                         scrollEnabled={false}
@@ -1006,25 +954,14 @@ export default function CameraScreen({ onNavigate, session }) {
                     </View>
                     <View style={{ backgroundColor: '#E8F5E9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, flexDirection: 'row', alignItems: 'center' }}>
                       <Animated.View style={[styles.cameraStatusDot, { backgroundColor: '#4CAF50', width: 6, height: 6, marginRight: 4, opacity: pulseAnim }]} />
-                      <Text style={{ color: '#2E7D32', fontSize: 10, fontWeight: 'bold' }}>
-                        {hasCameraAnalytics ? 'LIVE' : 'NO DATA'}
-                      </Text>
+                      <Text style={{ color: '#2E7D32', fontSize: 10, fontWeight: 'bold' }}>LIVE</Text>
                     </View>
                   </View>
                   <Text style={[styles.cardSubtitle, { marginTop: -4, marginBottom: 8 }]}>
-                    {hasCameraAnalytics
-                      ? 'Insights improve with more recorded behavior over time.'
-                      : 'Waiting for camera detections to calculate analytics.'}
+                    Insights improve with more recorded behavior over time.
                   </Text>
 
-                  {!hasCameraAnalytics ? (
-                    <View style={styles.analyticsEmpty}>
-                      <MaterialCommunityIcons name="camera-off" size={24} color="#94A3B8" />
-                      <Text style={styles.analyticsEmptyText}>No camera detections yet.</Text>
-                      <Text style={styles.analyticsEmptySubtext}>Start the camera feed to see real analytics.</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.insightsGrid}>
+                  <View style={styles.insightsGrid}>
                     {/* Energy Distribution */}
                     <View style={styles.insightRow}>
                       <View style={styles.insightHeader}>
@@ -1097,7 +1034,6 @@ export default function CameraScreen({ onNavigate, session }) {
                       </View>
                     </View>
                   </View>
-                  )}
                 </View>
               </SectionOverlay>
 
@@ -1252,9 +1188,6 @@ const styles = StyleSheet.create({
   progressPaw: { marginRight: -8, textShadowColor: 'rgba(0,0,0,0.15)', textShadowOffset: { width: 0, height: 1.5 }, textShadowRadius: 3, zIndex: 10 },
   insightSubtext: { fontSize: 11, color: '#90A4AE', marginTop: 4, textAlign: 'right' },
   insightSubtextLeft: { fontSize: 11, color: '#90A4AE' },
-  analyticsEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 12, gap: 6 },
-  analyticsEmptyText: { fontSize: 12, color: '#64748B', fontWeight: '700' },
-  analyticsEmptySubtext: { fontSize: 11, color: '#94A3B8' },
 });
 
 

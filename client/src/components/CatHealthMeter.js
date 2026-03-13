@@ -27,17 +27,8 @@ const tintHex = (hex, amount = 0) => {
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 };
 
-export default function CatHealthMeter({
-  score = null,
-  centerImageUri = null,
-  centerMode = "dashboard",
-  size = null,
-  statusText = null,
-  statusColor = null,
-}) {
-  // null/undefined score means no data yet – ring should show as neutral gray at zero
-  const hasData = score !== null && score !== undefined;
-  const safeScore = hasData ? Math.max(0, Math.min(100, Number(score) || 0)) : 0;
+export default function CatHealthMeter({ score = 44, centerImageUri = null, centerMode = "dashboard", size = null }) {
+  const safeScore = Math.max(0, Math.min(100, Number(score) || 0));
   const actualSize = size || (centerMode === "profile" ? 190 : 250);
   const scale = actualSize / 190;
   const progress = useSharedValue(0);
@@ -75,26 +66,13 @@ export default function CatHealthMeter({
   });
 
   const health = getHealthStatus(safeScore);
-  const resolvedLabel = (statusText ?? (hasData ? health.label : "") ?? "").toString();
-  // When there is no data: force gray ring regardless of statusColor prop
-  const resolvedColor = hasData ? (statusColor ?? health.color) : "#CBD5E1";
-  const normalizedLabel = resolvedLabel.trim().toLowerCase();
-
-  const moodByLabel =
-    normalizedLabel === "normal" ? "happy" :
-      normalizedLabel === "monitor" ? "normal" :
-        normalizedLabel === "warning" ? "meh" :
-          normalizedLabel === "critical" ? "sad" :
-            null;
-
   const status = {
-    text: resolvedLabel.toUpperCase(),
-    color: resolvedColor,
-    mood: moodByLabel || (safeScore >= 80 ? "happy" : safeScore >= 60 ? "normal" : safeScore >= 40 ? "meh" : "sad"),
+    text: String(health.label || "").toUpperCase(),
+    color: health.color,
+    mood: safeScore >= 80 ? "happy" : safeScore >= 60 ? "normal" : safeScore >= 40 ? "meh" : "sad",
   };
-  // neutral gray gradient when no data
-  const ringStart = hasData ? tintHex(status.color, 35) : "#E2E8F0";
-  const ringEnd = hasData ? tintHex(status.color, -25) : "#CBD5E1";
+  const ringStart = tintHex(status.color, 35);
+  const ringEnd = tintHex(status.color, -25);
 
   return (
     <View style={[styles.card, { width: actualSize, height: actualSize, justifyContent: "center", alignItems: "center" }]}>
@@ -171,6 +149,7 @@ export default function CatHealthMeter({
           <View style={styles.dashboardCenter}>
             <MaterialCommunityIcons name="cat" size={44} color={status.color} />
             <Text style={[styles.status, { color: status.color }]}>{status.text}</Text>
+            <Text style={[styles.score, { color: status.color }]}>{safeScore}</Text>
           </View>
         )}
 
@@ -225,11 +204,16 @@ const styles = StyleSheet.create({
     resizeMode: "cover",
   },
   status: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "700",
     letterSpacing: 1,
     marginTop: 2,
-    marginBottom: 0,
+    marginBottom: -4,
+  },
+  score: {
+    fontSize: 36,
+    fontWeight: "800",
+    lineHeight: 40,
   },
   paw: {
     width: 32,

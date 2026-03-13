@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     SafeAreaView,
     View,
@@ -9,35 +9,54 @@ import {
     Image,
     StyleSheet,
     ActivityIndicator,
-    KeyboardAvoidingView,
-    ScrollView,
-    Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import supabase from './config/supabaseClient';
 
-export default function ResetPasswordScreen({ onComplete, onBack }) {
+export default function ResetPasswordScreen({ onComplete, onBack, initialEmail }) {
+    const [email, setEmail] = useState('');
+    const [token, setToken] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
 
+    useEffect(() => {
+        if (!email && initialEmail) {
+            setEmail(String(initialEmail));
+        }
+    }, [email, initialEmail]);
+
     const handleReset = async () => {
-        if (!password || !confirmPassword) {
-            Alert.alert('Alert', 'Please fill in all password fields.');
+        const cleanEmail = email.trim().toLowerCase();
+        const cleanToken = token.trim();
+
+        if (!cleanEmail || !cleanToken || !password || !confirmPassword) {
+            Alert.alert('แจ้งเตือน', 'กรุณากรอก Email, Token และรหัสผ่านให้ครบถ้วน');
             return;
         }
         if (password.length < 6) {
-            Alert.alert('Alert', 'Password must be at least 6 characters.');
+            Alert.alert('แจ้งเตือน', 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
             return;
         }
         if (password !== confirmPassword) {
-            Alert.alert('Alert', 'Passwords do not match. Please check again.');
+            Alert.alert('แจ้งเตือน', 'รหัสผ่านทั้งสองช่องไม่ตรงกัน กรุณาตรวจสอบใหม่');
             return;
         }
 
         setLoading(true);
         try {
+            const { error: verifyError } = await supabase.auth.verifyOtp({
+                email: cleanEmail,
+                token: cleanToken,
+                type: 'recovery',
+            });
+
+            if (verifyError) {
+                Alert.alert('Error', verifyError.message);
+                return;
+            }
+
             const { error } = await supabase.auth.updateUser({ password });
 
             if (error) {
@@ -46,12 +65,12 @@ export default function ResetPasswordScreen({ onComplete, onBack }) {
             }
 
             Alert.alert(
-                'Success! 🎉',
-                'Your password has been reset. Please sign in with your new password.',
-                [{ text: 'OK', onPress: onComplete }]
+                'สำเร็จ! 🎉',
+                'ตั้งรหัสผ่านใหม่เรียบร้อยแล้ว กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่',
+                [{ text: 'ตกลง', onPress: onComplete }]
             );
         } catch (err) {
-            Alert.alert('Error', 'Unable to reset password. Please try again.');
+            Alert.alert('Error', 'ไม่สามารถตั้งรหัสผ่านใหม่ได้ กรุณาลองใหม่อีกครั้ง');
         } finally {
             setLoading(false);
         }
@@ -68,17 +87,7 @@ export default function ResetPasswordScreen({ onComplete, onBack }) {
                 </TouchableOpacity>
             )}
 
-            <KeyboardAvoidingView
-                style={{ flex: 1 }}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
-            >
-                <ScrollView
-                    contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}
-                    keyboardShouldPersistTaps="handled"
-                    keyboardDismissMode="on-drag"
-                >
-                    <View style={styles.container}>
+            <View style={styles.container}>
                 {/* Logo */}
                 <View style={styles.headerContainer}>
                     <Image
@@ -93,6 +102,41 @@ export default function ResetPasswordScreen({ onComplete, onBack }) {
 
                 <Text style={styles.title}>ตั้งรหัสผ่านใหม่</Text>
                 <Text style={styles.subtitle}>กรอกรหัสผ่านใหม่ที่ต้องการ (อย่างน้อย 6 ตัวอักษร)</Text>
+
+                {/* Email */}
+                <View style={styles.inputGroup}>
+                    <View style={styles.labelRow}>
+                        <Text style={styles.label}>Email</Text>
+                        <Text style={styles.required}> *</Text>
+                    </View>
+                    <TextInput
+                        style={styles.input}
+                        value={email}
+                        onChangeText={setEmail}
+                        placeholder="กรอกอีเมลที่ใช้สมัคร"
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        editable={!loading}
+                        autoFocus
+                    />
+                </View>
+
+                {/* Reset Token */}
+                <View style={styles.inputGroup}>
+                    <View style={styles.labelRow}>
+                        <Text style={styles.label}>Reset Token</Text>
+                        <Text style={styles.required}> *</Text>
+                    </View>
+                    <TextInput
+                        style={styles.input}
+                        value={token}
+                        onChangeText={setToken}
+                        placeholder="กรอก token จากอีเมล"
+                        autoCapitalize="none"
+                        keyboardType="number-pad"
+                        editable={!loading}
+                    />
+                </View>
 
                 {/* New Password */}
                 <View style={styles.inputGroup}>
@@ -148,9 +192,7 @@ export default function ResetPasswordScreen({ onComplete, onBack }) {
                         <Text style={styles.buttonText}>ยืนยันรหัสผ่านใหม่</Text>
                     )}
                 </TouchableOpacity>
-                    </View>
-                </ScrollView>
-            </KeyboardAvoidingView>
+            </View>
         </SafeAreaView>
     );
 }

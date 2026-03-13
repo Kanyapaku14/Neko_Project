@@ -22,8 +22,7 @@ import Paw from "../components/Paw";
 import CatHealthMeter from "../components/CatHealthMeter";
 import styles from "../styles/homeStyles";
 import useCameraData from "../hooks/useCameraData";
-import { analyzeHealthLog, analyzeHealthTrend7d, getHealthStatus, getRiskStatus } from "../utils/healthLogic";
-import AlertRepository from "../services/AlertRepository";
+import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
 
 const { width } = Dimensions.get('window');
 
@@ -44,33 +43,10 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
     const [homeHealthScore, setHomeHealthScore] = useState(null);
     const [cachedHealthScore, setCachedHealthScore] = useState(null);
     const [cachedHealthColor, setCachedHealthColor] = useState(null);
-    const [cachedHealthLabel, setCachedHealthLabel] = useState(null);
-    const [cachedHealthText, setCachedHealthText] = useState(null);
     const [activeBannerIndex, setActiveBannerIndex] = useState(0);
     const [bannerData, setBannerData] = useState([]);
-    // NOTE: do NOT fall back to 100 — null means "no data", ring should be colorless
     const computedScore = homeHealthScore ?? cachedHealthScore ?? data?.behaviorAnalytics?.wellness?.score ?? null;
     const healthCacheKey = (userId, catId) => (userId && catId ? `health_status_cache:${userId}:${catId}` : null);
-
-    const getHomeRiskCopy = (score) => {
-        const safeScore = Number(score);
-        if (!Number.isFinite(safeScore)) return null;
-        const clamped = Math.max(0, Math.min(100, safeScore));
-        const risk = 100 - clamped;
-        const status = getRiskStatus(risk, false);
-        const label = String(status?.label || "").trim().toLowerCase();
-
-        if (label === "normal") {
-            return { level: "Normal", message: "Healthy & Active! Keep up the great care." };
-        }
-        if (label === "monitor") {
-            return { level: "Low Risk", message: "Looking Good. Minor changes in behavior noted." };
-        }
-        if (label === "warning") {
-            return { level: "Moderate", message: "Needs Attention. Monitoring behavior is advised." };
-        }
-        return { level: "High / Extreme", message: "High Risk! Consult a veterinarian immediately." };
-    };
 
     useEffect(() => {
         const bootstrapLastHealthColor = async () => {
@@ -80,8 +56,6 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                 const cached = raw ? JSON.parse(raw) : null;
                 if (Number.isFinite(cached?.score)) setCachedHealthScore(cached.score);
                 if (cached?.color) setCachedHealthColor(cached.color);
-                if (cached?.label) setCachedHealthLabel(cached.label);
-                if (cached?.text) setCachedHealthText(cached.text);
             } catch (_) { }
         };
         bootstrapLastHealthColor();
@@ -135,7 +109,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
             }
         };
 
-        const fetchHomeHealthScore = async (catId, catWeightKg = 4) => {
+        const fetchHomeHealthScore = async (catId) => {
             if (!catId) {
                 setHomeHealthScore(null);
                 return;
@@ -143,7 +117,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
             try {
                 const { data: logsData, error: logsError } = await supabase
                     .from("daily_logs")
-                    .select("*, normal_logs(*), something_off_logs(*), meal_logs(*)")
+                    .select("*, normal_logs(*), something_off_logs(*)")
                     .eq("cat_id", catId)
                     .order("log_date", { ascending: false })
                     .limit(7);
@@ -162,34 +136,17 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                     return;
                 }
 
-                const safeWeight = Number.isFinite(Number(catWeightKg)) && Number(catWeightKg) > 0
-                    ? Number(catWeightKg) : 4;
-
-                // ==========================================
-                // Two-Tier Analysis (same as Dashboard)
-                // ==========================================
-                const analyses = unifiedLogs.map((log, idx) =>
-                    analyzeHealthLog(log, safeWeight, idx === 0 ? unifiedLogs.slice(1) : null)
-                );
-
-                // Tier 1: 3-day immediate score for ring color
-                const recentAnalyses = analyses.slice(0, 3);
-                const recentCount = Math.max(1, recentAnalyses.length);
-                const avg3Score = Math.round(
-                    recentAnalyses.reduce((sum, a) => sum + (Number(a?.score) || 0), 0) / recentCount
-                );
-                const hasEmergencyIn3Days = recentAnalyses.some((a) => Boolean(a?.meta?.isEmergency));
-                const effectiveScore = hasEmergencyIn3Days ? Math.min(avg3Score, 19) : avg3Score;
-                setHomeHealthScore(effectiveScore);
-
-                // Tier 2: 7-day trend alerts (special alerts — for future badge use)
-                analyzeHealthTrend7d(unifiedLogs.slice(0, 7), safeWeight);
-
+                let total = 0;
+                unifiedLogs.forEach((log) => {
+                    total += analyzeHealthLog(log).score;
+                });
+                const nextScore = Math.round(total / unifiedLogs.length);
+                setHomeHealthScore(nextScore);
                 const key = healthCacheKey(session?.user?.id, catId);
                 if (key) {
-                    const st = getHealthStatus(effectiveScore);
+                    const st = getHealthStatus(nextScore);
                     await AsyncStorage.setItem(key, JSON.stringify({
-                        score: effectiveScore,
+                        score: nextScore,
                         color: st.color,
                         label: st.label,
                         text: st.text,
@@ -200,59 +157,6 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
             } catch (err) {
                 console.log("Error fetching home health score:", err);
                 setHomeHealthScore(null);
-            }
-        };
-
-        const checkInactivityAlert = async (userId) => {
-            if (!userId) return;
-
-            try {
-                // Check if we already alerted today to avoid spamming
-                const todayStr = new Date().toISOString().split('T')[0];
-                const lastAlertKey = `last_inactivity_alert_date:${userId}`;
-                const lastAlertDate = await AsyncStorage.getItem(lastAlertKey);
-
-                if (lastAlertDate === todayStr) return;
-
-                // Get all cats for this user
-                const { data: cats } = await supabase
-                    .from('cats')
-                    .select('id')
-                    .eq('owner_id', userId);
-
-                if (!cats || cats.length === 0) return;
-
-                // Find the latest log across all cats
-                const { data: latestLogs, error } = await supabase
-                    .from('daily_logs')
-                    .select('log_date')
-                    .in('cat_id', cats.map(c => c.id))
-                    .order('log_date', { ascending: false })
-                    .limit(1);
-
-                if (error) throw error;
-
-                let daysInactive = 0;
-                if (latestLogs && latestLogs.length > 0) {
-                    const lastLogDate = new Date(latestLogs[0].log_date);
-                    const today = new Date();
-                    const diffTime = Math.abs(today - lastLogDate);
-                    daysInactive = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-                }
-
-                if (daysInactive >= 3) {
-                    await AlertRepository.push({
-                        type: 'daily_log_inactivity',
-                        severity: 'warning',
-                        title: 'Haven’t logged a daily update?',
-                        desc: `You haven’t logged a daily update for ${daysInactive} days. Let’s update your cat’s health.`,
-                        timestamp: new Date().toISOString(),
-                    });
-                    // Mark as alerted today
-                    await AsyncStorage.setItem(lastAlertKey, todayStr);
-                }
-            } catch (err) {
-                console.log("Inactivity check error:", err);
             }
         };
 
@@ -277,11 +181,9 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                             const cached = raw ? JSON.parse(raw) : null;
                             setCachedHealthScore(Number.isFinite(cached?.score) ? cached.score : null);
                             setCachedHealthColor(cached?.color || null);
-                            setCachedHealthLabel(cached?.label || null);
-                            setCachedHealthText(cached?.text || null);
                         }
                         fetchLastAssessment(data.id);
-                        fetchHomeHealthScore(data.id, Number(data.weight) || 4);
+                        fetchHomeHealthScore(data.id);
                     }
                 }
             } catch (error) {
@@ -290,7 +192,6 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
         };
 
         fetchActiveCat();
-        checkInactivityAlert(session?.user?.id);
 
         const subscription = DeviceEventEmitter.addListener('catChanged', (cat) => {
             setActiveCat(cat);
@@ -305,23 +206,13 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                 };
                 loadCache();
                 fetchLastAssessment(cat.id);
-                fetchHomeHealthScore(cat.id, Number(cat.weight) || 4);
+                fetchHomeHealthScore(cat.id);
             } else {
                 setLastCheckText("Active now");
                 setHomeHealthScore(null);
                 setCachedHealthScore(null);
                 setCachedHealthColor(null);
-                setCachedHealthLabel(null);
-                setCachedHealthText(null);
             }
-        });
-
-        // listen for score updates saved by Dashboard → sync ring & text instantly
-        const scoreUpdatedSub = DeviceEventEmitter.addListener('healthScoreUpdated', ({ score, color, label, text } = {}) => {
-            if (Number.isFinite(score)) setHomeHealthScore(score);
-            if (color) setCachedHealthColor(color);
-            if (label) setCachedHealthLabel(label);
-            if (text) setCachedHealthText(text);
         });
 
         // Setup random banners
@@ -331,7 +222,6 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
 
         return () => {
             subscription.remove();
-            scoreUpdatedSub.remove();
         };
     }, []);
 
@@ -360,7 +250,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                     {/* 1. ส่วนรูปแมว (แยกออกมาแล้ว) */}
                     <View style={{ alignItems: 'center', marginTop: 26, marginBottom: 16 }}>
                         <CatHealthMeter
-                            score={computedScore}
+                            score={computedScore ?? 0}
                             centerImageUri={activeCat?.image_url || null}
                             centerMode="profile"
                             size={230}
@@ -370,14 +260,14 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                     {/* 2. ส่วนข้อความ (Hero Section เดิม เหลือแค่ Text) */}
                     <View style={styles.heroSection}>
                         <Text style={styles.heroTitle}>
-                            {(() => {
+                            {((score) => {
                                 const name = activeCat?.name || "Luna";
-                                if (computedScore === null || computedScore === undefined)
-                                    return `${name} has not been assessed yet.`;
-                                const copy = getHomeRiskCopy(computedScore);
-                                if (!copy) return `${name} has not been assessed yet.`;
-                                return `${name}\n${copy.message}`;
-                            })()}
+                                if (score === null || score === undefined) return `${name} has not been assessed yet.`;
+                                if (score >= 80) return "Everything looks great today!";
+                                if (score >= 60) return `${name} is doing well today.`;
+                                if (score >= 40) return `Keep an eye on ${name} today.`;
+                                return `${name} needs some extra care.`;
+                            })(computedScore)}
                         </Text>
 
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
