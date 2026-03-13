@@ -26,6 +26,9 @@ import AlertRepository from '../services/AlertRepository';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
 import supabase from './config/supabaseClient';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+
 const isNewArchitecture = !!global?.nativeFabricUIManager;
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental && !isNewArchitecture) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -123,6 +126,15 @@ const getAlertVisuals = (alert, catInfo = null) => {
             return { icon: 'clipboard-check-outline', color: '#2E7D32', bg: '#E8F5E9', text: 'Assessment Saved', borderColor: '#00897B' };
         case 'behavior_abnormal':
             return { icon: 'alert-circle-outline', color: '#B42318', bg: '#FFEBEE', text: 'Abnormal Behavior', borderColor: '#B42318' };
+        case 'daily_log_inactivity':
+            return { icon: 'calendar-alert', color: '#E65100', bg: '#FFF3E0', text: 'Missed Logging' };
+        case 'friend_request':
+            return { icon: 'account-plus-outline', color: '#7E57C2', bg: '#EDE7F6', text: 'Friend Request' };
+        case 'friend_accepted':
+            return { icon: 'account-check-outline', color: '#2E7D32', bg: '#E8F5E9', text: 'Friend Accepted' };
+        case 'post_like':
+            return { icon: 'heart-outline', color: '#E57373', bg: '#FFEBEE', text: 'Post Liked' };
+
     }
 
     // Fallback to severity
@@ -182,9 +194,46 @@ const dedupeAlerts = (items = []) => {
     return Array.from(map.values());
 };
 
+const isAllowedAlertType = (alert) => {
+    const type = String(alert?.type || '').toLowerCase();
+    return (
+        type === 'dashboard_low_score_60'
+        || type === 'dashboard_low_score_40'
+        || type === 'friend_request'
+        || type === 'friend_accepted'
+        || type === 'post_like'
+        || type === 'daily_log_inactivity'
+    );
+};
+
+const collapseAlerts = (items = []) => {
+    const latestLowScore = new Map();
+    const rest = [];
+    for (const alert of items) {
+        const type = String(alert?.type || '').toLowerCase();
+        if (type === 'dashboard_low_score_60' || type === 'dashboard_low_score_40') {
+            const catKey = String(alert?.catId || 'unknown');
+            const groupKey = `${type}:${catKey}`;
+            const ts = new Date(alert?.timestamp || 0).getTime();
+            const prev = latestLowScore.get(groupKey);
+            const prevTs = prev ? new Date(prev?.timestamp || 0).getTime() : -1;
+            if (!prev || ts >= prevTs) latestLowScore.set(groupKey, alert);
+            continue;
+        }
+        rest.push(alert);
+    }
+    return [...latestLowScore.values(), ...rest];
+};
+
 const getShortDetail = (alert) => {
     const txt = String(alert?.desc || '').trim();
     return txt || 'Tap to view event details.';
+};
+
+const getCatLabel = (alert) => {
+    const name = String(alert?.catName || '').trim();
+    if (name) return name;
+    return '';
 };
 
 const SwipeableNotificationCard = ({
@@ -338,8 +387,12 @@ const SwipeableNotificationCard = ({
     const isPending = alert.pendingIdentityConfirm === true;
     const isIdentityResolved = alert.type === 'pending_identity' && !isPending && alert.resolvedBy && alert.resolvedBy !== 'skipped';
     const isRejectedIdentity = alert.type === 'pending_identity' && !isPending && alert.resolvedBy === 'skipped';
+
     const isAbnormal = isAbnormalAlert(alert);
     const isOpening = isPending && String(openingAlertId || '') === String(alert.id || '');
+
+    const catLabel = getCatLabel(alert);
+
 
     // Dynamic left border color
     const leftBorderColor = visuals.borderColor || '#0A84FF';
@@ -491,14 +544,24 @@ const SwipeableNotificationCard = ({
 
                     <View style={styles.alertTextContainer}>
                         <View style={styles.titleRow}>
-                            <Text style={[styles.alertTitle, !alert.isRead && styles.unreadText]} numberOfLines={1}>{alert.title}</Text>
+
+                            <Text style={[styles.alertTitle, !alert.isRead && styles.unreadText]}>{alert.title}</Text>
+                            {!!catLabel && (
+                                <View style={styles.catBadge}>
+                                    <Text style={styles.catBadgeText}>{catLabel}</Text>
+                                </View>
+                            )}
+
                             {isPending ? (
                                 <View style={[styles.pendingBadge, { backgroundColor: '#F57C00' }]}><Text style={styles.pendingBadgeText}>Pending</Text></View>
                             ) : isRejectedIdentity ? (
                                 <View style={styles.rejectedBadge}><Text style={styles.rejectedBadgeText}>Skipped</Text></View>
                             ) : isIdentityResolved ? (
-                                <View style={[styles.resolvedBadge, resolvedBadgeStyle]}><Text style={[styles.resolvedBadgeText, resolvedTextStyle]}>Identified</Text></View>
-                            ) : !alert.isRead ? (
+
+                                <View style={styles.resolvedBadge}><Text style={styles.resolvedBadgeText}>Identified</Text></View>
+                            ) : null}
+                            {!alert.isRead ? (
+
                                 <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>
                             ) : null}
                             {isOpening && (
@@ -548,7 +611,7 @@ const SwipeableNotificationCard = ({
     );
 };
 
-export default function AlertScreen({ onBack, onNavigate }) {
+export default function AlertScreen({ onBack, onNavigate, returnTo }) {
     const [alerts, setAlerts] = useState([]);
     const [filterMode, setFilterMode] = useState('all');
     const [catMap, setCatMap] = useState({});
@@ -571,8 +634,93 @@ export default function AlertScreen({ onBack, onNavigate }) {
     const selectionBarAnim = useRef(new Animated.Value(0)).current;
     const openingTimerRef = useRef(null);
     const { pushAlert } = useContext(GlobalAlertQueueContext);
+    const [notificationsEnabled, setNotificationsEnabled] = useState(null);
+    const buildAlertsFromLocal = (mode) => {
+        const list = mode === 'deleted' && AlertEngine.getDeletedHistory
+            ? AlertEngine.getDeletedHistory()
+            : AlertEngine.getHistory();
+        const allowed = (list || []).filter(isAllowedAlertType);
+        return dedupeAlerts(collapseAlerts(allowed))
+            .sort((a, b) => new Date(b?.timestamp || 0) - new Date(a?.timestamp || 0));
+    };
+    const loadAlertsFromDb = async (mode) => {
+        if (notificationsEnabled === null) return;
+        if (notificationsEnabled === false) {
+            setAlerts(buildAlertsFromLocal(mode));
+            return;
+        }
+        try {
+            const { data: userRes } = await supabase.auth.getUser();
+            const userId = userRes?.user?.id;
+            if (!userId) return;
+
+            let q = supabase
+                .from('alerts')
+                .select('*')
+                .eq('owner_id', userId);
+            if (mode === 'deleted') q = q.eq('is_deleted', true);
+            else q = q.eq('is_deleted', false);
+
+            const { data, error } = await q.order('timestamp', { ascending: false }).limit(200);
+            if (error) throw error;
+
+            const mapped = (data || []).map((row) => ({
+                id: row.id,
+                type: row.type,
+                severity: row.severity,
+                title: row.title,
+                desc: row.description || '',
+                details: row.details || '',
+                timestamp: row.timestamp || row.created_at || new Date().toISOString(),
+                expiresAt: row.expires_at || undefined,
+                isRead: row.is_read === true,
+                isDeleted: row.is_deleted === true,
+                resolved: row.resolved === true,
+                source: row.source || null,
+                sessionId: row.session_id || null,
+                pendingIdentityConfirm: row?.metadata?.pendingIdentityConfirm === true,
+                behaviorLabel: row?.metadata?.behaviorLabel || null,
+                confidence: row?.metadata?.confidence ?? null,
+                cropSnapshot: row?.metadata?.cropSnapshot || null,
+                isAbnormal: row?.metadata?.isAbnormal === true,
+                resolvedBy: row?.metadata?.resolvedBy || null,
+                resolvedAt: row?.metadata?.resolvedAt || null,
+                resolvedCatName: row?.metadata?.resolvedCatName || null,
+                resolutionText: row?.metadata?.resolutionText || null,
+                resolvedCatId: row.cat_id || null,
+                catId: row.cat_id || null,
+                catName: row?.metadata?.catName || null,
+                _fromRemote: true,
+            }));
+
+            const localById = new Map(
+                AlertEngine.getHistory()
+                    .filter((a) => a?.id != null)
+                    .map((a) => [String(a.id), a])
+            );
+            const merged = mapped.map((row) => {
+                const local = localById.get(String(row.id));
+                if (!local) return row;
+                return {
+                    ...row,
+                    isRead: local.isRead ?? row.isRead,
+                    isDeleted: local.isDeleted ?? row.isDeleted,
+                    resolved: local.resolved ?? row.resolved,
+                };
+            });
+
+            const allowed = merged.filter(isAllowedAlertType);
+            const ordered = dedupeAlerts(collapseAlerts(allowed))
+                .sort((a, b) => new Date(b?.timestamp || 0) - new Date(a?.timestamp || 0));
+            setAlerts(ordered);
+        } catch (err) {
+            // fallback to local history
+            setAlerts(buildAlertsFromLocal(mode));
+        }
+    };
 
     useEffect(() => {
+        if (notificationsEnabled === false || notificationsEnabled === null) return;
         AlertRepository.init();
         // syncFromRemote is already handled by GlobalAlertQueueProvider.
         // TODO: For out-of-app (push) notifications, this is where you would register the device token.
@@ -583,7 +731,11 @@ export default function AlertScreen({ onBack, onNavigate }) {
         // 5. Your backend (e.g., Supabase Edge Function) would listen to inserts on the 'alerts' table
         //    and send a push notification to the user's registered tokens.
 
+        // For list refresh (including likes), sync alerts only and skip identity reviews to avoid popups.
+        AlertRepository.syncFromRemote({ skipIdentityReview: true });
+    }, [notificationsEnabled]);
 
+    useEffect(() => {
         // Avoid re-sync on every AlertScreen mount which can re-trigger auto-popup.
 
         let mounted = true;
@@ -633,15 +785,52 @@ export default function AlertScreen({ onBack, onNavigate }) {
         const handler = () => {
             setAlerts(dedupeAlerts(getBaseList()));
         };
-        AlertEngine.on(AlertEvents.UPDATED, handler);
-        AlertEngine.on(AlertEvents.IDENTITY_RESOLVED, handler);
-
-        Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
         return () => {
             AlertEngine.off(AlertEvents.UPDATED, handler);
             AlertEngine.off(AlertEvents.IDENTITY_RESOLVED, handler);
         };
-    }, [filterMode, fadeAnim]);
+    }, []);
+    useEffect(() => {
+        let alive = true;
+        const loadPrefs = async () => {
+            try {
+                const raw = await AsyncStorage.getItem('notifications_enabled');
+                if (!alive) return;
+                if (raw === null) {
+                    setNotificationsEnabled(true);
+                } else {
+                    setNotificationsEnabled(raw === 'true');
+                }
+            } catch (_) {
+                setNotificationsEnabled(true);
+            }
+        };
+        loadPrefs();
+        return () => { alive = false; };
+    }, []);
+
+    useEffect(() => {
+        loadAlertsFromDb(filterMode);
+
+        const handler = () => {
+            // Immediate UI update from local engine; DB sync can lag.
+            setAlerts(buildAlertsFromLocal(filterMode));
+            if (notificationsEnabled === true) {
+                loadAlertsFromDb(filterMode);
+            }
+        };
+        AlertEngine.on(AlertEvents.UPDATED, handler);
+        AlertEngine.on(AlertEvents.ALERT_ADDED, handler);
+
+
+        Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+        return () => {
+            AlertEngine.off(AlertEvents.UPDATED, handler);
+
+            AlertEngine.off(AlertEvents.ALERT_ADDED, handler);
+        };
+    }, [filterMode, fadeAnim, notificationsEnabled]);
+
 
 
     useEffect(() => {
@@ -709,6 +898,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
 
     const handlePressCard = (alert) => {
         setActiveSwipeId(null);
+
         if (!alert.isRead) {
             if (AlertEngine.markAsRead) AlertEngine.markAsRead(alert.id);
             AlertRepository.markReadOnRemote(alert.id);
@@ -726,7 +916,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
                 onNavigate('EventDetail', { alertData: alert, canPickCat: true });
             }
         } else {
-            onNavigate('EventDetail', { alertData: alert });
+            onNavigate('EventDetail', { alertData: alert, returnTo: returnTo || 'Camera' });
         }
     };
 
@@ -740,8 +930,12 @@ export default function AlertScreen({ onBack, onNavigate }) {
     };
 
     const handleReadAll = () => {
-        if (AlertEngine.markAllAsRead) AlertEngine.markAllAsRead();
-        AlertRepository.markAllReadOnRemote();
+
+        if (AlertEngine.markAllAsRead) {
+            AlertEngine.markAllAsRead();
+            AlertRepository.markAllAsReadOnRemote();
+        }
+
     };
 
     const openDeleteConfirmModal = ({ title, message, confirmText = 'Delete', onConfirm, onCancel }) => {
@@ -778,8 +972,10 @@ export default function AlertScreen({ onBack, onNavigate }) {
             title: 'Delete Notifications',
             message: 'Are you sure you want to delete all notifications? This cannot be undone.',
             confirmText: 'Delete All',
-            onConfirm: () => {
-                if (AlertEngine.deleteAllAlerts) AlertEngine.deleteAllAlerts();
+            onConfirm: async () => {
+                if (AlertEngine.deleteAllAlerts) await AlertEngine.deleteAllAlerts();
+                await AlertRepository.deleteAllOnRemote();
+                loadAlertsFromDb(filterMode);
             },
         });
     };
@@ -872,7 +1068,10 @@ export default function AlertScreen({ onBack, onNavigate }) {
                                         onRequestDeleteConfirm={openDeleteConfirmModal}
                                         onMarkRead={(id) => {
                                             if (AlertEngine.markAsRead) AlertEngine.markAsRead(id);
-                                            AlertRepository.markReadOnRemote(id);
+
+
+                                            AlertRepository.markAsReadOnRemote(id);
+
                                         }}
                                         isSelecting={isSelecting}
                                         isSelected={selectedIds.has(alert.id)}
@@ -1229,6 +1428,8 @@ const styles = StyleSheet.create({
     behaviorLabel: { fontSize: 11, color: '#F57C00', fontWeight: '600', marginTop: 1, marginBottom: 1, textTransform: 'capitalize' },
     rejectedBadge: { backgroundColor: '#FFE4E6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
     rejectedBadgeText: { color: '#B42318', fontSize: 10, fontFamily: 'Inter-Bold' },
+    catBadge: { backgroundColor: '#E8F0FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
+    catBadgeText: { color: '#1A56C5', fontSize: 10, fontFamily: 'Inter-Bold' },
     timeText: { fontSize: 10, color: '#8E8E93', fontFamily: 'Inter-Medium', marginTop: 2 },
     chevronButton: { paddingLeft: 8, paddingVertical: 8 },
     expandedContent: {

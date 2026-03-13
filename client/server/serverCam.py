@@ -943,6 +943,22 @@ def _pick_active_camera_from_db():
             os.getenv("FORCE_CAMERA_ID") or os.getenv("DEMO_CAMERA_ID") or ""
         ).strip()
         force_owner_id = (os.getenv("FORCE_OWNER_ID") or "").strip()
+        # 0) Manual override via environment variables
+        force_url = (os.getenv("FORCE_SOURCE_URL") or "").strip()
+        if force_url:
+            f_type = (os.getenv("FORCE_SOURCE_TYPE") or "").strip().lower()
+            if not f_type:
+                f_type = _guess_source_type(force_url)
+            return {
+                "id": force_camera_id or "forced",
+                "owner_id": force_owner_id or "forced",
+                "stream_source": force_url,
+                "stream_source_type": f_type,
+                "_source_type_guess": f_type,
+                "is_primary": True,
+                "is_ai_enabled": True,
+            }
+
         rows = (
             _supabase.table("cameras")
             .select(

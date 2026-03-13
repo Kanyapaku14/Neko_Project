@@ -14,6 +14,7 @@ import {
     Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { Ionicons } from '@expo/vector-icons';
 import supabase from './config/supabaseClient';
 
 export default function ForgotPasswordScreen({ onBack, onGoToResetPassword }) {
@@ -25,11 +26,11 @@ export default function ForgotPasswordScreen({ onBack, onGoToResetPassword }) {
         const cleanEmail = email.trim().toLowerCase();
 
         if (!cleanEmail) {
-            Alert.alert('แจ้งเตือน', 'กรุณากรอกอีเมล');
+            Alert.alert('Alert', 'Please enter your email.');
             return;
         }
         if (!cleanEmail.endsWith('@gmail.com') && !cleanEmail.endsWith('@hotmail.com')) {
-            Alert.alert('แจ้งเตือน', 'กรุณาใช้อีเมลที่ลงท้ายด้วย @gmail.com หรือ @hotmail.com เท่านั้น');
+            Alert.alert('Alert', 'Please use an email ending with @gmail.com or @hotmail.com only.');
             return;
         }
 
@@ -47,7 +48,7 @@ export default function ForgotPasswordScreen({ onBack, onGoToResetPassword }) {
 
             setSent(true);
         } catch (err) {
-            Alert.alert('Error', 'ไม่สามารถส่งอีเมลได้ กรุณาลองใหม่อีกครั้ง');
+            Alert.alert('Error', 'Unable to send email. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -57,15 +58,15 @@ export default function ForgotPasswordScreen({ onBack, onGoToResetPassword }) {
         <SafeAreaView style={styles.safeArea}>
             <StatusBar style="auto" />
 
-            {/* Back Button */}
+            {/* Back Button — วงกลมขาว + chevron เหมือน MainTabNavigator */}
             <TouchableOpacity style={styles.backButton} onPress={onBack}>
-                <Text style={styles.backText}>{'< ย้อนกลับ'}</Text>
+                <Ionicons name="chevron-back" size={24} color="#37474F" />
             </TouchableOpacity>
 
             <KeyboardAvoidingView
                 style={{ flex: 1 }}
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
             >
                 <ScrollView
                     contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}
@@ -73,83 +74,83 @@ export default function ForgotPasswordScreen({ onBack, onGoToResetPassword }) {
                     keyboardDismissMode="on-drag"
                 >
                     <View style={styles.container}>
-                {/* Logo */}
-                <View style={styles.headerContainer}>
-                    <Image
-                        source={require('../../assets/cioncat.jpg')}
-                        style={styles.logoimage}
-                    />
-                    <Image
-                        source={require('../../assets/taxticoncat.jpg')}
-                        style={styles.textimage}
-                    />
-                </View>
-
-                {!sent ? (
-                    <>
-                        <Text style={styles.title}>ลืมรหัสผ่าน?</Text>
-                        <Text style={styles.subtitle}>
-                            กรอกอีเมลของคุณ เราจะส่งลิงก์สำหรับรีเซ็ตรหัสผ่านให้
-                        </Text>
-
-                        <View style={styles.inputGroup}>
-                            <View style={styles.labelRow}>
-                                <Text style={styles.label}>Email</Text>
-                                <Text style={styles.required}> *</Text>
-                            </View>
-                            <TextInput
-                                style={styles.input}
-                                value={email}
-                                onChangeText={setEmail}
-                                placeholder="กรอกอีเมลของคุณ"
-                                autoCapitalize="none"
-                                keyboardType="email-address"
-                                autoFocus
+                        {/* Logo */}
+                        <View style={styles.headerContainer}>
+                            <Image
+                                source={require('../../assets/cioncat.jpg')}
+                                style={styles.logoimage}
+                            />
+                            <Image
+                                source={require('../../assets/taxticoncat.jpg')}
+                                style={styles.textimage}
                             />
                         </View>
 
-                        <TouchableOpacity
-                            style={[styles.button, loading && styles.buttonDisabled]}
-                            onPress={handleSendReset}
-                            disabled={loading}
-                        >
-                            {loading ? (
-                                <ActivityIndicator color="#fff" />
-                            ) : (
-                                <Text style={styles.buttonText}>ส่งลิงก์รีเซ็ตรหัสผ่าน</Text>
-                            )}
-                        </TouchableOpacity>
-                    </>
-                ) : (
-                    /* Success State */
-                    <View style={styles.successContainer}>
-                        <Text style={styles.successIcon}>📧</Text>
-                        <Text style={styles.title}>ส่งอีเมลสำเร็จ!</Text>
-                        <Text style={styles.subtitle}>
-                            ระบบส่งลิงก์รีเซ็ตรหัสผ่านไปที่{'\n'}
-                            <Text style={styles.emailHighlight}>{email}</Text>
-                            {'\n\n'}กรุณาตรวจสอบอีเมลของคุณ แล้วกดลิงก์เพื่อตั้งรหัสผ่านใหม่
-                        </Text>
+                        {!sent ? (
+                            <>
+                                <Text style={styles.title}>ลืมรหัสผ่าน?</Text>
+                                <Text style={styles.subtitle}>
+                                    กรอกอีเมลของคุณ เราจะส่งลิงก์สำหรับรีเซ็ตรหัสผ่านให้
+                                </Text>
 
-                        <TouchableOpacity
-                            style={styles.button}
-                            onPress={() => onGoToResetPassword && onGoToResetPassword(email.trim().toLowerCase())}
-                        >
-                            <Text style={styles.buttonText}>Reset Password</Text>
-                        </TouchableOpacity>
+                                <View style={styles.inputGroup}>
+                                    <View style={styles.labelRow}>
+                                        <Text style={styles.label}>Email</Text>
+                                        <Text style={styles.required}> *</Text>
+                                    </View>
+                                    <TextInput
+                                        style={styles.input}
+                                        value={email}
+                                        onChangeText={setEmail}
+                                        placeholder="กรอกอีเมลของคุณ"
+                                        autoCapitalize="none"
+                                        keyboardType="email-address"
+                                        autoFocus
+                                    />
+                                </View>
 
-                        <TouchableOpacity style={styles.button} onPress={onBack}>
-                            <Text style={styles.buttonText}>กลับหน้า Sign In</Text>
-                        </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.button, loading && styles.buttonDisabled]}
+                                    onPress={handleSendReset}
+                                    disabled={loading}
+                                >
+                                    {loading ? (
+                                        <ActivityIndicator color="#fff" />
+                                    ) : (
+                                        <Text style={styles.buttonText}>ส่งลิงก์รีเซ็ตรหัสผ่าน</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </>
+                        ) : (
+                            /* Success State */
+                            <View style={styles.successContainer}>
+                                <Text style={styles.successIcon}>📧</Text>
+                                <Text style={styles.title}>ส่งอีเมลสำเร็จ!</Text>
+                                <Text style={styles.subtitle}>
+                                    ระบบส่งลิงก์รีเซ็ตรหัสผ่านไปที่{'\n'}
+                                    <Text style={styles.emailHighlight}>{email}</Text>
+                                    {'\n\n'}กรุณาตรวจสอบอีเมลของคุณ แล้วกดลิงก์เพื่อตั้งรหัสผ่านใหม่
+                                </Text>
 
-                        <TouchableOpacity
-                            style={styles.resendButton}
-                            onPress={() => setSent(false)}
-                        >
-                            <Text style={styles.resendText}>ส่งอีเมลอีกครั้ง</Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
+                                <TouchableOpacity
+                                    style={styles.button}
+                                    onPress={() => onGoToResetPassword && onGoToResetPassword(email.trim().toLowerCase())}
+                                >
+                                    <Text style={styles.buttonText}>Reset Password</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity style={styles.button} onPress={onBack}>
+                                    <Text style={styles.buttonText}>กลับหน้า Sign In</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={styles.resendButton}
+                                    onPress={() => setSent(false)}
+                                >
+                                    <Text style={styles.resendText}>ส่งอีเมลอีกครั้ง</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -163,14 +164,20 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
     },
     backButton: {
-        paddingHorizontal: 24,
-        paddingTop: 16,
-        paddingBottom: 8,
-    },
-    backText: {
-        fontSize: 15,
-        color: '#16A085',
-        fontWeight: '500',
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#FFFFFF',
+        borderRadius: 20,
+        marginHorizontal: 24,
+        marginTop: 8,
+        marginBottom: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
     },
     container: {
         flex: 1,

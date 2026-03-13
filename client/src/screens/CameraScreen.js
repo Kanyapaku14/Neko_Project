@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect, useState, useContext, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useContext, useMemo } from 'react';
 import {
   View,
   Text,
@@ -65,13 +65,16 @@ const isDemoLikeSource = (source = '') => {
 
 // --- 🛠️ 2. สร้างฟังก์ชัน Generate HTML ที่รองรับทั้ง 2 แบบ และจัดการ Error ---
 const generateStreamHtml = (url, isVideo) => {
-  // บังคับให้โหลดใหม่เสมอ (Cache-busting) ป้องกัน WebView จำเฟรมดำๆ
   const cacheBuster = url.includes('?') ? `&cb=${Date.now()}` : `?cb=${Date.now()}`;
   const finalUrl = `${url}${cacheBuster}`;
+
+  // Force image tag if it's our MJPEG stream API
+  const useImageTag = !isVideo || url.includes('/api/video_feed');
 
   return `<!doctype html>
   <html>
     <head>
+      <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
       <style>
         html, body {
@@ -79,25 +82,37 @@ const generateStreamHtml = (url, isVideo) => {
           overflow: hidden; background: #000;
           display: flex; justify-content: center; align-items: center;
         }
-        .media { width: 100%; height: 100%; object-fit: cover; display: block; }
-        /* กล่องแจ้งเตือน Error เมื่อโหลดภาพ/วิดีโอไม่ขึ้น */
+        .media { 
+          width: 100%; height: 100%; 
+          object-fit: contain;
+          display: block; 
+        }
         .error-box {
-          display: none; color: #FF8A80; text-align: center; font-family: sans-serif;
+          display: none; color: #FF8A80; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
           padding: 20px; border: 1px solid #FF5252; border-radius: 8px; font-size: 14px;
+          background: rgba(255, 0, 0, 0.1);
         }
       </style>
     </head>
-    <body>
-      ${isVideo
-        ? `<video class="media" src="${finalUrl}" autoplay loop muted playsinline 
-            onerror="document.getElementById('err').style.display='block'; this.style.display='none';">
+    <body onload="console.log('Stream Page Loaded')">
+      ${useImageTag
+        ? `<img class="media" id="stream-media" src="${finalUrl}" alt="live-stream" 
+            onerror="showError()" />`
+        : `<video class="media" id="stream-media" src="${finalUrl}" autoplay loop muted playsinline 
+            onerror="showError()">
            </video>`
-        : `<img class="media" src="${finalUrl}" alt="live-stream" 
-            onerror="document.getElementById('err').style.display='block'; this.style.display='none';" />`
       }
       <div id="err" class="error-box">
-        ⚠️ ไม่สามารถโหลดวิดีโอหรือสตรีมได้<br/>กรุณาตรวจสอบสัญญาณหรือ URL
+        ⚠️ ไม่สามารถโหลดวิดีโอหรือสตรีมได้<br/>
+        <small style="opacity: 0.8; margin-top: 5px; display: block;">กรุณาตรวจสอบการเชื่อมต่อ Wi-Fi หรือ Firewall ของคอมพิวเตอร์</small>
       </div>
+      <script>
+        function showError() {
+          document.getElementById('err').style.display = 'block';
+          document.getElementById('stream-media').style.display = 'none';
+          console.error('Failed to load stream: ' + "${finalUrl}");
+        }
+      </script>
     </body>
   </html>`;
 };
@@ -741,17 +756,27 @@ export default function CameraScreen({ onNavigate, session }) {
                   {isDisplayConnected ? (
                     <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#000' }}>
                       <WebView
-                        key={isVideoMode ? 'video-player' : 'live-player'} // 🛡️ บังคับสร้างใหม่เมื่อสลับโหมด
+                        key={isVideoMode ? 'video-player' : 'live-player'} 
                         source={streamSource}
                         style={{ width: '100%', height: '100%', backgroundColor: '#000' }}
                         cacheEnabled={false}
                         scrollEnabled={false}
                         bounces={false}
-                        showsVerticalScrollIndicator={false}
-                        showsHorizontalScrollIndicator={false}
+                        javaScriptEnabled={true}
+                        domStorageEnabled={true}
+                        allowsFullscreenVideo={true}
+                        mediaPlaybackRequiresUserAction={false}
+                        allowsInlineMediaPlayback={true}
+                        onHttpError={(syntheticEvent) => {
+                          const { nativeEvent } = syntheticEvent;
+                          console.warn('WebView HTTP error: ', nativeEvent);
+                        }}
+                        onError={(syntheticEvent) => {
+                          const { nativeEvent } = syntheticEvent;
+                          console.warn('WebView error: ', nativeEvent);
+                        }}
                         originWhitelist={['*']}
                         mixedContentMode="always"
-                        allowsInlineMediaPlayback={true}
                         automaticallyAdjustContentInsets={false}
                       />
                     </View>

@@ -22,6 +22,7 @@ class SimpleEmitter {
 }
 
 const ALERT_STORAGE_KEY_PREFIX = 'global_alerts';
+
 const ABNORMAL_BEHAVIOR_SET = new Set(['vomiting', 'head_pressing', 'abnormal']);
 const DEBUG_ALERT_ENGINE = false;
 const DEFAULT_PENDING_COOLDOWN_MS = {
@@ -52,6 +53,9 @@ const isActivityBehaviorLabel = (value) => {
     const v = normalizeBehaviorLabel(value);
     return v === 'activity' || v === 'active';
 };
+
+const NOTIFICATIONS_ENABLED_KEY = 'notifications_enabled';
+
 
 /**
  * Global Alert Engine Event Names
@@ -187,6 +191,7 @@ class AlertEngineService {
      *   ttlMs: time-to-live in ms (optional). Defaults: critical=48h, warning=24h, info/success=6h
      */
     async logEvent(alertData) {
+
         if (alertData?.pendingIdentityConfirm === true) {
             const abnormal = isAbnormalBehaviorLabel(alertData.behaviorLabel)
                 || isAbnormalBehaviorLabel(alertData.behaviorDetail)
@@ -195,6 +200,13 @@ class AlertEngineService {
                 // Do not create identity-prompt alerts for activity/active
                 return;
             }
+        }
+        try {
+            const raw = await AsyncStorage.getItem(NOTIFICATIONS_ENABLED_KEY);
+            if (raw === 'false') return;
+        } catch (_) {
+            // if storage fails, default to allow
+
         }
         const normalizedSeverity = (alertData.severity || 'info').toLowerCase();
         const nowMs = Date.now();
@@ -315,6 +327,8 @@ class AlertEngineService {
             title: alertData.title,
             desc: alertData.desc,
             details: alertData.details || '',
+            catId: alertData.catId || null,
+            catName: alertData.catName || null,
             timestamp: alertData.timestamp || new Date().toISOString(),
             cameraId: alertData.cameraId || null,
             expiresAt,
@@ -532,21 +546,6 @@ class AlertEngineService {
     }
 
 
-    async markAsRead(alertId) {
-        let changed = false;
-        const targetId = String(alertId);
-        this.alerts = this.alerts.map(a => {
-            if (String(a.id) === targetId && !a.isRead) {
-                changed = true;
-                return { ...a, isRead: true };
-            }
-            return a;
-        });
-        if (changed) {
-            await this._saveAlerts();
-            this._recalculateState(); // Emit UPDATED event
-        }
-    }
 
     /**
      * Attach remote review id from DB row to an existing local alert.
@@ -675,8 +674,9 @@ class AlertEngineService {
 
     async markAsRead(alertId) {
         let changed = false;
+        const targetId = String(alertId);
         this.alerts = this.alerts.map(a => {
-            if (a.id === alertId && !a.isRead) {
+            if (String(a.id) === targetId && !a.isRead) {
                 changed = true;
                 return { ...a, isRead: true };
             }
@@ -685,26 +685,10 @@ class AlertEngineService {
 
         if (changed) {
             await this._saveAlerts();
+            this._recalculateState(); // Emit UPDATED event
         }
     }
 
-    /**
-     * Patch an existing alert with new data.
-     * Useful for updating IDs after remote push or updating metadata.
-     */
-    async patchAlert(alertId, data) {
-        let changed = false;
-        this.alerts = this.alerts.map(a => {
-            if (String(a.id) === String(alertId)) {
-                changed = true;
-                return { ...a, ...data };
-            }
-            return a;
-        });
-        if (changed) {
-            await this._saveAlerts();
-        }
-    }
 
     /**
      * Clear all alerts from local storage and memory.

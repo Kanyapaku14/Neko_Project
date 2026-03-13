@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { View, Text, TouchableOpacity, TextInput, ScrollView, Image, Alert, Platform } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,6 +9,50 @@ import { styles } from './Style/LogDailyStyle';
 import AlertEngine from '../services/AlertEngine';
 
 // --- Shared Utilities ---
+const NO_FOOD_TAG = 'ไม่กินอาหารเลย';
+const NO_WATER_TAG = 'ไม่กินน้ำเลย';
+const EXCESS_WATER_TAG = 'กินน้ำเยอะผิดปกติ';
+const POLYPHAGIA_TAG = 'กินจุผิดปกติ';
+const APPETITE_LOSS_TAG = 'เบื่ออาหาร';
+const EXTREME_FOOD_CONFIRM_G = 1000;
+const FOOD_WARNING_G = 320;
+const WATER_MAX_ML = 999;
+const WATER_HIGH_ML = 349;
+const WATER_ALERT_ML = 399;
+
+const sumMealGrams = (meals = []) => {
+    const items = Array.isArray(meals) ? meals : [];
+    return items.reduce((sum, meal) => {
+        const grams = Number(meal?.amount_grams);
+        if (!Number.isFinite(grams)) return sum;
+        return sum + grams;
+    }, 0);
+};
+
+const formatNumber = (n) => {
+    const num = Number(n);
+    if (!Number.isFinite(num)) return String(n ?? '');
+    return String(Math.round(num)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+};
+
+const sanitizeUpTo3Digits = (text) => {
+    const digits = String(text ?? '').replace(/\D/g, '').slice(0, 3);
+    return digits;
+};
+
+const confirmDialog = (title, message, okText = 'ยืนยัน') =>
+    new Promise((resolve) => {
+        Alert.alert(
+            title,
+            message,
+            [
+                { text: 'Edit', style: 'cancel', onPress: () => resolve(false) },
+                { text: okText, onPress: () => resolve(true) },
+            ],
+            { cancelable: true }
+        );
+    });
+
 const getLevelValue = (level) => {
     switch (level) {
         case 5: return "very_high";
@@ -23,14 +67,14 @@ const getLevelValue = (level) => {
 const formatToEnum = (val) => val ? String(val).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : null;
 
 // --- Custom Component: กล่องกรอกตัวเลขพร้อมหน่วยข้างใน ---
-const UnitInput = ({ value, onChangeText, unit, width, maxLength }) => (
+const UnitInput = ({ value, onChangeText, unit, width, maxLength, borderColor, onEndEditing, editable }) => (
     <View style={{
         flexDirection: 'row',
         alignItems: 'center',
 
         backgroundColor: '#fff',
         borderWidth: 1,
-        borderColor: '#C8DDD8',
+        borderColor: borderColor || '#C8DDD8',
         borderRadius: 8,
         height: 38,
         width: width || 100,
@@ -51,6 +95,8 @@ const UnitInput = ({ value, onChangeText, unit, width, maxLength }) => (
             maxLength={maxLength}
             value={value !== null && value !== undefined ? String(value) : ""}
             onChangeText={onChangeText}
+            onEndEditing={onEndEditing}
+            editable={editable !== false}
         />
         <Text style={{ fontSize: 13, color: '#999', marginLeft: 4 }}>
             {unit}
@@ -135,19 +181,26 @@ const CustomDropdown = ({ value, onValueChange }) => {
     );
 };
 
-const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) => {
+const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) => { 
     const { session, onBack, initialDate } = props;
     const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
 
     const {
-        meals, consumeMeals, waterIntake, urineLevel, stoolLevel, catName
+        meals, consumeMeals, waterIntake, urineLevel, stoolLevel, catName, behaviorTags, catWeightKg, isKitten
     } = state;
 
     const {
         setMeals, setConsumeMeals, setWaterIntake, setUrineLevel, setStoolLevel
     } = setters;
 
+    const hasNoFood = Array.isArray(behaviorTags) && behaviorTags.includes(NO_FOOD_TAG);
+    const hasNoWater = Array.isArray(behaviorTags) && behaviorTags.includes(NO_WATER_TAG);
+
     const handleAddMeal = () => {
+        if (hasNoFood) {
+            Alert.alert('ข้อมูลขัดแย้งกัน', 'คุณเลือก "ไม่กินอาหารเลย" อยู่ จึงไม่สามารถเพิ่มรายการอาหารได้');
+            return;
+        }
         setMeals([...meals, { id: Date.now().toString(), food_type: null, amount_grams: "" }]);
     };
 
@@ -163,11 +216,32 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
         }
     };
 
-    const isComplete = !meals.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === '') && consumeMeals && waterIntake && urineLevel && stoolLevel;
+    const mealsArray = Array.isArray(meals) ? meals : [];
+    const hasInvalidMeals = !hasNoFood && (mealsArray.length === 0 || mealsArray.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === ''));
+    const isComplete = !hasInvalidMeals &&
+        (hasNoFood || (consumeMeals !== null && String(consumeMeals).trim() !== '')) &&
+        (hasNoWater || (waterIntake !== null && String(waterIntake).trim() !== '')) &&
+        urineLevel !== null &&
+        stoolLevel !== null;
 
-    // Simplified: No internal fetchCatId or handleSave needed as they are lifted to LogDaily
+    // Simplified: No internal fetchCatId or handleSave needed as they are lifted to LogDaily 
+ 
+    const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34', textLabel: '#333' }; 
+    const warnedMealIdsRef = useRef(new Set()); 
+    const warnedConsumeRef = useRef(false);
+    const warnedWaterRef = useRef(false);
+    const recommendedWaterMl = Math.round((Number(catWeightKg) || 4) * 60); 
+    const waterNow = Number(waterIntake);
+    const hasWaterNow = Number.isFinite(waterNow);
+    const waterBorderColor =
+        !hasNoWater && hasWaterNow && waterNow >= WATER_ALERT_ML ? '#B42318' :
+            (!hasNoWater && hasWaterNow && waterNow > WATER_HIGH_ML ? '#F59E0B' : undefined);
 
-    const theme = { cardBg: '#DCECE7', borderColor: '#C8DDD8', textDark: '#1A3B34', textLabel: '#333' };
+    useEffect(() => {
+        if (!Number.isFinite(Number(waterIntake)) || Number(waterIntake) < WATER_ALERT_ML) {
+            warnedWaterRef.current = false;
+        }
+    }, [waterIntake]);
 
     return (
         <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
@@ -211,7 +285,24 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                     </View>
 
                     {/* --- Food Section --- */}
-                    <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: theme.borderColor, zIndex: 10 }}>
+                    {hasNoFood && (
+                        <Text style={{ marginBottom: 10, color: '#B42318', fontWeight: '700' }}>
+                            คุณเลือก "{NO_FOOD_TAG}" อยู่ ระบบจะล็อคการกรอกข้อมูลอาหารเพื่อไม่ให้ข้อมูลขัดแย้งกัน
+                        </Text>
+                    )}
+                    <View
+                        pointerEvents={hasNoFood ? 'none' : 'auto'}
+                        style={{
+                            backgroundColor: theme.cardBg,
+                            borderRadius: 16,
+                            padding: 15,
+                            marginBottom: 15,
+                            borderWidth: 1,
+                            borderColor: theme.borderColor,
+                            zIndex: 10,
+                            opacity: hasNoFood ? 0.55 : 1,
+                        }}
+                    >
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Food Meals</Text>
 
                         {meals.map((meal, index) => (
@@ -223,13 +314,30 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                                     />
                                 </View>
                                 <View style={{ marginRight: 8 }}>
+                                    {(() => {
+                                        const gramsNum = Number(meal.amount_grams);
+                                        const isOver = Number.isFinite(gramsNum) && gramsNum > FOOD_WARNING_G;
+                                        return (
                                     <UnitInput 
                                         value={meal.amount_grams} 
-                                        onChangeText={(val) => handleUpdateMeal(meal.id, 'amount_grams', val)} 
+                                        onChangeText={(val) => handleUpdateMeal(meal.id, 'amount_grams', sanitizeUpTo3Digits(val))} 
+                                        onEndEditing={() => {
+                                            const now = Number(meal.amount_grams);
+                                            if (!Number.isFinite(now) || now <= FOOD_WARNING_G) return;
+                                            if (warnedMealIdsRef.current.has(meal.id)) return;
+                                            warnedMealIdsRef.current.add(meal.id);
+                                            Alert.alert(
+                                                'ปริมาณอาหารเกินมาตรฐาน',
+                                                `ปริมาณอาหารเกินมาตรฐาน (${FOOD_WARNING_G}g)! โปรดตรวจสอบความถูกต้อง หรือเฝ้าระวังภาวะกินจุผิดปกติ`
+                                            );
+                                        }}
                                         unit="g" 
                                         width={80} 
-                                        maxLength={4} 
+                                        maxLength={3}
+                                        borderColor={isOver ? '#D32F2F' : undefined}
                                     />
+                                        );
+                                    })()}
                                 </View>
                                 <TouchableOpacity 
                                     onPress={() => handleRemoveMeal(meal.id)}
@@ -245,27 +353,87 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
                             style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 20 }}
                         >
                             <Ionicons name="add-circle" size={20} color="#00796B" style={{ marginRight: 6 }} />
-                            <Text style={{ color: '#00796B', fontWeight: 'bold', fontSize: 14 }}>+ Add a meal</Text>
+                            <Text style={{ color: '#00796B', fontWeight: 'bold', fontSize: 14 }}>Add a meal</Text>
                         </TouchableOpacity>
 
                         <View style={{ height: 1, backgroundColor: theme.borderColor, marginBottom: 20 }} />
 
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Text style={{ width: 85, fontSize: 14, color: theme.textLabel }}>Consume</Text>
-                            <UnitInput value={consumeMeals} onChangeText={setConsumeMeals} unit="meals" width={85} maxLength={2} />
+                            <UnitInput 
+                                value={consumeMeals} 
+                                onChangeText={(val) => setConsumeMeals(val.replace(/\D/g, ''))} 
+                                onEndEditing={() => {
+                                    const mealsCount = Number(consumeMeals);
+                                    if (!Number.isFinite(mealsCount) || mealsCount <= 0) return;
+                                    const adultLimit = 3;
+                                    const kittenLimit = 4;
+                                    if (isKitten && mealsCount > kittenLimit) {
+                                        Alert.alert('จำนวนมื้ออาหารเกินแนะนำ', 'ลูกแมวที่ต้องการพลังงานสูงควรแบ่งเป็น 3-4 มื้อต่อวัน');
+                                    } else if (!isKitten && mealsCount > adultLimit) {
+                                        Alert.alert('จำนวนมื้ออาหารเกินแนะนำ', 'แมวโตควรแบ่งกินอาหารวันละ 2-3 มื้อ (เช้า-เย็น)');
+                                    }
+                                }}
+                                unit="meals" 
+                                width={85} 
+                                maxLength={2} 
+                            />
                             <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
                         </View>
                     </View>
 
                     {/* --- Water Section --- */}
-                    <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: theme.borderColor }}>
-                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Water</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text>
-                            <UnitInput value={waterIntake} onChangeText={setWaterIntake} unit="ml" width={85} maxLength={4} />
-                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text>
-                        </View>
-                    </View>
+                    {hasNoWater && (
+                        <Text style={{ marginBottom: 10, color: '#B42318', fontWeight: '700' }}>
+                            คุณเลือก "{NO_WATER_TAG}" อยู่ ระบบจะล็อคการกรอกข้อมูลน้ำเพื่อไม่ให้ข้อมูลขัดแย้งกัน
+                        </Text>
+                    )}
+                    <View
+                        pointerEvents={hasNoWater ? 'none' : 'auto'}
+                        style={{
+                            backgroundColor: theme.cardBg,
+                            borderRadius: 16,
+                            padding: 15,
+                            marginBottom: 15,
+                            borderWidth: 1,
+                            borderColor: theme.borderColor,
+                            opacity: hasNoWater ? 0.55 : 1,
+                        }}
+                    > 
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Water</Text> 
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}> 
+                            <Text style={{ width: 105, fontSize: 14, color: theme.textLabel }}>Total quantity:</Text> 
+                            <UnitInput
+                                value={waterIntake}
+                                onChangeText={(v) => setWaterIntake(sanitizeUpTo3Digits(v))}
+                                unit="ml"
+                                width={85}
+                                maxLength={3}
+                                borderColor={waterBorderColor}
+                                onEndEditing={() => {
+                                    if (hasNoWater) return;
+                                    const now = Number(waterIntake);
+                                    if (!Number.isFinite(now) || now < WATER_ALERT_ML) return;
+                                    if (warnedWaterRef.current) return;
+                                    warnedWaterRef.current = true;
+                                    Alert.alert(
+                                        'ปริมาณน้ำสูงผิดปกติ',
+                                        `คุณกรอกปริมาณน้ำ ${formatNumber(now)} ml/วัน\n\nหากมากผิดปกติอาจเสี่ยงโรคไต/เบาหวาน โปรดตรวจสอบความถูกต้องและเฝ้าระวังอาการ`
+                                    );
+                                }}
+                            /> 
+                            <Text style={{ fontSize: 14, color: theme.textLabel, marginLeft: 8 }}> per day.</Text> 
+                        </View> 
+                        <Text style={{ marginTop: 8, fontSize: 12, color: '#607D8B', fontWeight: '600' }}>
+                            แนะนำประมาณ {formatNumber(recommendedWaterMl)} ml/วัน (60 ml/กก./วัน) • กรอกได้สูงสุด {WATER_MAX_ML} ml
+                        </Text>
+                        {!hasNoWater && hasWaterNow && waterNow > WATER_HIGH_ML && (
+                            <Text style={{ marginTop: 6, fontSize: 12, fontWeight: '700', color: waterNow >= WATER_ALERT_ML ? '#B42318' : '#B54708' }}>
+                                {waterNow >= WATER_ALERT_ML ? 'ดื่มน้ำมากผิดปกติ (ควรเฝ้าระวัง)' : 'เริ่มดื่มน้ำเยอะกว่าปกติ'}
+                            </Text>
+                        )}
+                        
+                    </View> 
 
                     {/* --- Urine & Stool Section --- */}
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
@@ -342,7 +510,7 @@ const NormalView = ({ props, setStatus, state, setters, handleSave, loading }) =
     );
 };
 
-const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loading }) => {
+const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loading }) => { 
     const { session, onBack, initialDate } = props;
     const insets = useSafeAreaInsets(); // ใช้คำนวณระยะขอบจอ
 
@@ -351,15 +519,27 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
         isVomitChecked, vomitColor,
         isDiarrheaChecked, diarrheaColor,
         behaviorTags, respiratoryTags,
-        notes, catName
+        notes, catName,
+        meals, consumeMeals, waterIntake
     } = state;
 
-    const {
-        setIsVomitChecked, setVomitColor,
-        setIsDiarrheaChecked, setDiarrheaColor,
-        setBehaviorTags, setRespiratoryTags,
-        setNotes
-    } = setters;
+    const { 
+        setIsVomitChecked, setVomitColor, 
+        setIsDiarrheaChecked, setDiarrheaColor, 
+        setBehaviorTags, setRespiratoryTags, 
+        setNotes, 
+        setMeals, setConsumeMeals, setWaterIntake 
+    } = setters; 
+
+    const totalFoodGrams = sumMealGrams(meals);
+    const isNoFoodSelected = Array.isArray(behaviorTags) && behaviorTags.includes(NO_FOOD_TAG);
+    const isOverNormalFood = !isNoFoodSelected && totalFoodGrams > FOOD_WARNING_G;
+
+    useEffect(() => {
+        if (!isOverNormalFood) return;
+        if (!Array.isArray(behaviorTags) || !behaviorTags.includes(APPETITE_LOSS_TAG)) return;
+        setBehaviorTags(behaviorTags.filter((t) => t !== APPETITE_LOSS_TAG));
+    }, [isOverNormalFood, behaviorTags, setBehaviorTags]);
 
     const handleToggleTag = (tag, currentTags, setTargetTags) => {
         if (currentTags.includes(tag)) {
@@ -367,6 +547,93 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
         } else {
             setTargetTags([...currentTags, tag]);
         }
+    };
+
+    // ==========================================
+    // ✅ NEW: Consistency rules (Clear / Block conflicting data)
+    // ==========================================
+    const toggleBehaviorTag = async (tag) => { 
+        const current = Array.isArray(behaviorTags) ? behaviorTags : []; 
+        const isSelected = current.includes(tag); 
+
+        // Prevent conflict: overfeeding vs appetite loss
+        if (!isSelected && tag === APPETITE_LOSS_TAG) {
+            const foodNow = sumMealGrams(meals);
+            const noFoodNow = current.includes(NO_FOOD_TAG);
+            if (!noFoodNow && foodNow > FOOD_WARNING_G) {
+                Alert.alert(
+                    'ข้อมูลขัดแย้งกัน',
+                    `เมื่อกรอกปริมาณอาหารรวมเกิน ${FOOD_WARNING_G}g (${formatNumber(foodNow)}g)\nระบบไม่อนุญาตให้เลือก "${APPETITE_LOSS_TAG}"`
+                );
+                return;
+            }
+        }
+
+        // Mutual exclusion (appetite loss vs polyphagia)
+        if (!isSelected && tag === POLYPHAGIA_TAG && current.includes(APPETITE_LOSS_TAG)) {
+            Alert.alert('ข้อมูลขัดแย้งกัน', `ไม่สามารถเลือก "${POLYPHAGIA_TAG}" พร้อม "${APPETITE_LOSS_TAG}" ได้`);
+            return;
+        }
+        if (!isSelected && tag === APPETITE_LOSS_TAG && current.includes(POLYPHAGIA_TAG)) {
+            Alert.alert('ข้อมูลขัดแย้งกัน', `ไม่สามารถเลือก "${APPETITE_LOSS_TAG}" พร้อม "${POLYPHAGIA_TAG}" ได้`);
+            return;
+        }
+ 
+        // Mutual exclusion (water behavior) 
+        if (!isSelected) { 
+            if (tag === NO_WATER_TAG && current.includes(EXCESS_WATER_TAG)) { 
+                Alert.alert('ข้อมูลขัดแย้งกัน', `ไม่สามารถเลือก "${NO_WATER_TAG}" พร้อม "${EXCESS_WATER_TAG}" ได้`); 
+                return;
+            }
+            if (tag === EXCESS_WATER_TAG && current.includes(NO_WATER_TAG)) {
+                Alert.alert('ข้อมูลขัดแย้งกัน', `ไม่สามารถเลือก "${EXCESS_WATER_TAG}" พร้อม "${NO_WATER_TAG}" ได้`);
+                return;
+            }
+            if (tag === POLYPHAGIA_TAG && current.includes(NO_FOOD_TAG)) {
+                Alert.alert('ข้อมูลขัดแย้งกัน', `ไม่สามารถเลือก "${POLYPHAGIA_TAG}" พร้อม "${NO_FOOD_TAG}" ได้`);
+                return;
+            }
+        }
+
+        // If user sets "no food", clear food inputs to avoid conflict
+        if (!isSelected && tag === NO_FOOD_TAG) {
+            const totalFood = sumMealGrams(meals);
+            const hasAnyFoodInput =
+                totalFood > 0 ||
+                (Array.isArray(meals) && meals.some((m) => m?.food_type || String(m?.amount_grams || '').trim() !== '')) ||
+                (consumeMeals !== null && String(consumeMeals).trim() !== '');
+
+            if (hasAnyFoodInput) {
+                const ok = await confirmDialog(
+                    'Confirm clearing food data',
+                    `You selected "${NO_FOOD_TAG}". The system will clear all food data to avoid conflicts.`,
+                    'Clear data'
+                );
+                if (!ok) return;
+            }
+
+            setMeals([]);
+            setConsumeMeals('0');
+        }
+
+        // If user sets "no water", optionally clear water intake
+        if (!isSelected && tag === NO_WATER_TAG) {
+            const waterNow = Number(waterIntake);
+            const hasWaterInput = (waterIntake !== null && String(waterIntake).trim() !== '' && Number.isFinite(waterNow) && waterNow > 0);
+            if (hasWaterInput) {
+                const ok = await confirmDialog(
+                    'Confirm clearing water data',
+                    `You entered ${formatNumber(waterNow)} ml of water. If you select "${NO_WATER_TAG}", the system will set it to 0 ml.`,
+                    'Set to 0 ml'
+                );
+                if (!ok) return;
+            }
+            setWaterIntake('0');
+        }
+
+        // Normal toggle behavior tags
+        if (isSelected) setBehaviorTags(current.filter((t) => t !== tag));
+        else setBehaviorTags([...current, tag]);
     };
 
     // Simplified: No internal catId or handleSave needed as they are lifted to LogDaily
@@ -489,13 +756,31 @@ const SomethingOffView = ({ props, setStatus, state, setters, handleSave, loadin
                     <View style={{ backgroundColor: theme.cardBg, borderRadius: 16, padding: 15, marginBottom: 20, borderWidth: 1, borderColor: theme.borderColor }}>
                         <Text style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: theme.textDark }}>Behavior & Energy</Text>
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                            {['ซึม', 'ซ่อนตัว', 'เลียขนมากเกินไป', 'ร้องผิดปกติ', 'เบื่ออาหาร', 'กินจุผิดปกติ', 'กระวนกระวาย', 'โก่งตัว', 'กินน้ำเยอะผิดปกติ', 'ไม่กินน้ำเลย', 'ไม่กินอาหารเลย', 'ไม่เลียขน', 'ก้าวร้าว'].map(tag => {
-                                const isSelected = behaviorTags.includes(tag);
-                                return (
-                                    <TouchableOpacity
-                                        key={tag}
-                                        onPress={() => handleToggleTag(tag, behaviorTags, setBehaviorTags)}
-                                        style={{ backgroundColor: isSelected ? '#FFA869' : '#F0F0F0', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 }}
+                            {['ซึม', 'ซ่อนตัว', 'เลียขนมากเกินไป', 'ร้องผิดปกติ', 'เบื่ออาหาร', 'กินจุผิดปกติ', 'กระวนกระวาย', 'โก่งตัว', 'กินน้ำเยอะผิดปกติ', 'ไม่กินน้ำเลย', 'ไม่กินอาหารเลย', 'ไม่เลียขน', 'ก้าวร้าว'].map(tag => { 
+                                const isSelected = behaviorTags.includes(tag); 
+                                const isBlockedByOvereat = !isSelected && tag === APPETITE_LOSS_TAG && isOverNormalFood;
+                                const isBlockedByPolyphagia = !isSelected && (
+                                    (tag === POLYPHAGIA_TAG && behaviorTags.includes(APPETITE_LOSS_TAG)) ||
+                                    (tag === APPETITE_LOSS_TAG && behaviorTags.includes(POLYPHAGIA_TAG))
+                                );
+                                const isDisabled = 
+                                    (tag === NO_WATER_TAG && behaviorTags.includes(EXCESS_WATER_TAG)) || 
+                                    (tag === EXCESS_WATER_TAG && behaviorTags.includes(NO_WATER_TAG)) || 
+                                    (tag === POLYPHAGIA_TAG && behaviorTags.includes(NO_FOOD_TAG)) ||
+                                    isBlockedByOvereat ||
+                                    isBlockedByPolyphagia; 
+                                return ( 
+                                    <TouchableOpacity 
+                                        key={tag} 
+                                        onPress={() => void toggleBehaviorTag(tag)} 
+                                        disabled={isDisabled} 
+                                        style={{
+                                            backgroundColor: isSelected ? '#FFA869' : '#F0F0F0',
+                                            paddingVertical: 6,
+                                            paddingHorizontal: 12,
+                                            borderRadius: 20,
+                                            opacity: isDisabled ? 0.45 : 1,
+                                        }}
                                     >
                                         <Text style={{ color: isSelected ? '#fff' : '#666', fontSize: 12, fontWeight: isSelected ? 'bold' : 'normal' }}>{tag}</Text>
                                     </TouchableOpacity>
@@ -555,6 +840,10 @@ export default function LogDaily(props) {
     // Initialize from props first — avoids "No cat profile found" race condition
     const [catId, setCatId] = useState(props.catId || null);
     const [catName, setCatName] = useState(props.catName || '');
+    const initialWeight = Number(props.catWeightKg ?? props.catWeight);
+    const [catWeightKg, setCatWeightKg] = useState(Number.isFinite(initialWeight) && initialWeight > 0 ? initialWeight : 4);
+    const [hasCatWeight, setHasCatWeight] = useState(Number.isFinite(initialWeight) && initialWeight > 0);
+    const [isKitten, setIsKitten] = useState(false);
     const [loading, setLoading] = useState(false);
 
     // --- Normal State ---
@@ -586,21 +875,74 @@ export default function LogDaily(props) {
         }
     }, [session, initialDate, props.catId]);
 
+    // ==========================================
+    // ✅ NEW: Keep state consistent if tags are loaded from DB
+    // ==========================================
+    useEffect(() => {
+        if (!Array.isArray(behaviorTags)) return;
+
+        if (behaviorTags.includes(NO_WATER_TAG) && behaviorTags.includes(EXCESS_WATER_TAG)) {
+            setBehaviorTags((prev) => prev.filter((t) => t !== EXCESS_WATER_TAG));
+        }
+        if (behaviorTags.includes(NO_FOOD_TAG) && behaviorTags.includes(POLYPHAGIA_TAG)) {
+            setBehaviorTags((prev) => prev.filter((t) => t !== POLYPHAGIA_TAG));
+        }
+
+        if (behaviorTags.includes(NO_WATER_TAG)) {
+            if (waterIntake !== '0') setWaterIntake('0');
+        }
+        if (behaviorTags.includes(NO_FOOD_TAG)) {
+            const totalFood = sumMealGrams(meals);
+            const hasAnyFoodInput =
+                totalFood > 0 ||
+                (Array.isArray(meals) && meals.some((m) => m?.food_type || String(m?.amount_grams || '').trim() !== '')) ||
+                (consumeMeals !== null && String(consumeMeals).trim() !== '');
+            if (hasAnyFoodInput) {
+                setMeals([]);
+                setConsumeMeals('0');
+            }
+        }
+    }, [behaviorTags]);
+
     const getLocalLogDate = () => {
         if (!initialDate) return new Date();
         return new Date(`${initialDate}T00:00:00`);
     };
 
     const fetchCatIdAndLog = async () => {
-        const { data: catData } = await supabase.from('cats').select('id, name').eq('owner_id', session.user.id).single();
+        const { data: catData } = await supabase.from('cats').select('id, name, weight, birthdate').eq('owner_id', session.user.id).single();
         if (catData) {
             setCatId(catData.id);
             setCatName(catData.name || 'your cat');
+            
+            if (catData.birthdate) {
+                const birthDate = new Date(catData.birthdate);
+                const oneYearAgo = new Date();
+                oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+                setIsKitten(birthDate > oneYearAgo);
+            }
+
+            const w = Number(catData.weight);
+            if (Number.isFinite(w) && w > 0) {
+                setCatWeightKg(w);
+                setHasCatWeight(true);
+            }
             await fetchExistingLog(catData.id);
         }
     };
 
+    const maybeLoadCatWeight = async (id) => {
+        if (!id || (hasCatWeight && isKitten !== null)) return;
+        const { data } = await supabase.from('cats').select('weight, birthdate').eq('id', id).maybeSingle();
+        const w = Number(data?.weight);
+        if (Number.isFinite(w) && w > 0) {
+            setCatWeightKg(w);
+            setHasCatWeight(true);
+        }
+    };
+
     const fetchExistingLog = async (catId) => {
+        await maybeLoadCatWeight(catId);
         const logDate = getLocalLogDate();
         const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
         const pickChild = (child) => {
@@ -673,17 +1015,21 @@ export default function LogDaily(props) {
     const handleSaveNormal = async () => {
         if (!catId) return Alert.alert("Error", "No cat profile found");
 
+        const isNoFoodSelected = Array.isArray(behaviorTags) && behaviorTags.includes(NO_FOOD_TAG);
+        const isNoWaterSelected = Array.isArray(behaviorTags) && behaviorTags.includes(NO_WATER_TAG);
+        const mealsArray = Array.isArray(meals) ? meals : [];
+
         const missingFields = [];
-        const hasInvalidMeals = meals.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === '');
-        if (hasInvalidMeals) missingFields.push("Food meals data (ประเภทหรือปริมาณ)");
-        if (consumeMeals === null || consumeMeals.toString().trim() === '') missingFields.push("Consume amount");
-        if (waterIntake === null || waterIntake.toString().trim() === '') missingFields.push("Total water quantity");
+        const hasInvalidMeals = !isNoFoodSelected && (mealsArray.length === 0 || mealsArray.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === ''));
+        if (!isNoFoodSelected && hasInvalidMeals) missingFields.push("Food meals data (ประเภทหรือปริมาณ)");
+        if (!isNoFoodSelected && (consumeMeals === null || consumeMeals.toString().trim() === '')) missingFields.push("Consume amount");
+        if (!isNoWaterSelected && (waterIntake === null || waterIntake.toString().trim() === '')) missingFields.push("Total water quantity");
         if (urineLevel === null) missingFields.push("Urine level");
         if (stoolLevel === null) missingFields.push("Stool level");
 
 
         if (missingFields.length > 0) {
-            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก\n(Missing: " + missingFields.join(', ') + ")");
+            return Alert.alert("Incomplete data", "Please complete all fields before saving\n(Missing: " + missingFields.join(', ') + ")");
         }
 
         await saveData();
@@ -697,7 +1043,7 @@ export default function LogDaily(props) {
         if (isDiarrheaChecked && !diarrheaColor) missingFields.push("Diarrhea Color");
 
         if (missingFields.length > 0) {
-            return Alert.alert("ข้อมูลไม่ครบถ้วน", "กรุณากรอกข้อมูลให้ครบทุกช่องก่อนบันทึก\n(Missing: " + missingFields.join(', ') + ")");
+            return Alert.alert("Incomplete data", "Please complete all fields before saving\n(Missing: " + missingFields.join(', ') + ")");
         }
 
         setLoading(true);
@@ -720,10 +1066,13 @@ export default function LogDaily(props) {
                 (Array.isArray(existingData.normal_logs) ? existingData.normal_logs.length > 0 : Object.keys(existingData.normal_logs).length > 0);
 
             // เช็คว่าข้อมูลใน State (หน้าจอ) กรอกครบหรือยัง?
-            const hasInvalidMeals = meals.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === '');
+            const isNoFoodSelected = Array.isArray(behaviorTags) && behaviorTags.includes(NO_FOOD_TAG);
+            const isNoWaterSelected = Array.isArray(behaviorTags) && behaviorTags.includes(NO_WATER_TAG);
+            const mealsArray = Array.isArray(meals) ? meals : [];
+            const hasInvalidMeals = !isNoFoodSelected && (mealsArray.length === 0 || mealsArray.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === ''));
             const isNormalCompleteInState = !hasInvalidMeals &&
-                consumeMeals !== null && consumeMeals.toString().trim() !== '' &&
-                waterIntake !== null && waterIntake.toString().trim() !== '' &&
+                (isNoFoodSelected || (consumeMeals !== null && consumeMeals.toString().trim() !== '')) &&
+                (isNoWaterSelected || (waterIntake !== null && waterIntake.toString().trim() !== '')) &&
                 urineLevel !== null &&
                 stoolLevel !== null;
 
@@ -731,8 +1080,8 @@ export default function LogDaily(props) {
             if (!hasNormalInDB && !isNormalCompleteInState) {
                 setLoading(false);
                 return Alert.alert(
-                    "ไม่สามารถบันทึกได้",
-                    "ต้องกรอกข้อมูลหน้า 'Normal' (อาหาร/น้ำ/ขับถ่าย) ของวันนี้ให้ครบถ้วนก่อน ถึงจะสามารถบันทึก Something off ได้"
+                    "Unable to save",
+                    "Please complete today's 'Normal' (food/water/elimination) data before saving Something Off."
                 );
             }
 
@@ -741,25 +1090,81 @@ export default function LogDaily(props) {
 
         } catch (error) {
             console.error("Check normal data error:", error);
-            Alert.alert("Error", "เกิดข้อผิดพลาดในการตรวจสอบข้อมูล");
+            Alert.alert("Error", "An error occurred while validating data.");
             setLoading(false);
         }
     };
 
     const saveData = async () => {
         if (!catId) return Alert.alert("Error", "No cat profile found");
-        setLoading(true);
+
+        // ==========================================
+        // ✅ NEW: Pre-save sanity check (prevent extreme input mistakes)
+        // ==========================================
+        const totalFoodGrams = sumMealGrams(meals); 
+        const isNoFoodSelected = Array.isArray(behaviorTags) && behaviorTags.includes(NO_FOOD_TAG); 
+        const isNoWaterSelected = Array.isArray(behaviorTags) && behaviorTags.includes(NO_WATER_TAG); 
+        const currentBehaviorTags = Array.isArray(behaviorTags) ? behaviorTags : [];
+        const hasAppetiteLoss = currentBehaviorTags.includes(APPETITE_LOSS_TAG);
+        const hasPolyphagia = currentBehaviorTags.includes(POLYPHAGIA_TAG);
+
+        // Prevent contradictory input: overfeeding + appetite loss
+        if (!isNoFoodSelected && totalFoodGrams > FOOD_WARNING_G && hasAppetiteLoss) {
+            Alert.alert(
+                'ข้อมูลขัดแย้งกัน',
+                `คุณกรอกปริมาณอาหารรวม ${formatNumber(totalFoodGrams)}g (เกิน ${FOOD_WARNING_G}g)\nโปรดเอา "${APPETITE_LOSS_TAG}" ออกก่อนบันทึก`
+            );
+            return;
+        }
+
+        // Prevent contradictory tags
+        if (hasAppetiteLoss && hasPolyphagia) {
+            Alert.alert('ข้อมูลขัดแย้งกัน', `ไม่สามารถเลือก "${APPETITE_LOSS_TAG}" พร้อม "${POLYPHAGIA_TAG}" ได้`);
+            return;
+        }
+        if (!isNoFoodSelected && totalFoodGrams >= EXTREME_FOOD_CONFIRM_G) { 
+            const ok = await confirmDialog( 
+                'ตรวจสอบปริมาณอาหาร', 
+                `คุณกรอกปริมาณอาหาร ${formatNumber(totalFoodGrams)}g แน่ใจหรือไม่?\nปริมาณนี้อาจเป็นอันตรายต่อแมว`, 
+                'บันทึกต่อ'
+            );
+            if (!ok) return;
+        } else if (!isNoFoodSelected && totalFoodGrams > FOOD_WARNING_G) { 
+            const ok = await confirmDialog( 
+                'ปริมาณอาหารเกินมาตรฐาน', 
+                `ปริมาณอาหารเกินมาตรฐาน (${FOOD_WARNING_G}g)! โปรดตรวจสอบความถูกต้อง หรือเฝ้าระวังภาวะกินจุผิดปกติ\n\nปริมาณที่กรอก: ${formatNumber(totalFoodGrams)}g`, 
+                'บันทึกต่อ' 
+            ); 
+            if (!ok) return; 
+        } 
+
+        const waterNow = Number(waterIntake);
+        if (!isNoWaterSelected && Number.isFinite(waterNow) && waterNow >= WATER_ALERT_ML) {
+            const ok = await confirmDialog(
+                'ปริมาณน้ำสูงผิดปกติ',
+                `คุณกรอกปริมาณน้ำ ${formatNumber(waterNow)} ml/วัน แน่ใจหรือไม่?\nหากมากผิดปกติอาจเสี่ยงโรคไต/เบาหวาน`,
+                'บันทึกต่อ'
+            );
+            if (!ok) return;
+        }
+ 
+        setLoading(true); 
         const logDate = getLocalLogDate();
         const logDateStr = `${logDate.getFullYear()}-${String(logDate.getMonth() + 1).padStart(2, '0')}-${String(logDate.getDate()).padStart(2, '0')}`;
 
         try {
+            const isSomethingOffActive = (status === 'Something off') ||
+                isVomitChecked || isDiarrheaChecked ||
+                behaviorTags.length > 0 || respiratoryTags.length > 0 ||
+                (notes && notes.trim() !== '');
+
             // Step 1: UPSERT daily_logs (parent)
             const { data: dailyLog, error: dailyError } = await supabase
                 .from('daily_logs')
                 .upsert({
                     cat_id: catId,
                     log_date: logDateStr,
-                    log_type: (isVomitChecked || isDiarrheaChecked || behaviorTags.length > 0 || respiratoryTags.length > 0) ? 'something_off' : 'normal'
+                    log_type: isSomethingOffActive ? 'something_off' : 'normal'
                 }, { onConflict: 'cat_id, log_date' })
                 .select('id')
                 .single();
@@ -767,10 +1172,11 @@ export default function LogDaily(props) {
             if (dailyError) throw dailyError;
 
             // Step 2: Save Normal Logs if complete
-            const hasInvalidMeals = meals.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === '');
+            const mealsArrayState = Array.isArray(meals) ? meals : [];
+            const hasInvalidMeals = !isNoFoodSelected && (mealsArrayState.length === 0 || mealsArrayState.some(m => m.food_type === null || m.amount_grams === null || String(m.amount_grams).trim() === ''));
             const isNormalComplete = !hasInvalidMeals &&
-                consumeMeals !== null && consumeMeals.toString().trim() !== '' &&
-                waterIntake !== null && waterIntake.toString().trim() !== '' &&
+                (isNoFoodSelected || (consumeMeals !== null && consumeMeals.toString().trim() !== '')) &&
+                (isNoWaterSelected || (waterIntake !== null && waterIntake.toString().trim() !== '')) &&
                 urineLevel !== null &&
                 stoolLevel !== null;
 
@@ -779,8 +1185,8 @@ export default function LogDaily(props) {
                     .from('normal_logs')
                     .upsert({
                         daily_log_id: dailyLog.id,
-                        meals_per_day: consumeMeals !== null && consumeMeals !== '' ? Number(consumeMeals) : 0,
-                        water_ml_per_day: waterIntake !== null && waterIntake !== '' ? Number(waterIntake) : 0,
+                        meals_per_day: isNoFoodSelected ? 0 : (consumeMeals !== null && consumeMeals !== '' ? Number(consumeMeals) : 0),
+                        water_ml_per_day: isNoWaterSelected ? 0 : (waterIntake !== null && waterIntake !== '' ? Number(waterIntake) : 0),
                         urine_level: getLevelValue(urineLevel),
                         stool_level: getLevelValue(stoolLevel),
                     }, { onConflict: 'daily_log_id' });
@@ -790,24 +1196,21 @@ export default function LogDaily(props) {
                 // Save meals array
                 // First delete existing meals for this daily_log_id
                 await supabase.from('meal_logs').delete().eq('daily_log_id', dailyLog.id);
-                
-                // Then insert the new items
-                const mealsArray = meals.map(m => ({
-                    daily_log_id: dailyLog.id,
-                    food_type: m.food_type,
-                    amount_grams: m.amount_grams !== null && m.amount_grams !== '' ? Number(m.amount_grams) : 0
-                }));
-                
-                const { error: mealsError } = await supabase.from('meal_logs').insert(mealsArray);
-                if (mealsError) throw mealsError;
+
+                // Then insert the new items (skip if user selected "no food")
+                if (!isNoFoodSelected) {
+                    const mealsArray = mealsArrayState.map(m => ({
+                        daily_log_id: dailyLog.id,
+                        food_type: m.food_type,
+                        amount_grams: m.amount_grams !== null && m.amount_grams !== '' ? Number(m.amount_grams) : 0
+                    }));
+
+                    const { error: mealsError } = await supabase.from('meal_logs').insert(mealsArray);
+                    if (mealsError) throw mealsError;
+                }
             }
 
             // Step 3: Save Something Off Logs if we are in 'Something off' mode or have data
-            const isSomethingOffActive = (status === 'Something off') ||
-                isVomitChecked || isDiarrheaChecked ||
-                behaviorTags.length > 0 || respiratoryTags.length > 0 ||
-                (notes && notes.trim() !== '');
-
             if (isSomethingOffActive) {
                 const { error: offError } = await supabase
                     .from('something_off_logs')
@@ -823,6 +1226,9 @@ export default function LogDaily(props) {
                     }, { onConflict: 'daily_log_id' });
 
                 if (offError) throw offError;
+            } else {
+                // If it's not active, delete any existing something_off_logs to ensure clean state
+                await supabase.from('something_off_logs').delete().eq('daily_log_id', dailyLog.id);
             }
 
             try {
@@ -861,7 +1267,9 @@ export default function LogDaily(props) {
     const state = {
         meals, consumeMeals, waterIntake, urineLevel, stoolLevel,
         isVomitChecked, vomitColor, isDiarrheaChecked, diarrheaColor, behaviorTags, respiratoryTags, notes,
-        catName
+        catName,
+        catWeightKg,
+        isKitten,
     };
 
     const setters = {

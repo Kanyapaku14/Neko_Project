@@ -30,7 +30,7 @@ export default function ResetPasswordTokenScreen({ onVerified, onBack, initialEm
     const cleanToken = token.trim();
 
     if (!cleanEmail || !cleanToken) {
-      Alert.alert('แจ้งเตือน', 'กรุณากรอก Email และ Token ให้ครบถ้วน');
+      Alert.alert('Alert', 'Please enter both email and token.');
       return;
     }
 

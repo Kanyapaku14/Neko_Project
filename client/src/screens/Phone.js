@@ -32,7 +32,7 @@ const VIDEO_SERVER_BASE = CAMERA_API_BASE;
 
 // 🚨 ประกาศตัวแปรลิงก์กล้อง RTSP ที่นี่ (เพื่อเอาไปบันทึกลง Database)
 const RTSP_URL = 'http://192.168.1.108:5000/api/video_feed';
-const CAMERA_RTSP_URL = "rtsp://testt1:1234test@192.168.1.101:554/stream2"
+const CAMERA_RTSP_URL = "rtsp://testt1:1234test@192.168.1.101:553/stream2"
 
 const BRANDS = [
     { id: "tapo", name: "TP-Link Tapo", icon: "link-variant" },

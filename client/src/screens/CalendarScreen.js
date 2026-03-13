@@ -532,7 +532,11 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                                 </Text>
                               </View>
                             )}
-                            {offLog?.behavior_energy && (
+                            {(() => {
+                              const val = offLog?.behavior_energy;
+                              const hasVal = Array.isArray(val) ? val.length > 0 : Boolean(val);
+                              if (!hasVal) return null;
+                              return (
                               <View style={styles.textLogRow}>
                                 <MaterialCommunityIcons name="cat" size={18} color="#147C78" />
                                 <Text style={styles.textLogLabel}>Behavior: </Text>
@@ -542,7 +546,24 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                                     : offLog.behavior_energy}
                                 </Text>
                               </View>
-                            )}
+                              );
+                            })()}
+                            {(() => {
+                              const val = offLog?.respiratory_physical;
+                              const hasVal = Array.isArray(val) ? val.length > 0 : Boolean(val);
+                              if (!hasVal) return null;
+                              return (
+                                <View style={styles.textLogRow}>
+                                  <MaterialCommunityIcons />
+                                  <Text style={[styles.textLogLabel, { color: '#D32F2F' }]}>Respiratory: </Text>
+                                  <Text style={[styles.textLogValue, { flex: 1, color: '#D32F2F' }]}>
+                                    {Array.isArray(offLog.respiratory_physical)
+                                      ? offLog.respiratory_physical.join(', ')
+                                      : offLog.respiratory_physical}
+                                  </Text>
+                                </View>
+                              );
+                            })()}
                             {offLog?.notes && (
                               <View style={[styles.textLogRow, { alignItems: 'flex-start' }]}>
                                 <MaterialCommunityIcons name="note-text" size={18} color="#147C78" />
@@ -597,7 +618,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                     onPress={() => onNavigate({ screen: 'PhotoCheck' })}
                   >
                     <Ionicons name="camera" size={32} color="#147C78" />
-                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>อัพโหลดรูปภาพเพื่อวิเคราะห์</Text>
+                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>Upload photos for analysis</Text>
                   </TouchableOpacity>
                 )}
 
@@ -661,7 +682,7 @@ export default function CalendarScreen({ onNavigate, session, initialDate }) {
                     onPress={() => onNavigate({ screen: 'PhotoCheck' })}
                   >
                     <Ionicons name="camera" size={32} color="#147C78" />
-                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>อัพโหลดรูปภาพเพื่อวิเคราะห์</Text>
+                    <Text style={{ color: '#147C78', marginTop: 8, fontSize: 14, fontWeight: '500' }}>Upload photos for analysis</Text>
                   </TouchableOpacity>
                 )}
 

@@ -21,6 +21,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from 'expo-image-picker';
 import supabase from './config/supabaseClient';
+import AlertRepository from "../services/AlertRepository";
 import PostCard from "../components/PostCard";
 import PostDetailScreen from "./PostDetail.Screen";
 import AddPostScreen from "./AddPostScreen";
@@ -772,6 +773,16 @@ export default function CommunityProfile({ session, userId, onBack, onNavigate }
                 await supabase
                     .from('post_likes')
                     .insert({ post_id: postId, user_id: session.user.id });
+
+                if (post.user.id !== session.user.id) {
+                    await AlertRepository.push({
+                        type: 'post_like',
+                        severity: 'info',
+                        title: 'มีคนถูกใจโพสต์ของคุณ! ❤️',
+                        desc: `${userProfile?.name || 'ใครบางคน'} ถูกใจโพสต์ของคุณ`,
+                        timestamp: new Date().toISOString(),
+                    }, post.user.id);
+                }
             }
 
             // Optimistic Update or Refresh

@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 // import { FEED_DATA } from "../mock/feedData";
 // import { currentUser } from "../utils/auth";
 import supabase from './config/supabaseClient';
+import AlertRepository from '../services/AlertRepository';
 
 import FeedHeader from "../components/FeedHeader";
 import PostCard from "../components/PostCard";
@@ -233,6 +234,16 @@ export default function CommunityScreen({ onBack, session, onNavigate }) {
         await supabase
           .from('post_likes')
           .insert({ post_id: postId, user_id: session.user.id });
+
+        if (post.user.id !== session.user.id) {
+          await AlertRepository.push({
+            type: 'post_like',
+            severity: 'info',
+            title: 'มีคนถูกใจโพสต์ของคุณ! ❤️',
+            desc: `${userProfile?.name || 'ใครบางคน'} ถูกใจโพสต์ของคุณ`,
+            timestamp: new Date().toISOString(),
+          }, post.user.id);
+        }
       }
 
       // Optimistic Update or Refresh

@@ -21,11 +21,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import AlertEngine, { AlertEvents } from './AlertEngine';
 import AlertRepository from './AlertRepository';
 import CatPickerModal from '../components/alert/CatPickerModal';
 import supabase from '../screens/config/supabaseClient';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Expose for JS Debugger console during development only.
 if (__DEV__) {
@@ -40,6 +41,7 @@ export const GlobalAlertQueueContext = createContext({
     criticalAlert: null,
     showCriticalBanner: false,
 });
+
 
 const ABNORMAL_BEHAVIORS = new Set(['vomiting', 'head_pressing', 'abnormal']);
 const BANNER_BEHAVIORS = new Set(['eat', 'feeding_session', 'litter', 'litter_session', 'toileting', 'litter_box']);
@@ -77,7 +79,10 @@ function shouldNavigateAfterResolve(alert) {
     return isBannerBehavior(raw);
 }
 
-export function GlobalAlertQueueProvider({ children, session }) {
+
+export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
+    const AUTO_POPUP_COOLDOWN_MS = 45 * 1000;
+
     const [queue, setQueue] = useState([]);
     const [currentAlert, setCurrentAlert] = useState(null);
     const [catsFromDb, setCatsFromDb] = useState([]);
@@ -95,6 +100,7 @@ export function GlobalAlertQueueProvider({ children, session }) {
     const [suppressPending, setSuppressPending] = useState(false);
     const appStartAtRef = useRef(Date.now());
     const lastAutoPopupAtRef = useRef(0);
+
     const syncLockRef = useRef(false);
     const realtimeChannelRef = useRef(null);
     const realtimeSyncTimerRef = useRef(null);
@@ -102,6 +108,9 @@ export function GlobalAlertQueueProvider({ children, session }) {
     const lastSyncAtRef = useRef(0);
     const syncDebounceRef = useRef(null);
     const poppedAlertIdsRef = useRef(new Set());
+
+    const criticalPopupInFlight = useRef(new Set());
+
 
     const getAlertGroupKey = useCallback((alert) => {
         if (!alert) return null;
@@ -127,7 +136,33 @@ export function GlobalAlertQueueProvider({ children, session }) {
         lastAutoPopupAtRef.current = 0;
     }, [session?.user?.id]);
 
+
     // One-time local clear to stop alert loop.
+
+
+    const shouldShowCriticalOncePerCat = useCallback(async (candidate) => {
+        if (!candidate?.id) return false;
+        const type = String(candidate?.type || '').toLowerCase();
+        if (type !== 'dashboard_low_score_40') return true;
+        const catId = String(candidate?.catId || '');
+        if (!catId) return true;
+        const today = new Date().toISOString().slice(0, 10);
+        const key = `critical_popup_once:${type}:${catId}`;
+        if (criticalPopupInFlight.current.has(key)) return false;
+        criticalPopupInFlight.current.add(key);
+        try {
+            const last = await AsyncStorage.getItem(key);
+            if (last === today) return false;
+            await AsyncStorage.setItem(key, today);
+            return true;
+        } finally {
+            criticalPopupInFlight.current.delete(key);
+        }
+    }, []);
+
+
+    // 1. Fetch Cats from DB when session exists
+
     useEffect(() => {
         let mounted = true;
         const clearOnce = async () => {
@@ -313,6 +348,7 @@ export function GlobalAlertQueueProvider({ children, session }) {
         AlertRepository.syncFromRemote();
     }, [session?.user?.id]);
 
+
     const requestSync = useCallback(() => {
         if (syncDebounceRef.current) return;
         syncDebounceRef.current = setTimeout(async () => {
@@ -453,6 +489,25 @@ export function GlobalAlertQueueProvider({ children, session }) {
     }, []);
 
     // --- IDENTITY_PENDING listener ---
+
+    // Background sync to keep unread badge up-to-date even if realtime misses
+    useEffect(() => {
+        if (!session?.user?.id) return;
+        let cancelled = false;
+        const tick = async () => {
+            if (cancelled) return;
+            await AlertRepository.syncFromRemote({ skipIdentityReview: true });
+        };
+        tick();
+        const interval = setInterval(tick, 20000);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [session?.user?.id]);
+
+    // 2. Listen for Auto-Popup events from AlertEngine
+
     useEffect(() => {
         const handleNewPendingAlert = (alert) => {
             if (!alert?.id) return;
@@ -604,40 +659,35 @@ export function GlobalAlertQueueProvider({ children, session }) {
 
     // --- Global Critical / behavior_abnormal listener ---
     useEffect(() => {
-        const handleNewCritical = (alert) => {
-            if (!alert) return;
-            // behavior_abnormal type from the DB subscription should show as red modal
-            if (alert.type === 'pending_identity' && alert.pendingIdentityConfirm === true) {
+        let mounted = true;
+
+        const handleNewCritical = async (alert) => {
+            if (!alert || !mounted) return;
+            const allowed = await shouldShowCriticalOncePerCat(alert);
+            if (!mounted) return;
+            if (!allowed) {
+                setDismissedCriticalIds((prev) => ({ ...prev, [alert.id]: true }));
                 return;
             }
-            const rawBehavior = alert?.behaviorLabel || alert?.metadata?.behavior || alert?.metadata?.behaviorLabel || '';
-            if (normalizeBehaviorLabelLocal(rawBehavior) === 'activity') {
-                return;
-            }
-            const isAbnormal = alert.type === 'behavior_abnormal' || isAlertAbnormal(alert);
-            const freshnessWindow = isAbnormal ? 15 * 60 * 1000 : 5000;
-            const isFresh = Number.isFinite(tsMs)
-                ? (tsMs >= (appStartAtRef.current - freshnessWindow))
-                : false;
-            if (isAbnormal && isFresh) {
-                openCriticalIfNeeded(alert);
-            }
+            openCriticalIfNeeded(alert);
         };
+
         const handleUpdated = () => {
             const top = findTopCritical();
             if (top) openCriticalIfNeeded(top);
             else setCriticalAlert(null);
         };
+
         handleUpdated();
         AlertEngine.on(AlertEvents.NEW_CRITICAL, handleNewCritical);
-        // AlertEvents.ALERT_ADDED consolidated into NEW_CRITICAL
         AlertEngine.on(AlertEvents.UPDATED, handleUpdated);
+
         return () => {
+            mounted = false;
             AlertEngine.off(AlertEvents.NEW_CRITICAL, handleNewCritical);
-            AlertEngine.off(AlertEvents.ALERT_ADDED, handleNewCritical);
             AlertEngine.off(AlertEvents.UPDATED, handleUpdated);
         };
-    }, [findTopCritical, openCriticalIfNeeded]);
+    }, [findTopCritical, openCriticalIfNeeded, shouldShowCriticalOncePerCat]);
 
     // --- Queue Processor ---
     useEffect(() => {
