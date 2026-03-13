@@ -96,8 +96,8 @@ export default function HomeHeader({
         {leftComponent ? leftComponent : (
           <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.catDropdownTrigger} disabled={isSwitchingCat}>
             <View style={[styles.avatar, { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }]}>
-              {activeCat?.image_url ? (
-                <Image source={{ uri: activeCat.image_url }} style={{ width: '100%', height: '100%' }} />
+              {activeCat?.image_url || activeCat?.photo_url ? (
+                <Image source={{ uri: activeCat.image_url || activeCat.photo_url }} style={{ width: '100%', height: '100%' }} />
               ) : (
                 <Ionicons name="paw" size={20} color="#718096" />
               )}

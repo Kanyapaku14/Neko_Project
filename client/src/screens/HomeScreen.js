@@ -1,18 +1,6 @@
 import React, { useState, useEffect } from "react";
 import BottomNav from "../components/BottomNav";
-import {
-    View,
-    Text,
-    TouchableOpacity,
-    ScrollView,
-    SafeAreaView,
-    Image,
-    ImageBackground,
-    DeviceEventEmitter,
-    Dimensions,
-    Linking
-
-} from "react-native";
+import { View, Text, TouchableOpacity, ScrollView, Image, ImageBackground, DeviceEventEmitter, Dimensions, Linking } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from "../screens/config/supabaseClient";
@@ -23,6 +11,7 @@ import CatHealthMeter from "../components/CatHealthMeter";
 import styles from "../styles/homeStyles";
 import useCameraData from "../hooks/useCameraData";
 import { analyzeHealthLog, getHealthStatus } from "../utils/healthLogic";
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
 
@@ -148,7 +137,7 @@ export default function HomeScreen({ onAssess, onLogDaily, onSetting, onNavigate
                 if (key) {
                     const st = getHealthStatus(averageScore);
                     await AsyncStorage.setItem(key, JSON.stringify({
-                        score: nextScore,
+                        score: averageScore,
                         color: st.color,
                         label: st.label,
                         text: st.text,

@@ -1,4 +1,4 @@
-﻿// ==============================================
+// ==============================================
 // 1. ส่วนการนำเข้า Libraries และ Components
 // ==============================================
 import React, { useState, useRef, useEffect } from 'react';
@@ -25,7 +25,7 @@ const CAMERA_BRANDS = [
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 // 🚨 กำหนด URL ของ Camera Server (Port 5000)
-const VIDEO_STREAM_URL = 'http://192.168.1.100:5000/api/video_feed_raw?fps=15&quality=62&width=960';
+const VIDEO_STREAM_URL = 'http://192.168.1.108:5000/api/video_feed_raw?fps=15&quality=62&width=960';
 const VIDEO_SERVER_BASE = VIDEO_STREAM_URL.split('/api')[0];
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -215,6 +215,19 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
                     if (error) throw error;
                     setMyCats(cats || []);
 
+                    let dbSelected = [];
+                    if (activeDbCam?.id) {
+                        const { data: camCats } = await supabase
+                            .from('camera_cats')
+                            .select('cat_id, is_primary, assigned_at')
+                            .eq('camera_id', activeDbCam.id)
+                            .order('is_primary', { ascending: false })
+                            .order('assigned_at', { ascending: true });
+                        if (Array.isArray(camCats) && camCats.length > 0) {
+                            dbSelected = camCats.map((r) => r.cat_id);
+                        }
+                    }
+
                     if (cats && cats.length === 1) {
                         const onlyCat = [cats[0].id];
                         setMonitoringMode('single');
@@ -223,8 +236,8 @@ export default function SetcameraScreen({ onNavigate, session, params }) {
                         await AsyncStorage.setItem('camera_monitoringMode', 'single');
                         await AsyncStorage.setItem(scopedCatsKey, JSON.stringify(onlyCat));
                         await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(onlyCat));
-                    } else if (savedCatsJson) {
-                        const parsed = JSON.parse(savedCatsJson);
+                    } else if (dbSelected.length > 0 || savedCatsJson) {
+                        const parsed = dbSelected.length > 0 ? dbSelected : JSON.parse(savedCatsJson);
                         const valid = Array.isArray(parsed) ? parsed.filter((id) => cats.some((c) => c.id === id)) : [];
                         const fallback = valid.length > 0 ? valid : cats.map(c => c.id);
                         setSelectedCats(fallback);

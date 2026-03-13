@@ -43,6 +43,7 @@ import { GlobalAlertQueueProvider } from './src/services/GlobalAlertQueue';
 import AlertRepository from './src/services/AlertRepository';
 import NotificationService from './src/services/NotificationService';
 import AlertScreen from './src/screens/AlertScreen';
+import CameraAlertScreen from './src/screens/CameraAlertScreen';
 import EventDetailScreen from './src/screens/EventDetailScreen';
 
 import { useFonts } from 'expo-font';
@@ -510,8 +511,12 @@ export default function App() {
       if (currentScreenName === 'Alert') {
         return <AlertScreen onBack={() => setAuthScreen(screenParams?.returnTo || 'Camera')} onNavigate={(screen, params) => navigateAuth(screen, params)} />;
       }
+      if (currentScreenName === 'CameraAlert') {
+        return <CameraAlertScreen onBack={() => setAuthScreen('Camera')} onNavigate={(screen, params) => navigateAuth(screen, params)} />;
+      }
       if (currentScreenName === 'EventDetail') {
-        return <EventDetailScreen onBack={() => navigateAuth('Alert', { returnTo: screenParams?.returnTo || 'Camera' })} alertData={screenParams?.alertData} />;
+        const returnScreen = screenParams?.returnToPath || 'Alert';
+        return <EventDetailScreen onBack={() => navigateAuth(returnScreen, { returnTo: screenParams?.returnTo || 'Camera' })} alertData={screenParams?.alertData} />;
       }
 
       if (currentScreenName === 'Tutorail') {

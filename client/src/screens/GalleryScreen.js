@@ -57,6 +57,63 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
     const [showStatsModal, setShowStatsModal] = useState(false);
     const [selectedCatId, setSelectedCatId] = useState(null);
     const [selectedCatName, setSelectedCatName] = useState(null);
+    const [allCats, setAllCats] = useState([]);      // for cat switcher
+    const [allowedCatIds, setAllowedCatIds] = useState([]);
+    const [monitoringMode, setMonitoringMode] = useState('multi');
+    const [showCatPicker, setShowCatPicker] = useState(false);
+
+    const loadCameraSettingsFromDb = async () => {
+        if (!session?.user?.id) return null;
+        try {
+            const storedCameraId =
+                (await AsyncStorage.getItem(`camera_id:${session.user.id}`)) ||
+                (await AsyncStorage.getItem('camera_id'));
+            let cameraId = storedCameraId;
+            if (!cameraId) {
+                const { data: cams } = await supabase
+                    .from('cameras')
+                    .select('id, is_primary, created_at')
+                    .eq('owner_id', session.user.id)
+                    .order('is_primary', { ascending: false })
+                    .order('created_at', { ascending: true })
+                    .limit(1);
+                cameraId = cams?.[0]?.id || null;
+            }
+            if (!cameraId) return null;
+
+            const { data: camRow } = await supabase
+                .from('cameras')
+                .select('mode, ai_mode')
+                .eq('id', cameraId)
+                .maybeSingle();
+            const rawMode = String(camRow?.ai_mode || camRow?.mode || '').toLowerCase();
+            const mode = rawMode ? (rawMode.includes('single') ? 'single' : 'multi') : null;
+
+            const { data: camCats } = await supabase
+                .from('camera_cats')
+                .select('cat_id, is_primary, assigned_at')
+                .eq('camera_id', cameraId)
+                .order('is_primary', { ascending: false })
+                .order('assigned_at', { ascending: true });
+            const selectedCats = Array.isArray(camCats) && camCats.length > 0
+                ? camCats.map((r) => String(r.cat_id))
+                : [];
+
+            if (mode) {
+                await AsyncStorage.setItem(`camera_monitoringMode:${session.user.id}`, mode);
+                await AsyncStorage.setItem('camera_monitoringMode', mode);
+            }
+            if (selectedCats.length > 0) {
+                await AsyncStorage.setItem(`camera_selectedCats:${session.user.id}`, JSON.stringify(selectedCats));
+                await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(selectedCats));
+            }
+            await AsyncStorage.setItem(`camera_id:${session.user.id}`, cameraId);
+            await AsyncStorage.setItem('camera_id', cameraId);
+            return { mode: mode || 'multi', selectedCats };
+        } catch (_) {
+            return null;
+        }
+    };
 
     useEffect(() => {
         setSavedSnapshots([]);
@@ -79,18 +136,33 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
             try {
                 const scopedSelectedCatIdKey = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
                 const scopedSelectedCatsKey = session?.user?.id ? `camera_selectedCats:${session.user.id}` : 'camera_selectedCats';
+                const scopedModeKey = session?.user?.id ? `camera_monitoringMode:${session.user.id}` : 'camera_monitoringMode';
+                const dbSettings = await loadCameraSettingsFromDb();
                 const scopedLastCatKey = session?.user?.id ? `last_selected_cat_id:${session.user.id}` : 'last_selected_cat_id';
                 const selectedCatIdFromHeader =
                     (await AsyncStorage.getItem(scopedSelectedCatIdKey)) ||
                     (await AsyncStorage.getItem('selectedCatId'));
-                const raw =
-                    (await AsyncStorage.getItem(scopedSelectedCatsKey)) ||
-                    (await AsyncStorage.getItem('camera_selectedCats'));
+                const raw = dbSettings?.selectedCats?.length
+                    ? JSON.stringify(dbSettings.selectedCats)
+                    : ((await AsyncStorage.getItem(scopedSelectedCatsKey)) || (await AsyncStorage.getItem('camera_selectedCats')));
+                const modeRaw = dbSettings?.mode
+                    ? dbSettings.mode
+                    : ((await AsyncStorage.getItem(scopedModeKey)) || (await AsyncStorage.getItem('camera_monitoringMode')));
                 const lastId =
                     (await AsyncStorage.getItem(scopedLastCatKey)) ||
                     (await AsyncStorage.getItem('last_selected_cat_id'));
                 const ids = raw ? JSON.parse(raw) : [];
-                const catId = selectedCatIdFromHeader || ids[0] || lastId || null;
+                const cleanedIds = Array.isArray(ids) ? ids.filter(Boolean).map((v) => String(v)) : [];
+                const mode = String(modeRaw || 'multi').toLowerCase();
+                setMonitoringMode(mode);
+                setAllowedCatIds(cleanedIds);
+
+                let catId = selectedCatIdFromHeader || cleanedIds[0] || lastId || null;
+                if (mode === 'single' && cleanedIds.length > 0) {
+                    catId = cleanedIds[0];
+                } else if (cleanedIds.length > 0 && catId && !cleanedIds.includes(String(catId))) {
+                    catId = cleanedIds[0];
+                }
                 setSelectedCatId(catId);
                 if (catId && session?.user?.id) {
                     const { data: catRow } = await supabase
@@ -100,6 +172,46 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
             } catch (e) { /* ignore */ }
         };
         loadSelectedCat();
+
+        // Fetch all cats for switcher
+        const fetchAllCats = async () => {
+            if (!session?.user?.id) return;
+            try {
+                const scopedSelectedCatsKey = session?.user?.id ? `camera_selectedCats:${session.user.id}` : 'camera_selectedCats';
+                const scopedModeKey = session?.user?.id ? `camera_monitoringMode:${session.user.id}` : 'camera_monitoringMode';
+                const dbSettings = await loadCameraSettingsFromDb();
+                const raw = dbSettings?.selectedCats?.length
+                    ? JSON.stringify(dbSettings.selectedCats)
+                    : ((await AsyncStorage.getItem(scopedSelectedCatsKey)) || (await AsyncStorage.getItem('camera_selectedCats')));
+                const modeRaw = dbSettings?.mode
+                    ? dbSettings.mode
+                    : ((await AsyncStorage.getItem(scopedModeKey)) || (await AsyncStorage.getItem('camera_monitoringMode')));
+                const ids = raw ? JSON.parse(raw) : [];
+                const cleanedIds = Array.isArray(ids) ? ids.filter(Boolean).map((v) => String(v)) : [];
+                const mode = String(modeRaw || 'multi').toLowerCase();
+                setMonitoringMode(mode);
+                setAllowedCatIds(cleanedIds);
+
+                const { data } = await supabase
+                    .from('cats')
+                    .select('id, name, image_url')
+                    .eq('owner_id', session.user.id);
+                if (data) {
+                    let list = data;
+                    if (cleanedIds.length > 0) {
+                        const indexById = new Map(cleanedIds.map((id, idx) => [String(id), idx]));
+                        list = list
+                            .filter((c) => indexById.has(String(c.id)))
+                            .sort((a, b) => (indexById.get(String(a.id)) ?? 0) - (indexById.get(String(b.id)) ?? 0));
+                    }
+                    if (mode === 'single' && list.length > 1) {
+                        list = [list[0]];
+                    }
+                    setAllCats(list);
+                }
+            } catch (_) { }
+        };
+        fetchAllCats();
 
         const handler = () => {
             loadImages();
@@ -561,13 +673,14 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                             <View style={styles.headerRight}>
                                 <TouchableOpacity
                                     style={styles.headerPill}
-                                    onPress={() => setShowStatsModal(true)}
+                                    onPress={() => setShowCatPicker(true)}
                                     activeOpacity={0.7}
                                 >
                                     <MaterialCommunityIcons name="cat" size={14} color="#0C5A58" />
                                     <Text style={styles.headerPillText} numberOfLines={1}>
-                                        {selectedCatName ? `${selectedCatName} · ${dailyStats.total}` : `${dailyStats.total}`}
+                                        {selectedCatName ? `${selectedCatName} · ${dailyStats.total}` : `All cats · ${dailyStats.total}`}
                                     </Text>
+                                    <Ionicons name="chevron-down" size={12} color="#0C5A58" />
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     style={styles.headerNotifyButton}
@@ -577,7 +690,7 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                                     <Ionicons name="notifications-outline" size={18} color="#0C5A58" />
                                 </TouchableOpacity>
                             </View>
-                        } 
+                        }
                     />
 
                     <View style={styles.zoneSwitchWrap}>
@@ -783,6 +896,58 @@ export default function GalleryScreen({ onBack, session, onNavigate }) {
                             </View>
                         </View>
                     </Modal>
+
+                    {/* ── Cat Switcher Bottom-Sheet ─────────────────────── */}
+                    <Modal visible={showCatPicker} transparent animationType="slide" onRequestClose={() => setShowCatPicker(false)}>
+                        <TouchableOpacity
+                            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}
+                            activeOpacity={1}
+                            onPress={() => setShowCatPicker(false)}
+                        >
+                            <View style={styles.catPickerSheet}>
+                                <View style={styles.catPickerHandle} />
+                                <Text style={styles.catPickerTitle}>Switch Cat</Text>
+                                {/* All cats option */}
+                                {monitoringMode !== 'single' && (
+                                    <TouchableOpacity
+                                        style={[styles.catPickerRow, !selectedCatId && styles.catPickerRowActive]}
+                                        onPress={() => {
+                                            setSelectedCatId(null);
+                                            setSelectedCatName(null);
+                                            setShowCatPicker(false);
+                                        }}
+                                    >
+                                        <MaterialCommunityIcons name="paw" size={20} color={!selectedCatId ? '#0C5A58' : '#546E7A'} />
+                                        <Text style={[styles.catPickerRowText, !selectedCatId && styles.catPickerRowTextActive]}>All cats</Text>
+                                        {!selectedCatId && <Ionicons name="checkmark" size={18} color="#0C5A58" />}
+                                    </TouchableOpacity>
+                                )}
+                                {allCats.map((cat) => (
+                                    <TouchableOpacity
+                                        key={cat.id}
+                                        style={[styles.catPickerRow, selectedCatId === cat.id && styles.catPickerRowActive]}
+                                        onPress={async () => {
+                                            const nextId = String(cat.id);
+                                            setSelectedCatId(nextId);
+                                            setSelectedCatName(cat.name);
+                                            setShowCatPicker(false);
+                                            try {
+                                                const key = session?.user?.id ? `selectedCatId:${session.user.id}` : 'selectedCatId';
+                                                await AsyncStorage.multiSet([
+                                                    [key, nextId],
+                                                    ['selectedCatId', nextId],
+                                                ]);
+                                            } catch (_) { }
+                                        }}
+                                    >
+                                        <MaterialCommunityIcons name="cat" size={20} color={selectedCatId === cat.id ? '#0C5A58' : '#546E7A'} />
+                                        <Text style={[styles.catPickerRowText, selectedCatId === cat.id && styles.catPickerRowTextActive]}>{cat.name}</Text>
+                                        {selectedCatId === cat.id && <Ionicons name="checkmark" size={18} color="#0C5A58" />}
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </TouchableOpacity>
+                    </Modal>
                 </SafeAreaView>
             </LinearGradient>
         </View>
@@ -855,6 +1020,31 @@ const styles = StyleSheet.create({
         color: '#0C5A58',
         fontFamily: 'Inter-Bold',
     },
+    // Cat switcher bottom-sheet
+    catPickerSheet: {
+        position: 'absolute',
+        bottom: 0, left: 0, right: 0,
+        backgroundColor: '#FFF',
+        borderTopLeftRadius: 20, borderTopRightRadius: 20,
+        paddingTop: 12, paddingHorizontal: 16, paddingBottom: 32,
+        shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.12, shadowRadius: 16, elevation: 12,
+    },
+    catPickerHandle: {
+        alignSelf: 'center', width: 36, height: 4,
+        borderRadius: 2, backgroundColor: '#D1D5DB', marginBottom: 12,
+    },
+    catPickerTitle: {
+        fontSize: 16, fontWeight: '700', color: '#1E293B', marginBottom: 10,
+    },
+    catPickerRow: {
+        flexDirection: 'row', alignItems: 'center', gap: 12,
+        paddingVertical: 12, paddingHorizontal: 10,
+        borderRadius: 12, marginBottom: 4,
+    },
+    catPickerRowActive: { backgroundColor: '#E0F2F1' },
+    catPickerRowText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#374151' },
+    catPickerRowTextActive: { color: '#0C5A58', fontWeight: '700' },
     zoneSwitchWrap: {
         flexDirection: 'row',
         paddingHorizontal: 14,

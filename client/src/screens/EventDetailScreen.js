@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AlertEngine from '../services/AlertEngine';
 import CameraMetaBlock from '../components/alert/CameraMetaBlock';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
+import { CAMERA_API_BASE } from '../config/cameraApi';
 
 export default function EventDetailScreen({ onBack, route, alertData }) {
     // Navigate via route.params or direct prop
@@ -70,7 +71,7 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
             return { icon: 'help-rhombus-outline', color: '#E65100', bg: '#FFF8E1', text: 'Pending Identity' };
         }
         if (type === 'pending_identity' && alert.resolvedBy === 'skipped') {
-            return { icon: 'cat-off', color: '#B42318', bg: '#FFE4E6', text: 'Identity Skipped' };
+            return { icon: 'cat', color: '#B42318', bg: '#FFE4E6', text: 'Identity Skipped' };
         }
 
         switch (type) {
@@ -96,8 +97,12 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
     const isIdentityAlert = alertView.type === 'pending_identity';
     const isPending = alertView.pendingIdentityConfirm === true;
     const isRejectedIdentity = isIdentityAlert && !isPending && alertView.resolvedBy === 'skipped';
-    const resolvedCatLabel = alertView.resolvedCatName || (alertView.resolvedCatId ? `ID: ${alertView.resolvedCatId}` : null);
+    const isIdentified = isIdentityAlert && !isPending && alertView.resolvedBy === 'user';
+    const resolvedCatLabel = alertView.resolvedCatName || (alertView.resolvedCatId ? `${alertView.resolvedCatId}` : null);
     const latestResolutionText = alertView.resolutionText || null;
+    // snapshot source — prefer cropSnapshot (from identity review) then snapshotUrl
+    const snapshotUri = alertView.cropSnapshot || alertView.snapshotUrl
+        || (alertView.cameraId ? `${CAMERA_API_BASE}/api/latest_frame.jpg?camera_id=${encodeURIComponent(alertView.cameraId)}&t=${Date.now()}` : null);
 
     // Nicer timestamp format
     const formatTimeNice = (isoString) => {
@@ -131,6 +136,8 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
             overshootClamping: true,
         }).start();
     };
+
+
 
     return (
         <View style={styles.screenBg}>
@@ -205,30 +212,37 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
                             signal={alertView.signal || alertView.metadata?.signal}
                         />
 
-                        {/* Snapshot - inline, only renders if snapshotUrl exists */}
-                        {alertView.snapshotUrl && (
+                        {/* Snapshot — cropSnapshot (identity review) or snapshotUrl */}
+                        {snapshotUri && (
                             <View style={styles.card}>
                                 <Text style={styles.sectionTitle}>Snapshot</Text>
-                                <Image source={{ uri: alertView.snapshotUrl }} style={styles.snapshotImage} resizeMode="cover" />
+                                <Image source={{ uri: snapshotUri }} style={styles.snapshotImage} resizeMode="cover" />
                             </View>
                         )}
 
                         {/* Identify Cat Section — only for pending_identity alerts */}
                         {isIdentityAlert && (
-                            <View style={styles.card}>
+                            <View style={[styles.card, isIdentified && { borderColor: '#A5D6A7', borderWidth: 1.5 }, alertView.isAbnormal && { borderColor: '#FCA5A5', borderWidth: 1.5 }]}>
                                 <View style={styles.identifyHeader}>
-                                    <MaterialCommunityIcons name="help-rhombus-outline" size={20} color="#E65100" style={{ marginRight: 8 }} />
-                                    <Text style={[styles.sectionTitle, { color: '#E65100' }]}>Identify Cat</Text>
+                                    <MaterialCommunityIcons
+                                        name={isIdentified ? 'paw' : alertView.isAbnormal ? 'alert-circle-outline' : 'help-rhombus-outline'}
+                                        size={20}
+                                        color={isIdentified ? '#00695C' : alertView.isAbnormal ? '#B42318' : '#E65100'}
+                                        style={{ marginRight: 8 }}
+                                    />
+                                    <Text style={[styles.sectionTitle, { color: isIdentified ? '#00695C' : alertView.isAbnormal ? '#B42318' : '#E65100' }]}>
+                                        {isIdentified ? 'Cat Identified' : alertView.isAbnormal ? 'Abnormal Behavior' : 'Identify Cat'}
+                                    </Text>
                                 </View>
-                                {isRejectedIdentity ? (
+                                {isIdentified && resolvedCatLabel ? (
+                                    <View style={[styles.selectedCatChip, { backgroundColor: '#E0F2F1', borderColor: '#A5D6A7' }]}>
+                                        <MaterialCommunityIcons name="paw" size={16} color="#00695C" />
+                                        <Text style={[styles.selectedCatText, { color: '#00695C' }]}>🐱 {resolvedCatLabel}</Text>
+                                    </View>
+                                ) : isRejectedIdentity ? (
                                     <View style={styles.selectedCatChip}>
                                         <MaterialCommunityIcons name="close-circle" size={16} color="#B42318" />
                                         <Text style={[styles.selectedCatText, { color: '#B42318' }]}>Marked as not your cat.</Text>
-                                    </View>
-                                ) : resolvedCatLabel && !isPending ? (
-                                    <View style={styles.selectedCatChip}>
-                                        <MaterialCommunityIcons name="paw" size={16} color="#1A56C5" />
-                                        <Text style={styles.selectedCatText}>Selected cat: {resolvedCatLabel}</Text>
                                     </View>
                                 ) : (
                                     <Text style={styles.descText}>
@@ -236,33 +250,28 @@ export default function EventDetailScreen({ onBack, route, alertData }) {
                                     </Text>
                                 )}
                                 {!isPending && !!latestResolutionText && (
-                                    <Text style={[styles.descText, { marginTop: 8 }]}>{latestResolutionText}</Text>
+                                    <Text style={[styles.descText, { marginTop: 8, color: '#546E7A' }]}>{latestResolutionText}</Text>
                                 )}
-                                <TouchableOpacity
-                                    style={styles.identifyButton}
-                                    onPress={() => pushAlert(alertView)}
-                                    onPressIn={() => animatePressIn(identifyBtnAnim)}
-                                    onPressOut={() => animatePressOut(identifyBtnAnim)}
-                                    activeOpacity={0.8}
-                                >
-                                    <Animated.View
-                                        style={{
-                                            flexDirection: 'row',
-                                            alignItems: 'center',
-                                            transform: [
-                                                {
-                                                    scale: identifyBtnAnim.interpolate({
-                                                        inputRange: [0, 1],
-                                                        outputRange: [1, 0.96],
-                                                    }),
-                                                },
-                                            ],
-                                        }}
+                                {isPending && (
+                                    <TouchableOpacity
+                                        style={[styles.identifyButton, isIdentified && { backgroundColor: '#00897B' }]}
+                                        onPress={() => pushAlert(alertView)}
+                                        onPressIn={() => animatePressIn(identifyBtnAnim)}
+                                        onPressOut={() => animatePressOut(identifyBtnAnim)}
+                                        activeOpacity={0.8}
                                     >
-                                        <MaterialCommunityIcons name="paw" size={16} color="#FFF" style={{ marginRight: 6 }} />
-                                        <Text style={styles.identifyButtonText}>{(resolvedCatLabel || isRejectedIdentity) ? 'Edit selected cat' : 'Identify which cat'}</Text>
-                                    </Animated.View>
-                                </TouchableOpacity>
+                                        <Animated.View
+                                            style={{
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                transform: [{ scale: identifyBtnAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.96] }) }],
+                                            }}
+                                        >
+                                            <MaterialCommunityIcons name={isIdentified ? 'pencil' : 'paw'} size={16} color="#FFF" style={{ marginRight: 6 }} />
+                                            <Text style={styles.identifyButtonText}>{isIdentified ? 'Edit selection' : isRejectedIdentity ? 'Change response' : 'Identify which cat'}</Text>
+                                        </Animated.View>
+                                    </TouchableOpacity>
+                                )}
                             </View>
                         )}
 

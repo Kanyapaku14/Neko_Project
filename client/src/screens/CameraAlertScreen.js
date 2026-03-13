@@ -624,7 +624,7 @@ export default function AlertScreen({ onBack, onNavigate }) {
                 : AlertEngine.getHistory();
             return (list || []).filter(a => {
                 const isCameraAlert = a.type === 'pending_identity' || a.type === 'behavior_abnormal' || a.isAbnormal;
-                return !isCameraAlert;
+                return isCameraAlert; // ONLY camera alerts here
             });
         };
 

@@ -58,8 +58,8 @@ export default function DropdownProfile({ visible, onClose, cats, activeCat, onS
                                 onPress={() => onSelectCat(item)}
                             >
                                 <View style={styles.catItemAvatar}>
-                                    {item.image_url ? (
-                                        <Image source={{ uri: item.image_url }} style={{ width: '100%', height: '100%' }} />
+                                    {item.image_url || item.photo_url ? (
+                                        <Image source={{ uri: item.image_url || item.photo_url }} style={{ width: '100%', height: '100%' }} />
                                     ) : (
                                         <Ionicons name="paw" size={20} color="#718096" />
                                     )}

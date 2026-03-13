@@ -14,10 +14,12 @@ try:
     from .models import CatTracker
     from .behavior_system import BehaviorSystem
     from .cat_session import CatSessionManager
+    from .identity_rules import IdentityRuleEngine
 except ImportError:
     from models import CatTracker
     from behavior_system import BehaviorSystem
     from cat_session import CatSessionManager
+    from identity_rules import IdentityRuleEngine
 
 try:
     from supabase import create_client
@@ -34,8 +36,8 @@ NORMAL_SNAPSHOT_COOLDOWN_SEC = 15.0
 ABNORMAL_SNAPSHOT_COOLDOWN_SEC = 8.0
 OVER_CAPACITY_ALERT_COOLDOWN_SEC = 180.0
 OVER_CAPACITY_MIN_PERSIST_SEC = 8.0
-PROCESS_EVERY_N_FRAMES = 2
-PENDING_IDENTITY_EXPIRE_MIN = 30
+PROCESS_EVERY_N_FRAMES = 10
+PENDING_IDENTITY_EXPIRE_MIN = 48 * 60
 PENDING_IDENTITY_SWEEP_SEC = 120.0
 HEALTH_WRITE_INTERVAL_SEC = 2.0
 
@@ -55,7 +57,7 @@ BEHAVIOR_MIN_STREAK_FRAMES = {
     "eat": 10,
     "litter": 12,
     "sleep": 16,
-    "activity": 20,
+    "activity": 12,   # Fewer Attention samples → shorter streak needed
     "grooming": 6,
     "vomiting": 1,
     "abnormal": 5,
@@ -64,7 +66,7 @@ BEHAVIOR_MIN_CONFIDENCE = {
     "eat": 0.50,
     "litter": 0.55,
     "sleep": 0.45,
-    "activity": 0.40,
+    "activity": 0.32,   # Attention class has fewer training samples → lower threshold
     "grooming": 0.45,
     "vomiting": 0.45,
     "abnormal": 0.55,
@@ -99,6 +101,19 @@ ABNORMAL_ALERT_COOLDOWN_SEC = {
     "warning": 300.0,
     "critical": 600.0,
 }
+
+# Set of db_behavior labels treated as abnormal for alerting purposes.
+# vomiting and head_pressing must fire even in single-cat mode.
+ABNORMAL_BEHAVIOR_LABELS = {"abnormal", "vomiting", "head_pressing"}
+
+# Litter over-frequency threshold
+LITTER_DAILY_ALERT_THRESHOLD = 8    # visits per day that triggers alert
+LITTER_DAILY_ALERT_COOLDOWN_SEC = 3600.0  # at most 1 alert per hour
+
+# Identity rules — zone session end detection
+# A zone session is considered ended when no cat is detected in that zone
+# for this many seconds.
+ZONE_SESSION_IDLE_SEC = 30.0
 
 
 def expand_bbox(bbox, frame_shape, ratio=CROP_EXPAND_RATIO):
@@ -650,7 +665,8 @@ def insert_alert_if_needed(
         "details": "Please review camera snapshot and cat condition.",
         "timestamp": event_time_iso,
         "source": "smart_cat_health_server",
-        "metadata": {"behavior": behavior, "confidence": confidence},
+        # isAbnormal flag lets the frontend push to the red abnormal-alerts channel
+        "metadata": {"behavior": behavior, "confidence": confidence, "isAbnormal": True},
     }
     supabase.table("alerts").insert(payload).execute()
 
@@ -867,6 +883,13 @@ def run(
         max_cats=None,
     )
 
+    # Identity Rule Engine — handles Rules 7-21
+    identity_engine = IdentityRuleEngine(known_cat_ids=assigned_cat_ids if db_write else [])
+    # zone_last_active: zone_type -> (session_id, last_seen_ts)
+    zone_last_active: dict = {}
+    # current zone session ids: zone_type -> session_id
+    zone_session_ids: dict = {}
+
     source = code_source if code_source is not None else (db_source if db_source is not None else source)
     print(
         "[smart_cat_health] source resolved:",
@@ -967,16 +990,36 @@ def run(
             valid_tracks_in_frame = 0
             frame_cat_counts = defaultdict(int)  # mapped cat_uuid activity in this frame
             frame_cat_last_bbox = {}  # cat_uuid -> last bbox in this frame
+
+            # ── Rule 21: Merge duplicate detections before processing ─────────
+            raw_tracks = []
             for obj in tracked:
                 bx1, by1, bx2, by2 = obj.bbox
                 if scale != 1.0:
                     bx1, by1, bx2, by2 = bx1 / scale, by1 / scale, bx2 / scale, by2 / scale
-                bbox = [bx1, by1, bx2, by2]
-                if (bx2 - bx1) * (by2 - by1) < MIN_BBOX_AREA:
-                    continue
-                valid_tracks_in_frame += 1
+                raw_tracks.append((obj.track_id, [bx1, by1, bx2, by2]))
+            merged_tracks = identity_engine.merge_duplicates(raw_tracks)
+            # Build a lookup: track_id -> merged bbox
+            merged_bbox_map = {tid: bbox for tid, bbox in merged_tracks}
 
-                cat_id = session.get_cat_id(obj.track_id, bbox=bbox)
+            # Active zone tracking for session-end detection
+            frame_active_zones: set = set()
+
+            for obj in tracked:
+                track_id = obj.track_id
+                if track_id not in merged_bbox_map:
+                    continue  # this track was merged into another
+                bbox = merged_bbox_map[track_id]
+                bx1, by1, bx2, by2 = bbox
+
+                # ── Rules 17, 18, 19: Pre-filter ─────────────────────────────
+                if not identity_engine.prefilter_passes(track_id, bbox, obj.conf if hasattr(obj, 'conf') else MIN_DETECTION_CONF):
+                    continue
+
+                valid_tracks_in_frame += 1
+                identity_engine.update_movement(track_id, bbox)
+
+                cat_id = session.get_cat_id(track_id, bbox=bbox)
                 session.update_seen(cat_id, bbox=bbox)
                 cat = session.get_cat_data(cat_id)
                 if not cat:
@@ -988,8 +1031,10 @@ def run(
                     continue
 
                 if frame_count % CLASSIFY_EVERY_N == 0:
-                    behavior, confidence = behavior_sys.classify_behavior(crop, track_id=obj.track_id)
+                    behavior, confidence = behavior_sys.classify_behavior(crop, track_id=track_id)
                     session.update_behavior(cat_id, behavior, confidence)
+                    # Rule 10: add classifier output to sliding vote
+                    identity_engine.add_sliding_vote(track_id, cat_id if "-" in str(cat_id) else None)
 
                 behavior = cat["current_behavior"]
                 confidence = cat["current_confidence"]
@@ -998,7 +1043,15 @@ def run(
                 if abnormal:
                     session.increment_abnormal(cat_id)
 
-                should_snap = is_known_cat_uuid and (abnormal or session.can_snapshot(cat_id, now))
+                # ── Zone session tracking for Rules 4/5 ──────────────────────
+                zone_type, zone_score = detect_zone_for_bbox(camera_zones, bbox, frame_orig.shape)
+                if zone_type:
+                    frame_active_zones.add(zone_type)
+                    if zone_type not in zone_session_ids:
+                        zone_session_ids[zone_type] = f"{zone_type}_{int(now * 1000)}"
+                    zone_last_active[zone_type] = (zone_session_ids[zone_type], now)
+
+                should_snap = (abnormal or session.can_snapshot(cat_id, now))
                 snap_path = None
                 if should_snap and session.can_snapshot(cat_id, now):
                     snap_bbox = expand_bbox(bbox, frame_orig.shape)
@@ -1018,28 +1071,47 @@ def run(
                         event_time = datetime.now(timezone.utc)
                         event_iso = event_time.isoformat()
                         now_event_ts = time.time()
-                        cat_uuid = cat_id if is_known_cat_uuid else None
+
+                        # ── Identity Resolution (Rules 7-21) ─────────────────
+                        cur_zone_type = zone_type  # already computed above
+                        cur_session_id = zone_session_ids.get(cur_zone_type, session.session_id)
+                        identity = identity_engine.resolve(
+                            track_id=track_id,
+                            bbox=bbox,
+                            confidence=confidence,
+                            behavior=behavior,
+                            zone_type=cur_zone_type,
+                            session_id=cur_session_id,
+                            detected_count=valid_tracks_in_frame,
+                            snapshot_path=snap_path,
+                            session_ended=False,
+                        )
+
+                        # Determine which cat_uuid to use:
+                        # - If identity resolved → use it
+                        # - If not resolved and cat_id is already a known UUID → use it
+                        # - Otherwise → use None (unknown)
+                        if identity.cat_id and "-" in str(identity.cat_id):
+                            cat_uuid = identity.cat_id
+                        elif is_known_cat_uuid:
+                            cat_uuid = cat_id
+                        else:
+                            cat_uuid = None
+
                         if cat_uuid:
                             frame_cat_counts[cat_uuid] += 1
                             frame_cat_last_bbox[cat_uuid] = bbox
+
                         db_behavior = map_behavior_to_db(behavior)
-                        zone_type, zone_score = detect_zone_for_bbox(camera_zones, bbox, frame_orig.shape)
                         db_behavior = apply_zone_behavior_prior(
                             db_behavior,
                             confidence,
-                            zone_type,
+                            cur_zone_type,
                             zone_score,
                             zones_configured=bool(camera_zones),
                         )
-                        cat_event_key = cat_uuid or str(cat_id)
-                        should_commit = should_commit_behavior_event(
-                            event_state=behavior_event_state,
-                            cat_key=cat_event_key,
-                            db_behavior=db_behavior,
-                            confidence=confidence,
-                            now_ts=now_event_ts,
-                            frame_idx=frame_count,
-                        )
+
+                        # Upload snapshot if present
                         if snap_path:
                             snap_path = upload_snapshot_to_storage(
                                 supabase=supabase,
@@ -1049,6 +1121,76 @@ def run(
                                 event_time=event_time,
                             )
                             health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
+
+                        # ── Identity review insert decision ───────────────────
+                        if identity.should_popup:
+                            # Suppress activity popups unless inside eat/litter zones.
+                            if db_behavior == "activity" and cur_zone_type not in ("eat", "litter", "food"):
+                                pass
+                            # Pre-filter: suppress popup for likely non-cat noise (non-abnormal, low confidence, no session snaps)
+                            elif (not abnormal) and (not identity.multi_snapshots) and float(confidence or 0.0) < 0.35:
+                                pass
+                            else:
+                                # Insert pending identity_review for user to resolve
+                                # Gather cat vote counts from current session tracker
+                                _session_key = (cur_zone_type, cur_session_id)
+                                _tracker = identity_engine._session_trackers.get(_session_key)
+                                _cat_counts = _tracker.get_cat_vote_counts() if _tracker else {}
+                                insert_identity_review(
+                                    supabase=supabase,
+                                    camera_id=camera_id,
+                                    pred_cat_uuid=cat_uuid,
+                                    behavior=behavior,
+                                    confidence=confidence,
+                                    snapshot_path=snap_path,
+                                    reviewed=False,
+                                    resolved_by=None,
+                                    resolved_cat_id=None,
+                                    session_id=cur_session_id,
+                                    metadata={
+                                        "rule": identity.resolved_by,
+                                        "is_foreign_cat_alert": identity.is_foreign_cat_alert,
+                                        "multi_snapshots": identity.multi_snapshots,
+                                        "cat_vote_counts": _cat_counts,
+                                        "requires_confirm": True,
+                                    },
+                                )
+                                health_state["pending_identity_count"] += 1
+                                health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
+                        elif identity.auto_resolved and snap_path:
+                            # Auto-confirmed — log as reviewed immediately
+                            insert_identity_review(
+                                supabase=supabase,
+                                camera_id=camera_id,
+                                pred_cat_uuid=cat_uuid,
+                                behavior=behavior,
+                                confidence=confidence,
+                                snapshot_path=snap_path,
+                                reviewed=True,
+                                resolved_by=identity.resolved_by,
+                                resolved_cat_id=cat_uuid,
+                                session_id=cur_session_id,
+                                metadata={
+                                    "rule": identity.resolved_by,
+                                    "confirmed_cat": True,
+                                    "source": "pipeline_auto_confirm",
+                                },
+                            )
+                            health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
+
+                        # ── Behavior event commit (Rule 20: movement gate) ────
+                        cat_event_key = cat_uuid or str(cat_id)
+                        # Rule 20: only commit behavior event if cat has moved
+                        # (exception: litter/abnormal events always commit)
+                        cat_moved = identity_engine.has_moved(track_id, bbox) or db_behavior in ("litter", "abnormal", "vomiting")
+                        should_commit = cat_moved and should_commit_behavior_event(
+                            event_state=behavior_event_state,
+                            cat_key=cat_event_key,
+                            db_behavior=db_behavior,
+                            confidence=confidence,
+                            now_ts=now_event_ts,
+                            frame_idx=frame_count,
+                        )
                         if should_commit and within_daily_cap(
                             daily_event_counts=daily_event_counts,
                             cat_key=cat_event_key,
@@ -1070,13 +1212,34 @@ def run(
                             health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
                         else:
                             committed = False
+
                         if cat_uuid and committed:
                             rollup = summary_rollup[cat_uuid]
                             if db_behavior == "eat":
                                 rollup["total_feeding"] += 1
                             if db_behavior == "litter":
                                 rollup["total_litter"] += 1
-                            if abnormal or db_behavior == "abnormal":
+                                # Litter over-frequency alert
+                                if rollup["total_litter"] >= LITTER_DAILY_ALERT_THRESHOLD:
+                                    _litter_key = f"litter_daily:{cat_event_key}"
+                                    _litter_state = abnormal_escalation_state.setdefault(
+                                        _litter_key, {"last_alert_at": 0.0}
+                                    )
+                                    if now_event_ts - _litter_state["last_alert_at"] >= LITTER_DAILY_ALERT_COOLDOWN_SEC:
+                                        insert_alert_if_needed(
+                                            supabase=supabase,
+                                            owner_id=owner_id,
+                                            camera_id=camera_id,
+                                            cat_uuid=cat_uuid,
+                                            behavior="litter",
+                                            confidence=confidence,
+                                            abnormal=True,
+                                            event_time_iso=event_iso,
+                                            severity="warning",
+                                            title=f"Frequent litter visits detected ({rollup['total_litter']} today)",
+                                        )
+                                        _litter_state["last_alert_at"] = now_event_ts
+                            if db_behavior in ABNORMAL_BEHAVIOR_LABELS:
                                 rollup["total_abnormal"] += 1
                             rollup[_slot_for_hour(event_time.hour)] += 1
                             rollup["_behavior_counts"][db_behavior] += 1
@@ -1088,14 +1251,23 @@ def run(
                                 f"{behavior} ({int(confidence * 100)}%)",
                                 event_iso,
                             )
-                            if (not is_single_mode) and db_behavior == "abnormal":
+                            # Abnormal alert path: vomiting + head_pressing + abnormal
+                            # Fires for ALL users (including single-cat)
+                            if db_behavior in ABNORMAL_BEHAVIOR_LABELS:
                                 level = decide_abnormal_alert_level(
                                     abnormal_state=abnormal_escalation_state,
                                     cat_key=cat_event_key,
                                     now_ts=now_event_ts,
                                 )
                                 if level:
-                                    title = "Critical abnormal pattern detected" if level == "critical" else "Abnormal behavior detected"
+                                    _behavior_titles = {
+                                        "vomiting": "Vomiting detected",
+                                        "head_pressing": "Head pressing detected - urgent",
+                                    }
+                                    title = _behavior_titles.get(
+                                        db_behavior,
+                                        "Critical abnormal pattern detected" if level == "critical" else "Abnormal behavior detected",
+                                    )
                                     insert_alert_if_needed(
                                         supabase=supabase,
                                         owner_id=owner_id,
@@ -1108,28 +1280,14 @@ def run(
                                         severity=level,
                                         title=title,
                                     )
-                            elif (not is_single_mode) and db_behavior != "abnormal":
-                                insert_alert_if_needed(
-                                    supabase, owner_id, camera_id, cat_uuid, behavior, confidence, abnormal, event_iso
-                                )
+                            else:
+                                # Non-abnormal: only insert informational alert if multi-cat mode
+                                if not is_single_mode:
+                                    insert_alert_if_needed(
+                                        supabase, owner_id, camera_id, cat_uuid, behavior, confidence, abnormal, event_iso
+                                    )
                             health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
-                        if snap_path:
-                            insert_identity_review(
-                                supabase=supabase,
-                                camera_id=camera_id,
-                                pred_cat_uuid=cat_uuid,
-                                behavior=behavior,
-                                confidence=confidence,
-                                snapshot_path=snap_path,
-                                reviewed=True,
-                                resolved_by="auto",
-                                resolved_cat_id=cat_uuid,
-                                metadata={
-                                    "confirmed_cat": True,
-                                    "source": "pipeline_auto_confirm",
-                                },
-                            )
-                            health_state["last_db_write_at"] = datetime.now(timezone.utc).isoformat()
+
                     except Exception as e:
                         health_state["last_error"] = str(e)
                         print(f"DB write error: {e}")
@@ -1232,10 +1390,45 @@ def run(
                     over_capacity_state["peak_observed"] = 0
                     over_capacity_state["activity_counts"].clear()
 
+            # ── Zone session-end detection (for Rules 4/5) ──────────────────
+            if db_write and camera_id:
+                for zt, (sid, last_ts) in list(zone_last_active.items()):
+                    if zt not in frame_active_zones and (now - last_ts) >= ZONE_SESSION_IDLE_SEC:
+                        # Session ended for this zone — finalize vote/popup
+                        try:
+                            ended_result = identity_engine.on_session_end(zt, sid)
+                            if ended_result.should_popup:
+                                event_iso = datetime.now(timezone.utc).isoformat()
+                                insert_identity_review(
+                                    supabase=supabase,
+                                    camera_id=camera_id,
+                                    pred_cat_uuid=ended_result.cat_id,
+                                    behavior=zt,
+                                    confidence=0.0,
+                                    snapshot_path=ended_result.multi_snapshots[0] if ended_result.multi_snapshots else None,
+                                    reviewed=False,
+                                    resolved_by=None,
+                                    resolved_cat_id=None,
+                                    session_id=sid,
+                                    metadata={
+                                        "rule": ended_result.resolved_by,
+                                        "multi_snapshots": ended_result.multi_snapshots,
+                                        "is_session_end_popup": True,
+                                        "requires_confirm": True,
+                                    },
+                                )
+                                health_state["pending_identity_count"] += 1
+                        except Exception as e:
+                            print(f"Zone session-end identity review failed ({zt}): {e}")
+                        # Clean up zone session
+                        del zone_last_active[zt]
+                        zone_session_ids.pop(zt, None)
+
             lost = session.get_lost_tracks(now)
             for tid in lost:
                 behavior_sys.cleanup_track(tid)
                 session.remove_track(tid)
+                identity_engine.on_track_lost(tid)  # Rule 9/10/11/19/20 cleanup
 
             if frame_count % 60 == 0:
                 session.cleanup_expired_pool(now)

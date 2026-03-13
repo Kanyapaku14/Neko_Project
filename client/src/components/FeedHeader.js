@@ -1,17 +1,7 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Platform,
-  StatusBar,
-  SafeAreaView,
-  Modal,
-  TouchableWithoutFeedback,
-  Image,
-} from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Platform, StatusBar, Modal, TouchableWithoutFeedback, Image } from 'react-native';
 import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function FeedHeader({
   title = "Community",

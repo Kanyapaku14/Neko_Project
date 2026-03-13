@@ -1,4 +1,4 @@
-const DEFAULT_CAMERA_API_BASE = 'http://192.168.1.100:5000';
+const DEFAULT_CAMERA_API_BASE = 'http://192.168.1.108:5000';
 
 const normalizeBase = (raw) => String(raw || '').trim().replace(/\/+$/, '');
 

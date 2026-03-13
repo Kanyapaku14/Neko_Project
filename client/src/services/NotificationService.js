@@ -10,6 +10,12 @@ const LAST_CATCHUP_ALERT_AT_KEY = 'smart_alert:last_catchup_alert_at';
 const DEFAULT_SCOPE = 'anonymous';
 const INACTIVITY_HOURS = 24;
 const REMOTE_ALERT_MAX_AGE_MIN = 20;
+const ABNORMAL_BEHAVIOR_SET = new Set(['vomiting', 'head_pressing', 'abnormal']);
+
+const normalizeBehaviorLabel = (value) =>
+  String(value || '').toLowerCase().replace(/\s+/g, '_').trim();
+
+const isAbnormalBehavior = (value) => ABNORMAL_BEHAVIOR_SET.has(normalizeBehaviorLabel(value));
 
 const severityTitle = {
   critical: 'Critical Alert',
@@ -32,8 +38,6 @@ class NotificationServiceClass {
   }
 
   _canUseNotificationsModule() {
-    // Expo Go (especially Android SDK53+) has push-related internal behavior
-    // that can throw redbox. Keep Smart Alerts stable by disabling module there.
     return !this._isExpoGo();
   }
 
@@ -112,6 +116,16 @@ class NotificationServiceClass {
           vibrationPattern: [0, 250, 150, 250],
           lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
         });
+        // Dedicated high-priority channel for abnormal behavior (Rule 7: vomiting, head-pressing etc.)
+        await Notifications.setNotificationChannelAsync('abnormal-alerts', {
+          name: 'Abnormal Behavior Alerts',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 400, 200, 400, 200, 400],
+          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          bypassDnd: true,
+          lightColor: '#FF0000',
+          enableLights: true,
+        });
       }
       this._attachAlertEngineListener();
       return true;
@@ -165,8 +179,16 @@ class NotificationServiceClass {
 
     const isAppActive = AppState.currentState === 'active';
     const fromRemote = alert?._fromRemote === true;
-    if (isAppActive && !fromRemote) {
-      // Keep in-app UX clean while actively using app.
+    // Abnormal = isAbnormal flag OR critical severity OR abnormal behavior labels
+    const isAbnormal = alert?.isAbnormal === true
+      || String(alert.severity || '').toLowerCase() === 'critical'
+      || String(alert.type || '').toLowerCase() === 'behavior_abnormal'
+      || isAbnormalBehavior(alert?.behaviorLabel)
+      || isAbnormalBehavior(alert?.behaviorDetail);
+
+    // Abnormal alerts always push — even when app is active (Rule 7: must always show)
+    // Normal alerts only push when app is in background or from remote sync
+    if (!isAbnormal && isAppActive && !fromRemote) {
       return;
     }
 
@@ -180,8 +202,12 @@ class NotificationServiceClass {
       }
     }
 
-    const title = severityTitle[String(alert.severity || 'info').toLowerCase()] || 'Notification';
+    const channelId = isAbnormal ? 'abnormal-alerts' : 'smart-alerts';
+    const title = isAbnormal
+      ? 'Abnormal behavior detected!'
+      : (severityTitle[String(alert.severity || 'info').toLowerCase()] || 'Notification');
     const body = String(alert.title || alert.desc || 'You have a new update.');
+    const interruptionLevel = isAbnormal ? 'timeSensitive' : 'active';
 
     try {
       await Notifications.scheduleNotificationAsync({
@@ -194,6 +220,9 @@ class NotificationServiceClass {
             alertId: String(alert.id),
           },
           sound: true,
+          priority: isAbnormal ? 'max' : 'default',
+          ...(Platform.OS === 'android' ? { channelId } : {}),
+          ...(Platform.OS === 'ios' ? { interruptionLevel } : {}),
         },
         trigger: null,
       });
@@ -226,7 +255,7 @@ class NotificationServiceClass {
       const id = await Notifications.scheduleNotificationAsync({
         content: {
           title: 'Health check reminder',
-          body: 'You have not opened Neko Care for a while. Open the app and log today\'s cat health data.',
+          body: "You have not opened Neko Care for a while. Open the app and log today's cat health data.",
           data: {
             type: 'inactivity_reminder',
             target: 'Home',
@@ -281,7 +310,7 @@ class NotificationServiceClass {
         type: 'engagement_followup',
         severity: 'info',
         title: 'Reminder to update daily cat health',
-        desc: 'You have not opened the app for a while. Please log today\'s data to keep insights accurate.',
+        desc: "You have not opened the app for a while. Please log today's data to keep insights accurate.",
         dedupeKey: `engagement_followup:${this.scopeKey}`,
         cooldownMs: 8 * 60 * 60 * 1000,
       });

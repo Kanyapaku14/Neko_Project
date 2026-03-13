@@ -68,11 +68,13 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
     try {
       const selectedCatsScopedKey = session?.user?.id ? `camera_selectedCats:${session.user.id}` : 'camera_selectedCats';
       const scopedModeKey = session?.user?.id ? `camera_monitoringMode:${session.user.id}` : 'camera_monitoringMode';
-      const [mode, savedCats, storedCameraId] = await Promise.all([
+      const [mode, savedCats, storedCameraId, suppressPendingRaw] = await Promise.all([
         AsyncStorage.getItem(scopedModeKey),
         AsyncStorage.getItem(selectedCatsScopedKey),
         AsyncStorage.getItem(CAMERA_ID_KEY),
+        AsyncStorage.getItem('alerts_suppress_pending'),
       ]);
+      const suppressPending = suppressPendingRaw === '1';
 
       const [legacyMode, legacySavedCats] = await Promise.all([
         AsyncStorage.getItem('camera_monitoringMode'),
@@ -81,10 +83,63 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
       const effectiveMode = mode || legacyMode;
       const effectiveSavedCats = savedCats || legacySavedCats;
 
+      let dbMode = null;
+      let dbSelectedCats = null;
+      let resolvedCameraId = storedCameraId;
+
+      if (session?.user) {
+        try {
+          if (!resolvedCameraId) {
+            const { data: cams } = await supabase
+              .from('cameras')
+              .select('id, is_primary, created_at')
+              .eq('owner_id', session.user.id)
+              .order('is_primary', { ascending: false })
+              .order('created_at', { ascending: true })
+              .limit(1);
+            resolvedCameraId = cams?.[0]?.id || null;
+          }
+          if (resolvedCameraId) {
+            const { data: camRow } = await supabase
+              .from('cameras')
+              .select('mode, ai_mode')
+              .eq('id', resolvedCameraId)
+              .maybeSingle();
+            const rawMode = String(camRow?.ai_mode || camRow?.mode || '').toLowerCase();
+            if (rawMode) dbMode = rawMode.includes('single') ? 'single' : 'multi';
+
+            const { data: camCats } = await supabase
+              .from('camera_cats')
+              .select('cat_id, is_primary, assigned_at')
+              .eq('camera_id', resolvedCameraId)
+              .order('is_primary', { ascending: false })
+              .order('assigned_at', { ascending: true });
+            if (Array.isArray(camCats) && camCats.length > 0) {
+              dbSelectedCats = camCats.map((r) => r.cat_id);
+            }
+          }
+        } catch (_) { }
+      }
+
+      const finalMode = dbMode || effectiveMode || 'multi';
+      const finalSelectedCats = Array.isArray(dbSelectedCats)
+        ? dbSelectedCats
+        : (effectiveSavedCats ? JSON.parse(effectiveSavedCats) : []);
+
       newData.settings = {
-        monitoringMode: effectiveMode || 'multi',
-        selectedCats: effectiveSavedCats ? JSON.parse(effectiveSavedCats) : []
+        monitoringMode: finalMode,
+        selectedCats: finalSelectedCats,
       };
+
+      if (session?.user && resolvedCameraId) {
+        try {
+          await AsyncStorage.setItem(scopedModeKey, finalMode);
+          await AsyncStorage.setItem('camera_monitoringMode', finalMode);
+          await AsyncStorage.setItem(selectedCatsScopedKey, JSON.stringify(finalSelectedCats));
+          await AsyncStorage.setItem('camera_selectedCats', JSON.stringify(finalSelectedCats));
+          await AsyncStorage.setItem(CAMERA_ID_KEY, resolvedCameraId);
+        } catch (_) { }
+      }
 
       if (session?.user) {
         const { data: catsData, error: catError } = await supabase
@@ -96,8 +151,11 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
           const catIds = catsData.map((c) => c.id);
           newData.cats = catIds.length;
           if (catIds.length === 1) {
-            newData.settings.monitoringMode = 'single';
-            newData.settings.selectedCats = [catIds[0]];
+            // Do not force single mode here; let the UI/Banner handle the prompt.
+            // But ensure at least the single cat is selected if nothing else is.
+            if (!newData.settings.selectedCats?.length) {
+              newData.settings.selectedCats = [catIds[0]];
+            }
           }
 
           const selectedIds = selectedCatId
@@ -199,7 +257,45 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
                     .limit(20);
                   reviewSnaps = Array.isArray(data) ? data : [];
                 }
-                if (alertCatIds.length > 0 && unknownCatEvents.length > 0) {
+                if (!suppressPending && alertCatIds.length > 0) {
+                  const RECENT_IDENTITY_WINDOW_MIN = 60;
+                  const recentWindowStart = Date.now() - (RECENT_IDENTITY_WINDOW_MIN * 60 * 1000);
+                  const eatLitterEvents = aiEventsAll.filter((e) => {
+                    const behavior = normalizeBehavior(e?.behavior_label);
+                    if (behavior !== 'eat' && behavior !== 'litter') return false;
+                    const cid = e?.cat_id;
+                    if (!cid || !alertCatIds.includes(cid)) return false;
+                    const ts = new Date(e?.occurred_at || 0).getTime();
+                    return Number.isFinite(ts) && ts >= recentWindowStart;
+                  });
+
+                  eatLitterEvents.forEach((e) => {
+                    const behavior = normalizeBehavior(e?.behavior_label);
+                    const eventId = e?.id;
+                    if (!eventId) return;
+                    const dedupeKey = `identity_event:${storedCameraId || 'unknown'}:${eventId}`;
+                    const pendingExists = AlertEngine.getPendingIdentities().some(
+                      (a) => String(a?.dedupeKey || '') === dedupeKey || String(a?.sessionId || '') === dedupeKey
+                    );
+                    if (pendingExists) return;
+                    const snap =
+                      reviewSnaps?.find((r) => r?.pred_cat_id && String(r.pred_cat_id) === String(e?.cat_id))
+                      || reviewSnaps?.[0]
+                      || null;
+                    AlertEngine.logPendingIdentity({
+                      behaviorLabel: behavior,
+                      confidence: e?.confidence ?? 0.6,
+                      cropSnapshot: snap?.snapshot_url || `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`,
+                      sessionId: dedupeKey,
+                      source: 'useCameraData_eat_litter',
+                      isAbnormal: false,
+                      dedupeKey,
+                      cooldownMs: 0,
+                      cameraId: storedCameraId || null,
+                    });
+                  });
+                }
+                if (!suppressPending && alertCatIds.length > 0 && unknownCatEvents.length > 0) {
                   const unknownIds = [...new Set(unknownCatEvents.map((e) => e.cat_id))];
                   // à¸”à¸¶à¸‡ snapshot à¸ˆà¸²à¸ ai_cat_identity_review
                   if (
@@ -257,7 +353,7 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
                 // Multi-cat zone/session confirm:
                 // If 2+ cats have eat/litter events in the same recent session window,
                 // raise one confirmation alert (with the top 2 cats by count).
-                if (alertCatIds.length >= 2) {
+                if (!suppressPending && alertCatIds.length >= 2) {
                   const SESSION_WINDOW_MIN = 10;
                   const MIN_SESSION_EVENTS = 3;
                   const windowStartMs = Date.now() - (SESSION_WINDOW_MIN * 60 * 1000);
@@ -280,12 +376,12 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
                     const ranked = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
                     if (ranked.length < 2) return;
 
-                    const topTwo = ranked.slice(0, 2).map(([cid, count]) => ({ cid, count }));
+                    const topThree = ranked.slice(0, 3).map(([cid, count]) => ({ cid, count }));
                     const latestTs = Math.max(...sessionEvents.map((e) => new Date(e.occurred_at || 0).getTime()));
                     const sessionBucket = Math.floor(latestTs / (SESSION_WINDOW_MIN * 60 * 1000));
                     const dedupeKey = `identity_zone_session:${storedCameraId}:${targetBehavior}:${sessionBucket}`;
 
-                    const multiSnapshots = topTwo.map(({ cid, count }) => {
+                    const multiSnapshots = topThree.map(({ cid, count }) => {
                       const evt = sessionEvents.find((e) => e?.cat_id === cid);
                       const snap = reviewSnaps?.find((r) => !r.pred_cat_id || r.pred_cat_id === cid);
                       return {
@@ -294,8 +390,12 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
                         confidence: evt?.confidence ?? 0.5,
                         snapshot_url: snap?.snapshot_url || null,
                         metadata: { session_count: count },
+                        count,
                       };
                     });
+
+                    const catCounts = {};
+                    ranked.forEach(([cid, count]) => { catCounts[cid] = count; });
 
                     AlertEngine.logPendingIdentity({
                       behaviorLabel: targetBehavior === 'eat' ? 'feeding_session' : 'litter_session',
@@ -307,8 +407,68 @@ export default function useCameraData(session, cameraStatus, selectedCatId = nul
                       isAbnormal: false,
                       dedupeKey,
                       cooldownMs: SESSION_WINDOW_MIN * 60 * 1000,
+                      catCounts,
+                      identityRule: 'session_count',
                     });
                   });
+                }
+
+                // Abnormal behaviors (e.g., vomiting) should prompt identity selection when detected.
+                if (!suppressPending) {
+                  const RECENT_ABNORMAL_WINDOW_MIN = 60;
+                  const nowMs = Date.now();
+                  const abnormalEvent = aiEventsAll.find((e) => {
+                    const raw = String(e?.behavior_label || '').toLowerCase();
+                    const detail = String(e?.behavior_detail || '').toLowerCase();
+                    const isAb = normalizeBehavior(raw) === 'abnormal'
+                      || ['vomiting', 'vomit', 'barf', 'head_pressing', 'head pressing', 'abnormal'].includes(raw)
+                      || ['vomiting', 'vomit', 'barf', 'head_pressing', 'head pressing'].includes(detail);
+                    if (!isAb) return false;
+                    const ts = new Date(e?.occurred_at || 0).getTime();
+                    return Number.isFinite(ts) && (nowMs - ts) <= (RECENT_ABNORMAL_WINDOW_MIN * 60 * 1000);
+                  });
+
+                  if (abnormalEvent) {
+                    const lastKey = session?.user?.id
+                      ? `last_abnormal_event_ts:${session.user.id}:${storedCameraId || 'unknown'}`
+                      : `last_abnormal_event_ts:${storedCameraId || 'unknown'}`;
+                    const lastTs = Number(await AsyncStorage.getItem(lastKey) || 0);
+                    const raw = String(abnormalEvent?.behavior_label || '').toLowerCase();
+                    const detail = String(abnormalEvent?.behavior_detail || '').toLowerCase();
+                    const behaviorLabel = detail || raw || 'abnormal';
+                    
+                    const tsMs = new Date(abnormalEvent?.occurred_at || 0).getTime();
+                    if (!Number.isFinite(tsMs)) return;
+                    const currentTs = tsMs;
+                    const cooldownMs = RECENT_ABNORMAL_WINDOW_MIN * 60 * 1000;
+                    const lastSeenMs = Number.isFinite(lastTs) ? lastTs : 0;
+                    const elapsedMs = nowMs - lastSeenMs;
+                    const shouldFire = (currentTs > lastSeenMs) || (elapsedMs >= cooldownMs);
+
+                    if (shouldFire) {
+                      const snap = reviewSnaps?.find((r) => !r.pred_cat_id) || reviewSnaps?.[0] || null;
+                      const dedupeKey = `abnormal_event:${storedCameraId || 'unknown'}:${currentTs}`;
+                      const pendingExists = AlertEngine.getPendingIdentities().some(
+                        (a) => String(a?.dedupeKey || '') === dedupeKey || String(a?.sessionId || '') === dedupeKey
+                      );
+                      if (pendingExists) {
+                        await AsyncStorage.setItem(lastKey, String(currentTs));
+                        return;
+                      }
+                      AlertEngine.logPendingIdentity({
+                        behaviorLabel,
+                        confidence: abnormalEvent?.confidence ?? 0.6,
+                        cropSnapshot: snap?.snapshot_url || `${VIDEO_SERVER_BASE}/api/latest_frame.jpg?t=${Date.now()}`,
+                        sessionId: dedupeKey,
+                        source: 'useCameraData_abnormal',
+                        isAbnormal: true,
+                        dedupeKey,
+                        cooldownMs: RECENT_ABNORMAL_WINDOW_MIN * 60 * 1000,
+                        cameraId: storedCameraId || null,
+                      });
+                      await AsyncStorage.setItem(lastKey, String(currentTs));
+                    }
+                  }
                 }
 
                 // à¸à¸£à¸“à¸µ litter à¹€à¸¢à¸­à¸°à¸¡à¸²à¸ (à¸•à¸±à¹‰à¸‡à¹à¸•à¹ˆ 5 à¸„à¸£à¸±à¹‰à¸‡/à¸§à¸±à¸™) â†’ à¸–à¸²à¸¡à¸§à¹ˆà¸²à¹à¸¡à¸§à¸•à¸±à¸§à¹„à¸«à¸™à¹ƒà¸Šà¹‰à¸¡à¸²à¸à¸ªà¸¸à¸”

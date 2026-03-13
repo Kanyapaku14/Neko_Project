@@ -29,27 +29,77 @@ import BottomNav from '../components/BottomNav';
 import useCameraData from '../hooks/useCameraData';
 import ActivityLevelChart from '../components/ActivityLevelChart';
 import AlertEngine, { AlertEvents } from '../services/AlertEngine';
-import PendingIdentityBanner from '../components/alert/PendingIdentityBanner';
 import { GlobalAlertQueueContext } from '../services/GlobalAlertQueue';
 
 const { width } = Dimensions.get('window');
 
 const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
 // 🚨 เปลี่ยน 192.168.1.159 เป็น IP จริงของคอมพิวเตอร์คุณเสมอ
+const RTSP_URL = 'http://192.168.1.108:5000/api/video_feed';
 const VIDEO_STREAM_URL = CAMERA_STREAM_URL_RAW;
 const VIDEO_STREAM_QUERY = CAMERA_STREAM_QUERY;
 const VIDEO_SERVER_BASE = CAMERA_API_BASE;
 
+// --- 🛠️ 1. ปรับฟังก์ชัน เช็คประเภทไฟล์ให้ฉลาดขึ้น และใส่ Log ดักบั๊ก ---
 const isDemoLikeSource = (source = '') => {
-  const s = String(source || '').toLowerCase();
-  return (
-    s.endsWith('.mp4') ||
-    s.endsWith('.webm') ||
-    s.endsWith('.mov') ||
-    s.endsWith('.mkv') ||
-    s.endsWith('.avi') ||
-    s.includes('/storage/v1/object/public/')
+  if (!source) return false;
+  const s = String(source).toLowerCase();
+  
+  // ตัด Query Parameters (?t=123) ออกก่อนเช็คนามสกุลไฟล์
+  const urlWithoutQuery = s.split('?')[0];
+
+  const isVideo = (
+    urlWithoutQuery.endsWith('.mp4') ||
+    urlWithoutQuery.endsWith('.webm') ||
+    urlWithoutQuery.endsWith('.mov') ||
+    urlWithoutQuery.endsWith('.mkv') ||
+    urlWithoutQuery.endsWith('.avi') ||
+    s.includes('/storage/v1/object/public/') // ดักลิงก์ของ Supabase
   );
+
+  console.log(`[StreamDebugger] Input URL: ${source}`);
+  console.log(`[StreamDebugger] Detected Mode: ${isVideo ? 'VOD (Video 🎬)' : 'Live Stream (Camera 📷)'}`);
+
+  return isVideo;
+};
+
+// --- 🛠️ 2. สร้างฟังก์ชัน Generate HTML ที่รองรับทั้ง 2 แบบ และจัดการ Error ---
+const generateStreamHtml = (url, isVideo) => {
+  // บังคับให้โหลดใหม่เสมอ (Cache-busting) ป้องกัน WebView จำเฟรมดำๆ
+  const cacheBuster = url.includes('?') ? `&cb=${Date.now()}` : `?cb=${Date.now()}`;
+  const finalUrl = `${url}${cacheBuster}`;
+
+  return `<!doctype html>
+  <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+      <style>
+        html, body {
+          margin: 0; padding: 0; width: 100%; height: 100%;
+          overflow: hidden; background: #000;
+          display: flex; justify-content: center; align-items: center;
+        }
+        .media { width: 100%; height: 100%; object-fit: cover; display: block; }
+        /* กล่องแจ้งเตือน Error เมื่อโหลดภาพ/วิดีโอไม่ขึ้น */
+        .error-box {
+          display: none; color: #FF8A80; text-align: center; font-family: sans-serif;
+          padding: 20px; border: 1px solid #FF5252; border-radius: 8px; font-size: 14px;
+        }
+      </style>
+    </head>
+    <body>
+      ${isVideo
+        ? `<video class="media" src="${finalUrl}" autoplay loop muted playsinline 
+            onerror="document.getElementById('err').style.display='block'; this.style.display='none';">
+           </video>`
+        : `<img class="media" src="${finalUrl}" alt="live-stream" 
+            onerror="document.getElementById('err').style.display='block'; this.style.display='none';" />`
+      }
+      <div id="err" class="error-box">
+        ⚠️ ไม่สามารถโหลดวิดีโอหรือสตรีมได้<br/>กรุณาตรวจสอบสัญญาณหรือ URL
+      </div>
+    </body>
+  </html>`;
 };
 
 // Create animated components
@@ -92,88 +142,32 @@ export default function CameraScreen({ onNavigate, session }) {
   const [cameraStatus, setCameraStatus] = useState('disconnected');
   const [currentCamera, setCurrentCamera] = useState(1);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const [cameraUnreadAlerts, setCameraUnreadAlerts] = useState(0);
   const [hasCriticalAlert, setHasCriticalAlert] = useState(false);
-  const [pendingIdentityCount, setPendingIdentityCount] = useState(0);
   const [selectedCat, setSelectedCat] = useState(null);
   const [environment, setEnvironment] = useState({ temperature: null, humidity: null });
   const [proStats, setProStats] = useState({ ping: null, bitrate: null, fps: null });
   const [cameraModeFromDb, setCameraModeFromDb] = useState(null);
   const [livePreviewUri, setLivePreviewUri] = useState(null);
   const [quickSummary, setQuickSummary] = useState({ eventsToday: 0, lastDetected: '--' });
-  // ดึง stream_source จาก DB
   const [dbStreamUrl, setDbStreamUrl] = useState(null);
-  const [streamWebViewUrl] = useState(`${VIDEO_STREAM_URL}?${VIDEO_STREAM_QUERY}&t=${Date.now()}`);
-  const streamWebViewHtml = useMemo(() => `<!doctype html>
-<html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-    <style>
-      html, body {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #000;
-      }
-      .wrap {
-        width: 100%;
-        height: 100%;
-        background: #000;
-      }
-      img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-        background: #000;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <img src="${streamWebViewUrl}" alt="live-stream" />
-    </div>
-  </body>
-</html>`, [streamWebViewUrl]);
-  const modelStreamUrl = useMemo(() => `${CAMERA_STREAM_URL_MODEL}?${VIDEO_STREAM_QUERY}&t=${Date.now()}`, []);
-  const modelStreamHtml = useMemo(() => `<!doctype html>
-<html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-    <style>
-      html, body {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #000;
-      }
-      .wrap {
-        width: 100%;
-        height: 100%;
-        background: #000;
-      }
-      img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-        background: #000;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <img src="${modelStreamUrl}" alt="model-stream" />
-    </div>
-  </body>
-</html>`, [modelStreamUrl]);
-  const streamSource = useMemo(() => ({
-    html: isDemoLikeSource(dbStreamUrl) ? modelStreamHtml : streamWebViewHtml,
-    baseUrl: VIDEO_SERVER_BASE,
-  }), [dbStreamUrl, modelStreamHtml, streamWebViewHtml]);
+
+  // --- 🛠️ 3. จัดการ State และ URL สำหรับ WebView ---
+  const isVideoMode = useMemo(() => isDemoLikeSource(dbStreamUrl), [dbStreamUrl]);
+
+  const activeStreamUrl = useMemo(() => {
+    return isVideoMode 
+      ? `${CAMERA_STREAM_URL_MODEL}?${VIDEO_STREAM_QUERY}` 
+      : `${VIDEO_STREAM_URL}?${VIDEO_STREAM_QUERY}`;
+  }, [isVideoMode]);
+
+  const streamSource = useMemo(() => {
+    console.log(`[StreamDebugger] Generating HTML for URL: ${activeStreamUrl}`);
+    const html = generateStreamHtml(activeStreamUrl, isVideoMode);
+    return { html, baseUrl: VIDEO_SERVER_BASE };
+  }, [activeStreamUrl, isVideoMode]);
+
+
   const lastAppliedSourceRef = useRef('');
   const cameraScreenCatKey = session?.user?.id
     ? `camera_screen_selected_cat_id:${session.user.id}`
@@ -199,7 +193,7 @@ export default function CameraScreen({ onNavigate, session }) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   // Retrieve global queue context to open manual queue
-  const { openPendingQueue } = useContext(GlobalAlertQueueContext);
+  const { openPendingQueue, showCriticalBanner, pendingCount } = useContext(GlobalAlertQueueContext);
 
   // Entry Animation
   useEffect(() => {
@@ -243,19 +237,20 @@ export default function CameraScreen({ onNavigate, session }) {
 
   // Subscribe to AlertEngine
   useEffect(() => {
-    // Initial load
-    setUnreadAlerts(AlertEngine.getUnreadCount());
-    setHasCriticalAlert(AlertEngine.hasActiveCritical());
-    setPendingIdentityCount(AlertEngine.getPendingIdentityCount());
-
-    const handler = (data) => {
-      setUnreadAlerts(data.unreadCount);
-      setHasCriticalAlert(data.hasCritical);
-      setPendingIdentityCount(data.pendingIdentityCount);
+    const updateCounts = () => {
+      if (AlertEngine.getUnreadCount) setUnreadAlerts(AlertEngine.getUnreadCount());
+      if (AlertEngine.getCameraUnreadCount) setCameraUnreadAlerts(AlertEngine.getCameraUnreadCount());
+      if (AlertEngine.hasActiveCritical) setHasCriticalAlert(AlertEngine.hasActiveCritical());
     };
 
-    AlertEngine.on(AlertEvents.UPDATED, handler);
-    return () => AlertEngine.off(AlertEvents.UPDATED, handler);
+    updateCounts();
+    AlertEngine.on(AlertEvents.UPDATED, updateCounts);
+    AlertEngine.on(AlertEvents.ALERT_ADDED, updateCounts);
+
+    return () => {
+      AlertEngine.off(AlertEvents.UPDATED, updateCounts);
+      AlertEngine.off(AlertEvents.ALERT_ADDED, updateCounts);
+    };
   }, []);
 
   // ผู้ใช้ใหม่ (camera_setup_complete ยังไม่ถูก set) -> หน้า Phone.js ทันที
@@ -648,7 +643,6 @@ export default function CameraScreen({ onNavigate, session }) {
   if (!data) return null;
 
   const CameraSetupIntro = ({ onSetup, onMaybeLater }) => {
-    // ... (โค้ดส่วนนี้เหมือนเดิม)
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" color="#00695C" />
@@ -717,21 +711,37 @@ export default function CameraScreen({ onNavigate, session }) {
             onSetting={() => onNavigate('Setting')}
           />
 
-          <PendingIdentityBanner count={pendingIdentityCount} onPress={openPendingQueue} />
+          {pendingCount > 0 && (
+            <TouchableOpacity
+              style={[styles.pendingBanner, showCriticalBanner && { marginTop: 80 }]}
+              onPress={openPendingQueue}
+              activeOpacity={0.85}
+            >
+              <MaterialCommunityIcons name="paw" size={18} color="#FFFFFF" />
+              <Text style={styles.pendingBannerText}>
+                {pendingCount === 1
+                  ? 'Cat detected - tap to identify'
+                  : `${pendingCount} events - tap to identify cats`}
+              </Text>
+              <View style={styles.pendingBannerPill}>
+                <Text style={styles.pendingBannerPillText}>Identify</Text>
+              </View>
+            </TouchableOpacity>
+          )}
 
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-            {/* แสดง SetupPromptCard ถ้ายังไม่ได้ตั้งค่า stream_source (ไม่แตะ camera status) */}
             {requireSetcamera && <SetupPromptCard />}
 
             <Animated.View style={{ opacity, transform: [{ translateY }] }}>
 
-              {/* 🚨 โซนแสดงกล้อง (ปรับเป็น WebView แบบยิงตรง ไม่ฝัง HTML) */}
+              {/* 🚨 โซนแสดงกล้อง (ใช้งาน WebView แบบอัปเดต Key แล้ว) */}
               <View style={styles.cameraContainer}>
                 <View style={[styles.cameraFrame, { height: videoFrameHeight }]}>
                   {isDisplayConnected ? (
                     <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#000' }}>
                       <WebView
+                        key={isVideoMode ? 'video-player' : 'live-player'} // 🛡️ บังคับสร้างใหม่เมื่อสลับโหมด
                         source={streamSource}
                         style={{ width: '100%', height: '100%', backgroundColor: '#000' }}
                         cacheEnabled={false}
@@ -825,7 +835,7 @@ export default function CameraScreen({ onNavigate, session }) {
                 </LinearGradient>
               </View>
 
-              {/* Stream Stats Bar — ping/bitrate/fps จาก proStats + Quick Summary */}
+              {/* Stream Stats Bar */}
               {isDisplayConnected && (
                 <View style={styles.streamStatsBar}>
                   <View style={styles.streamStatItem}>
@@ -921,7 +931,6 @@ export default function CameraScreen({ onNavigate, session }) {
                 </View>
               </SectionOverlay>
 
-              {/* Stats Grid — Food & Litter จาก DB */}
               <SectionOverlay>
                 <View style={styles.statsRow}>
                   <View style={styles.statCardGlowFood}>
@@ -952,7 +961,6 @@ export default function CameraScreen({ onNavigate, session }) {
                 </View>
               </SectionOverlay>
 
-              {/* Posture & Behavior Card — จาก DB */}
               <SectionOverlay>
                 <View style={styles.cardContainer}>
                   <DecorativeCatEars />
@@ -996,7 +1004,6 @@ export default function CameraScreen({ onNavigate, session }) {
                 </View>
               </SectionOverlay>
 
-              {/* Behavior Analytics Card — คำนวณจากข้อมูลจริงใน DB ผ่าน useCameraData */}
               <SectionOverlay>
                 <View style={styles.cardContainer}>
                   <View style={styles.cardHeader}>
@@ -1025,83 +1032,95 @@ export default function CameraScreen({ onNavigate, session }) {
                     </View>
                   ) : (
                     <View style={styles.insightsGrid}>
-                    {/* Energy Distribution */}
-                    <View style={styles.insightRow}>
-                      <View style={styles.insightHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                          <MaterialCommunityIcons name="lightning-bolt-circle" size={16} color="#FF9800" style={{ marginRight: 6 }} />
-                          <Text style={styles.insightLabel} numberOfLines={1}>Energy Distribution</Text>
+                      <View style={styles.insightRow}>
+                        <View style={styles.insightHeader}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            <MaterialCommunityIcons name="lightning-bolt-circle" size={16} color="#FF9800" style={{ marginRight: 6 }} />
+                            <Text style={styles.insightLabel} numberOfLines={1}>Energy Distribution</Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                            <MaterialCommunityIcons name="paw" size={12} color="#FF9800" style={{ marginRight: 4 }} />
+                            <Text style={styles.insightValue} numberOfLines={1}>{data.behaviorAnalytics?.energy?.active || 0}% Active</Text>
+                          </View>
                         </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
-                          <MaterialCommunityIcons name="paw" size={12} color="#FF9800" style={{ marginRight: 4 }} />
-                          <Text style={styles.insightValue} numberOfLines={1}>{data.behaviorAnalytics?.energy?.active || 0}% Active</Text>
+                        <View style={styles.progressBarBg}>
+                          <View style={styles.progressBarGray} />
+                          <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.energy?.active || 0}%` }]}>
+                            <View style={[styles.progressBarColor, { backgroundColor: '#FFAB40' }]} />
+                            <MaterialCommunityIcons name="paw" size={24} color="#FF6D00" style={styles.progressPaw} />
+                          </View>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
+                          <Text style={styles.insightSubtextLeft}>High (Playing)</Text>
+                          <Text style={styles.insightSubtext}>Low (Resting)</Text>
                         </View>
                       </View>
-                      <View style={styles.progressBarBg}>
-                        <View style={styles.progressBarGray} />
-                        <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.energy?.active || 0}%` }]}>
-                          <View style={[styles.progressBarColor, { backgroundColor: '#FFAB40' }]} />
-                          <MaterialCommunityIcons name="paw" size={24} color="#FF6D00" style={styles.progressPaw} />
-                        </View>
-                      </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
-                        <Text style={styles.insightSubtextLeft}>High (Playing)</Text>
-                        <Text style={styles.insightSubtext}>Low (Resting)</Text>
-                      </View>
-                    </View>
 
-                    {/* Routine Consistency */}
-                    <View style={[styles.insightRow, { marginTop: 12 }]}>
-                      <View style={styles.insightHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                          <MaterialCommunityIcons name="calendar-check" size={16} color="#2196F3" style={{ marginRight: 6 }} />
-                          <Text style={styles.insightLabel} numberOfLines={1}>Routine Consistency</Text>
+                      <View style={[styles.insightRow, { marginTop: 12 }]}>
+                        <View style={styles.insightHeader}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            <MaterialCommunityIcons name="calendar-check" size={16} color="#2196F3" style={{ marginRight: 6 }} />
+                            <Text style={styles.insightLabel} numberOfLines={1}>Routine Consistency</Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                            <MaterialCommunityIcons name="paw" size={12} color="#2196F3" style={{ marginRight: 4 }} />
+                            <Text style={[styles.insightValue, { color: '#2196F3' }]} numberOfLines={1}>{data.behaviorAnalytics?.routine?.status || 'No Data'}</Text>
+                          </View>
                         </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
-                          <MaterialCommunityIcons name="paw" size={12} color="#2196F3" style={{ marginRight: 4 }} />
-                          <Text style={[styles.insightValue, { color: '#2196F3' }]} numberOfLines={1}>{data.behaviorAnalytics?.routine?.status || 'No Data'}</Text>
+                        <View style={styles.progressBarBg}>
+                          <View style={styles.progressBarGray} />
+                          <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.routine?.score || 0}%` }]}>
+                            <View style={[styles.progressBarColor, { backgroundColor: '#64B5F6' }]} />
+                            <MaterialCommunityIcons name="paw" size={24} color="#0D47A1" style={styles.progressPaw} />
+                          </View>
                         </View>
+                        <Text style={[styles.insightSubtextLeft, { marginTop: 0 }]}>Consistent feeding and litter habits</Text>
                       </View>
-                      <View style={styles.progressBarBg}>
-                        <View style={styles.progressBarGray} />
-                        <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.routine?.score || 0}%` }]}>
-                          <View style={[styles.progressBarColor, { backgroundColor: '#64B5F6' }]} />
-                          <MaterialCommunityIcons name="paw" size={24} color="#0D47A1" style={styles.progressPaw} />
-                        </View>
-                      </View>
-                      <Text style={[styles.insightSubtextLeft, { marginTop: 0 }]}>Consistent feeding and litter habits</Text>
-                    </View>
 
-                    {/* Wellness Index */}
-                    <View style={[styles.insightRow, { marginTop: 12 }]}>
-                      <View style={styles.insightHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                          <MaterialCommunityIcons name="heart-pulse" size={16} color="#4CAF50" style={{ marginRight: 6 }} />
-                          <Text style={styles.insightLabel} numberOfLines={1}>Wellness Index</Text>
+                      <View style={[styles.insightRow, { marginTop: 12 }]}>
+                        <View style={styles.insightHeader}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            <MaterialCommunityIcons name="heart-pulse" size={16} color="#4CAF50" style={{ marginRight: 6 }} />
+                            <Text style={styles.insightLabel} numberOfLines={1}>Wellness Index</Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                            <MaterialCommunityIcons name="paw" size={12} color="#4CAF50" style={{ marginRight: 4 }} />
+                            <Text style={[styles.insightValue, { color: '#4CAF50' }]} numberOfLines={1}>{data.behaviorAnalytics?.wellness?.status || 'No Data'}</Text>
+                          </View>
                         </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
-                          <MaterialCommunityIcons name="paw" size={12} color="#4CAF50" style={{ marginRight: 4 }} />
-                          <Text style={[styles.insightValue, { color: '#4CAF50' }]} numberOfLines={1}>{data.behaviorAnalytics?.wellness?.status || 'No Data'}</Text>
+                        <View style={styles.progressBarBg}>
+                          <View style={styles.progressBarGray} />
+                          <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.wellness?.score || 0}%` }]}>
+                            <View style={[styles.progressBarColor, { backgroundColor: '#81C784' }]} />
+                            <MaterialCommunityIcons name="paw" size={24} color="#1B5E20" style={styles.progressPaw} />
+                          </View>
                         </View>
-                      </View>
-                      <View style={styles.progressBarBg}>
-                        <View style={styles.progressBarGray} />
-                        <View style={[styles.progressBarFill, { width: `${data.behaviorAnalytics?.wellness?.score || 0}%` }]}>
-                          <View style={[styles.progressBarColor, { backgroundColor: '#81C784' }]} />
-                          <MaterialCommunityIcons name="paw" size={24} color="#1B5E20" style={styles.progressPaw} />
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
+                          <Text style={styles.insightSubtextLeft}>Relaxed</Text>
+                          <Text style={styles.insightSubtext}>Stressed</Text>
                         </View>
-                      </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 0 }}>
-                        <Text style={styles.insightSubtextLeft}>Relaxed</Text>
-                        <Text style={styles.insightSubtext}>Stressed</Text>
                       </View>
                     </View>
-                  </View>
                   )}
                 </View>
               </SectionOverlay>
 
-              {/* Action Buttons */}
+              <ButtonScale
+                style={styles.actionButton}
+                onPress={() => onNavigate('CameraAlert')}
+              >
+                <View style={[styles.iconCircleSmall, { backgroundColor: '#E0F2F1' }]}>
+                  <MaterialCommunityIcons name="history" size={20} color="#00695C" />
+                </View>
+                <Text style={styles.actionButtonText}>Camera Alert History</Text>
+                {cameraUnreadAlerts > 0 && (
+                  <View style={styles.cameraAlertBadge}>
+                    <Text style={styles.cameraAlertBadgeText}>{cameraUnreadAlerts}</Text>
+                  </View>
+                )}
+                <MaterialCommunityIcons name="chevron-right" size={20} color="#B0BEC5" />
+              </ButtonScale>
+
               <ButtonScale style={styles.actionButton} onPress={() => onNavigate('Gallery')}>
                 <MaterialCommunityIcons name="image-multiple-outline" size={22} color="#00695C" />
                 <Text style={styles.actionButtonText}>Activity Gallery</Text>
@@ -1175,6 +1194,12 @@ const styles = StyleSheet.create({
   iconCircleSmall: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#FFF3E0', justifyContent: 'center', alignItems: 'center' },
   actionButton: { backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', padding: 11, borderRadius: 14, marginBottom: 10, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
   actionButtonText: { flex: 1, marginLeft: 10, fontSize: 13, color: '#37474F', fontWeight: '700' },
+  pendingBanner: { marginHorizontal: 12, marginTop: 6, marginBottom: 4, backgroundColor: '#F57C00', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 8 },
+  pendingBannerText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', flex: 1 },
+  pendingBannerPill: { backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)' },
+  pendingBannerPillText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  cameraAlertBadge: { position: 'absolute', top: 10, right: 40, backgroundColor: '#FF5252', minWidth: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4, borderWidth: 1.5, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 3 },
+  cameraAlertBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   switcherContainer: { width: '80%', backgroundColor: '#FFF', borderRadius: 24, padding: 20, maxHeight: '50%' },
   switcherTitle: { fontSize: 18, fontWeight: 'bold', color: '#37474F', marginBottom: 16, textAlign: 'center' },
@@ -1256,6 +1281,3 @@ const styles = StyleSheet.create({
   analyticsEmptyText: { fontSize: 12, color: '#64748B', fontWeight: '700' },
   analyticsEmptySubtext: { fontSize: 11, color: '#94A3B8' },
 });
-
-
-
