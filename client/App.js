@@ -84,11 +84,6 @@ export default function App() {
 
   const [resetPasswordMode, setResetPasswordMode] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
-<<<<<<< HEAD
-=======
-  const [resetPasswordStep, setResetPasswordStep] = useState('token'); // token -> new
-  const [resetReturnTo, setResetReturnTo] = useState('SignIn');
->>>>>>> 4214cd69c179a9027f7487717ea782645aafbd56
   const [catName, setCatName] = useState(null); // ✅ เพิ่ม state สำหรับชื่อแมว
   const [profileLoading, setProfileLoading] = useState(false); // ✅ Track if checking profile
   const [hasSeenCameraIntro, setHasSeenCameraIntro] = useState(null); // null until loaded
@@ -357,9 +352,7 @@ export default function App() {
   }
 
   const renderScreen = () => {
-<<<<<<< HEAD
-    // Reset password mode (arrived via deep link from email)
-    // Note: in token-based reset flow, `verifyOtp` creates a session. We must keep showing this screen even if session exists.
+
     if (resetPasswordMode) {
       return (
         <ResetPasswordScreen
@@ -386,28 +379,6 @@ export default function App() {
             supabase.auth.signOut();
             setCurrentScreen('SignIn');
           }}
-=======
-    // Reset password flow (token-based OR arrived via deep link)
-    // Note: in token-based reset flow, `verifyOtp` creates a session. Keep showing this flow even if session exists.
-    if (resetPasswordMode) {
-      if (resetPasswordStep === 'token') {
-        return (
-          <ResetPasswordTokenScreen
-            initialEmail={resetEmail}
-            onBack={() => exitResetFlow(resetReturnTo)}
-            onVerified={(email) => {
-              setResetEmail(String(email || ''));
-              setResetPasswordStep('new');
-            }}
-          />
-        );
-      }
-
-      return (
-        <ResetPasswordScreen
-          onBack={() => setResetPasswordStep('token')}
-          onComplete={() => exitResetFlow('SignIn')}
->>>>>>> 4214cd69c179a9027f7487717ea782645aafbd56
         />
       );
     }
@@ -500,7 +471,6 @@ export default function App() {
       }
       if (currentScreenName === 'Result') {
         return <ResultScreen
-<<<<<<< HEAD
           onBack={() => {
             if (screenParams?.source === 'db') {
               setAuthScreen('AssessmentGallery');
@@ -508,9 +478,6 @@ export default function App() {
               setAuthScreen('Home');
             }
           }}
-=======
-          onBack={() => setAuthScreen('Home')}
->>>>>>> 4214cd69c179a9027f7487717ea782645aafbd56
           onSave={() => setAuthScreen('Home')}
           onNavigate={(screen, params) => navigateAuth(screen, params)}
           route={{ params: screenParams }}
@@ -648,7 +615,12 @@ export default function App() {
     // 2. Guest/SignIn flow
     return (
       <>
-<<<<<<< HEAD
+        {currentScreen === 'Welcome' && (
+          <Nekocare
+            onSignUp={() => setCurrentScreen('SignUp')}
+            onSignIn={() => setCurrentScreen('SignIn')}
+          />
+        )}
         {currentScreen === 'SignIn' && (
           <SignInScreen
             onNavigate={navigateToSignUp}
@@ -664,34 +636,6 @@ export default function App() {
             onGoToResetPassword={(email) => {
               setResetEmail(String(email || ''));
               setCurrentScreen('ResetPassword');
-=======
-        {currentScreen === 'Welcome' && (
-          <Nekocare
-            onSignUp={() => setCurrentScreen('SignUp')}
-            onSignIn={() => setCurrentScreen('SignIn')}
-          />
-        )}
-
-        {currentScreen === 'SignIn' && (
-          <SignInScreen
-            onNavigate={() => setCurrentScreen('SignUp')}
-            onForgotPassword={() => setCurrentScreen('ForgotPassword')}
-          />
-        )}
-
-        {currentScreen === 'SignUp' && (
-          <SignUpScreen onNavigate={() => setCurrentScreen('SignIn')} />
-        )}
-
-        {currentScreen === 'ForgotPassword' && (
-          <ForgotPasswordScreen
-            onBack={() => setCurrentScreen('Welcome')}
-            onGoToResetPassword={(email) => {
-              setResetReturnTo('ForgotPassword');
-              setResetEmail(String(email || ''));
-              setResetPasswordStep('token');
-              setResetPasswordMode(true);
->>>>>>> 4214cd69c179a9027f7487717ea782645aafbd56
             }}
           />
         )}
