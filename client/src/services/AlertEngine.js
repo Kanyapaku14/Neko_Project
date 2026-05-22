@@ -191,6 +191,7 @@ class AlertEngineService {
      *   ttlMs: time-to-live in ms (optional). Defaults: critical=48h, warning=24h, info/success=6h
      */
     async logEvent(alertData) {
+<<<<<<< HEAD
 
         if (alertData?.pendingIdentityConfirm === true) {
             const abnormal = isAbnormalBehaviorLabel(alertData.behaviorLabel)
@@ -208,6 +209,8 @@ class AlertEngineService {
             // if storage fails, default to allow
 
         }
+=======
+>>>>>>> origin/main
         const normalizedSeverity = (alertData.severity || 'info').toLowerCase();
         const nowMs = Date.now();
         const dedupeKey = alertData.dedupeKey ? String(alertData.dedupeKey) : null;
@@ -327,8 +330,6 @@ class AlertEngineService {
             title: alertData.title,
             desc: alertData.desc,
             details: alertData.details || '',
-            catId: alertData.catId || null,
-            catName: alertData.catName || null,
             timestamp: alertData.timestamp || new Date().toISOString(),
             cameraId: alertData.cameraId || null,
             expiresAt,

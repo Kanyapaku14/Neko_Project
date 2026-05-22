@@ -39,7 +39,7 @@ const mapAlertToDb = (alert, ownerId, cameraId) => ({
     id: isUuid(alert.id) ? alert.id : undefined,
     owner_id: ownerId,
     camera_id: isUuid(alert.cameraId) ? alert.cameraId : (isUuid(cameraId) ? cameraId : null),
-    cat_id: isUuid(alert.catId) ? alert.catId : (isUuid(alert.resolvedCatId) ? alert.resolvedCatId : null),
+    cat_id: isUuid(alert.resolvedCatId) ? alert.resolvedCatId : null,
     type: alert.type || 'system',
     severity: mapSeverity(alert.severity),
     title: alert.title || 'Notification',
@@ -63,12 +63,10 @@ const mapAlertToDb = (alert, ownerId, cameraId) => ({
         resolvedAt: alert.resolvedAt || null,
         resolvedCatName: alert.resolvedCatName || null,
         resolutionText: alert.resolutionText || null,
-
         isForeignCatAlert: alert.isForeignCatAlert === true,
         multiSnapshots: Array.isArray(alert.multiSnapshots) ? alert.multiSnapshots : null,
         identityRule: alert.identityRule || null,
         catName: alert.catName || null,
-
     },
 });
 
@@ -98,8 +96,6 @@ const mapDbAlertToLocal = (row) => ({
     resolvedCatName: row?.metadata?.resolvedCatName || null,
     resolutionText: row?.metadata?.resolutionText || row?.metadata?.resolution_text || null,
     resolvedCatId: row.cat_id || null,
-    catId: row.cat_id || null,
-    catName: row?.metadata?.catName || null,
     _fromRemote: true,
 });
 
@@ -150,7 +146,6 @@ const mapIdentityReviewToLocalAlert = (row) => {
 const AlertRepository = {
     _isInit: false,
     _resolvedReviewIdsKey: `${RESOLVED_REVIEW_IDS_KEY_PREFIX}:anonymous`,
-    _subscription: null,
 
     init() {
         if (this._isInit) return;
@@ -173,6 +168,7 @@ const AlertRepository = {
         };
     },
 
+<<<<<<< HEAD
 
     // Derives a stable AsyncStorage key for resolved review IDs using only userId.
     // IMPORTANT: do NOT include cameraId — it may be null on first sync causing key mismatch.
@@ -214,6 +210,8 @@ const AlertRepository = {
             });
     },
 
+=======
+>>>>>>> origin/main
     async _getResolvedReviewIds() {
         try {
             const key = await this._resolvedKey();
@@ -244,13 +242,12 @@ const AlertRepository = {
         }
     },
 
-    async push(alert, targetUserId = null) {
+    async push(alert) {
         try {
-            const { userId: currentUserId, cameraId } = await this._getContext();
-            const ownerId = targetUserId || currentUserId;
-            if (!ownerId) return null;
+            const { userId, cameraId } = await this._getContext();
+            if (!userId) return null;
 
-            const payload = mapAlertToDb(alert, ownerId, cameraId);
+            const payload = mapAlertToDb(alert, userId, cameraId);
             const { data, error } = await supabase
                 .from('alerts')
                 .upsert(payload, { onConflict: 'id' })
@@ -299,11 +296,11 @@ const AlertRepository = {
         }
     },
 
-    async syncFromRemote(options = {}) {
+    async syncFromRemote() {
         try {
-            const { skipIdentityReview = false } = options || {};
             const { userId, cameraId } = await this._getContext();
             if (!userId) return false;
+<<<<<<< HEAD
 
             // NOTE: do NOT set _resolvedReviewIdsKey here — key is now derived lazily in _resolvedKey().
             const suppressPending = (await AsyncStorage.getItem('alerts_suppress_pending')) === '1';
@@ -324,6 +321,9 @@ const AlertRepository = {
 
             this._subscribeToRemoteAlerts(userId);
 
+=======
+            this._resolvedReviewIdsKey = `${RESOLVED_REVIEW_IDS_KEY_PREFIX}:${userId}:${cameraId || 'no_camera'}`;
+>>>>>>> origin/main
 
             const localIds = new Set(AlertEngine.getHistory().map((a) => String(a.id)));
             const localRemoteReviewIds = new Set(
@@ -377,8 +377,12 @@ const AlertRepository = {
                 }
             }
 
+<<<<<<< HEAD
 
             if (cameraId && !skipIdentityReview) {
+=======
+            if (cameraId) {
+>>>>>>> origin/main
                 const recentIso = new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString();
 
                 const { data: reviews, error: reviewErr } = await supabase
@@ -774,6 +778,7 @@ const AlertRepository = {
             console.warn(`AlertRepository.resolveOnRemote failed: ${err?.message || err}`);
         }
     },
+<<<<<<< HEAD
 
 
     async markAsReadOnRemote(alertId) {
@@ -823,6 +828,8 @@ const AlertRepository = {
 
         }
     },
+=======
+>>>>>>> origin/main
 };
 
 export default AlertRepository;

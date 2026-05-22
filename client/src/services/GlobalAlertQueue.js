@@ -22,7 +22,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import AlertEngine, { AlertEvents } from './AlertEngine';
 import AlertRepository from './AlertRepository';
 import CatPickerModal from '../components/alert/CatPickerModal';
@@ -41,7 +40,6 @@ export const GlobalAlertQueueContext = createContext({
     criticalAlert: null,
     showCriticalBanner: false,
 });
-
 
 const ABNORMAL_BEHAVIORS = new Set(['vomiting', 'head_pressing', 'abnormal']);
 const BANNER_BEHAVIORS = new Set(['eat', 'feeding_session', 'litter', 'litter_session', 'toileting', 'litter_box']);
@@ -79,7 +77,6 @@ function shouldNavigateAfterResolve(alert) {
     return isBannerBehavior(raw);
 }
 
-
 export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
     const AUTO_POPUP_COOLDOWN_MS = 45 * 1000;
 
@@ -100,6 +97,7 @@ export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
     const [suppressPending, setSuppressPending] = useState(false);
     const appStartAtRef = useRef(Date.now());
     const lastAutoPopupAtRef = useRef(0);
+<<<<<<< HEAD
 
     const syncLockRef = useRef(false);
     const realtimeChannelRef = useRef(null);
@@ -110,6 +108,8 @@ export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
     const poppedAlertIdsRef = useRef(new Set());
 
     const criticalPopupInFlight = useRef(new Set());
+=======
+>>>>>>> origin/main
 
 
     const getAlertGroupKey = useCallback((alert) => {
@@ -140,6 +140,7 @@ export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
     // One-time local clear to stop alert loop.
 
 
+<<<<<<< HEAD
     const shouldShowCriticalOncePerCat = useCallback(async (candidate) => {
         if (!candidate?.id) return false;
         const type = String(candidate?.type || '').toLowerCase();
@@ -160,6 +161,14 @@ export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
         }
     }, []);
 
+=======
+    const openCriticalIfNeeded = useCallback((candidate) => {
+        if (!candidate?.id) return;
+        if (dismissedCriticalIds[candidate.id]) return;
+        if (currentAlert) return; // do not stack critical over identity modal
+        setCriticalAlert((prev) => (prev?.id === candidate.id ? prev : candidate));
+    }, [dismissedCriticalIds, currentAlert]);
+>>>>>>> origin/main
 
     // 1. Fetch Cats from DB when session exists
 
@@ -348,6 +357,7 @@ export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
         AlertRepository.syncFromRemote();
     }, [session?.user?.id]);
 
+<<<<<<< HEAD
 
     const requestSync = useCallback(() => {
         if (syncDebounceRef.current) return;
@@ -506,6 +516,8 @@ export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
         };
     }, [session?.user?.id]);
 
+=======
+>>>>>>> origin/main
     // 2. Listen for Auto-Popup events from AlertEngine
 
     useEffect(() => {
@@ -659,6 +671,7 @@ export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
 
     // --- Global Critical / behavior_abnormal listener ---
     useEffect(() => {
+<<<<<<< HEAD
         let mounted = true;
 
         const handleNewCritical = async (alert) => {
@@ -676,6 +689,19 @@ export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
             const top = findTopCritical();
             if (top) openCriticalIfNeeded(top);
             else setCriticalAlert(null);
+=======
+        const handleNewCritical = (alert) => {
+            if (!alert) return;
+            openCriticalIfNeeded(alert);
+        };
+        const handleUpdated = () => {
+            const topCritical = findTopCritical();
+            if (topCritical) {
+                openCriticalIfNeeded(topCritical);
+                return;
+            }
+            setCriticalAlert(null);
+>>>>>>> origin/main
         };
 
         handleUpdated();
@@ -683,11 +709,10 @@ export function GlobalAlertQueueProvider({ children, session, activeScreen }) {
         AlertEngine.on(AlertEvents.UPDATED, handleUpdated);
 
         return () => {
-            mounted = false;
             AlertEngine.off(AlertEvents.NEW_CRITICAL, handleNewCritical);
             AlertEngine.off(AlertEvents.UPDATED, handleUpdated);
         };
-    }, [findTopCritical, openCriticalIfNeeded, shouldShowCriticalOncePerCat]);
+    }, [findTopCritical, openCriticalIfNeeded]);
 
     // --- Queue Processor ---
     useEffect(() => {
