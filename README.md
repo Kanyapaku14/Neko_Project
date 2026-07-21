@@ -76,7 +76,7 @@ npx expo start
 - Press i to open on iOS Simulator.
 - Scan the QR Code with the Expo Go app to test on a physical device.
 
-#📁 Project Structure
+# 📁 Project Structure
 A modular architecture for scalability and maintainability:
 client/
 ├── assets/                 # Static assets (images, fonts, Lottie JSONs)
@@ -92,7 +92,7 @@ client/
 ├── app.json                # Expo configuration file
 └── babel.config.js         # Babel compiler configuration
 
-#🤝 Contributing
+# 🤝 Contributing
 We welcome contributions! If you'd like to improve the app:
 1.Fork the repository.
 2.Create a new feature branch (git checkout -b feature/AmazingFeature).
@@ -100,5 +100,5 @@ We welcome contributions! If you'd like to improve the app:
 4.Push to the branch (git push origin feature/AmazingFeature).
 5.Open a Pull Request.
 
-#📄 License
+# 📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.
