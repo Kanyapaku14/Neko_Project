@@ -1,65 +1,115 @@
-# Neko Project - Cat Health App (Client) 🐱
+# 🐾 Neko Project - Cat Health & Behavior App
 
-A mobile application for tracking and managing your beloved cat's health, built with React Native and Expo.
+![React Native](https://img.shields.io/badge/React_Native-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Expo](https://img.shields.io/badge/Expo-000020?style=for-the-badge&logo=expo&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-181818?style=for-the-badge&logo=supabase&logoColor=3ECF8E)
+
+A comprehensive mobile application designed to track, manage, and monitor your beloved cat's health. Built with React Native and Expo, Neko Project seamlessly integrates with an AI-powered smart camera to provide 24/7 behavioral monitoring and real-time alerts.
+
+---
 
 ## ✨ Key Features & Capabilities
 
-The Neko Project offers a comprehensive suite of features designed to make cat care easier and more interactive:
+### 1. 🤖 AI Smart Camera Integration
+- **24/7 Monitoring:** Connects seamlessly to external smart camera hardware via our custom backend.
+- **Behavior Detection:** Utilizes deep learning to detect abnormal behaviors (e.g., head pressing, vomiting, limping).
+- **Real-Time Alerts:** Push notifications immediately inform you of critical events and camera connectivity status.
 
-1. **AI Smart Camera Integration (Hardware Connection)**
-   - Connects to an external smart camera device (hardware) to monitor your cat 24/7.
-   - Uses AI algorithms to detect abnormal behavior and identify individual cats.
-   - Pushes real-time alerts to the app regarding your cat's activities or camera connection status.
+### 2. 📊 Health Tracking & Dashboard
+- **Daily Logging:** Track daily habits, food/water intake, and litter box usage.
+- **Medical Records:** Centralize vaccinations, vet visits, and medication schedules.
+- **Analytics Dashboard:** Visualize health trends over time with interactive charts.
 
-2. **Health Tracking & Dashboard**
-   - **Daily Logging:** Log your cat's daily habits, food intake, and litter box usage.
-   - **Medical Records:** Keep track of vaccinations, medical check-ups, and health assessments.
-   - **Data Visualization:** View health statistics, trends, and analytical results through an interactive dashboard.
+### 3. 📅 Calendar & Timeline
+- **Event Scheduling:** Never miss a vet appointment, vaccination booster, or grooming session.
+- **Life Timeline:** A historical view of your cat's significant health milestones and daily activities.
 
-3. **Calendar & Timeline**
-   - Schedule upcoming events such as vet appointments, vaccinations, and grooming.
-   - View a historical timeline of your cat's activities and health milestones.
+### 4. 🌍 Cat Community
+- **Social Networking:** Connect, share, and interact with fellow cat owners.
+- **Knowledge Sharing:** Exchange tips and view community-driven rankings and profiles.
 
-4. **Cat Community**
-   - Connect with other cat owners in the community.
-   - Share posts, photos, and updates about your feline friends.
-   - View community rankings and user profiles.
-
-## 🌟 Highlights
-
-- **Real-time Monitoring:** The seamless integration between the mobile app and the smart camera hardware ensures you are instantly notified of any abnormal behaviors.
-- **All-in-one Management:** Combines health tracking, medical records, and social networking in a single intuitive application.
-- **Delightful UI/UX:** Built with Reanimated and Lottie for smooth animations and a premium user experience.
+---
 
 ## 🛠 Tech Stack
-- **Framework:** React Native, Expo
-- **Backend/Database:** Supabase
+
+- **Frontend:** React Native, Expo
+- **Backend & Auth:** Supabase
 - **Local Storage:** SQLite (`expo-sqlite`), AsyncStorage
-- **UI & Animations:** `@rneui/themed`, Lottie (`lottie-react-native`), Reanimated
+- **UI & Styling:** `@rneui/themed`, React Native Reanimated
+- **Animations:** Lottie (`lottie-react-native`)
 - **Data Visualization:** `react-native-chart-kit`
-- **Device Features:** Notifications (`expo-notifications`), Image Picker, Audio/Video (`expo-av`)
+- **Hardware Integrations:** `expo-notifications`, `expo-av` (Audio/Video), `expo-image-picker`
 
-## 🚀 Installation & Setup
+---
 
-1. **Install Dependencies:**
-   Navigate to the `client` folder and run:
+## 🚀 Getting Started
+
+Follow these instructions to set up the project locally for development and testing.
+
+### Prerequisites
+Make sure you have the following installed:
+- [Node.js](https://nodejs.org/) (v16.x or newer)
+- npm, yarn, or bun
+- [Expo Go](https://expo.dev/client) app installed on your physical device, OR an iOS Simulator / Android Emulator.
+
+### Environment Setup
+1. Clone the repository and navigate to the `client` directory.
+2. Create a `.env` file in the root of the `client` directory:
    ```bash
-   npm install
-   ```
+   cp .env.example .env
+Populate the .env file with your Supabase and API credentials:
 
-2. **Run the Project:**
-   ```bash
-   npm start
-   # or run using Expo CLI
-   npx expo start
-   ```
+ข้อมูลโค้ด
+EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+EXPO_PUBLIC_AI_API_URL=your_ai_backend_endpoint
+Installation
+Install the required dependencies:
 
-3. **Platform-specific commands:**
-   - Run on Android: `npm run android`
-   - Run on iOS: `npm run ios`
-   - Run on Web: `npm run web`
+Bash
+npm install
+# or
+yarn install
+Running the App
+Start the Expo development server:
 
-## 📁 Project Structure
-- `src/`: Main source code directory (Components, Screens, Services, Navigation, etc.)
-- `assets/`: Image files, fonts, and other media
-- `App.js`: Application entry point
+Bash
+npx expo start
+Press a to open on Android Emulator.
+
+Press i to open on iOS Simulator.
+
+Scan the QR Code with the Expo Go app to test on a physical device.
+
+📁 Project Structure
+A modular architecture for scalability and maintainability:
+
+Plaintext
+client/
+├── assets/                 # Static assets (images, fonts, Lottie JSONs)
+├── src/                    # Main application code
+│   ├── components/         # Reusable UI components (Buttons, Cards, Modals)
+│   ├── screens/            # Screen components grouped by features
+│   ├── navigation/         # React Navigation setup and route definitions
+│   ├── services/           # API clients, Supabase config, and AI integrations
+│   ├── store/              # State management (Context API / Redux / Zustand)
+│   ├── utils/              # Helper functions, constants, and theme configs
+│   └── hooks/              # Custom React hooks
+├── App.js                  # Application entry point
+├── app.json                # Expo configuration file
+└── babel.config.js         # Babel compiler configuration
+🤝 Contributing
+We welcome contributions! If you'd like to improve the app:
+
+Fork the repository.
+
+Create a new feature branch (git checkout -b feature/AmazingFeature).
+
+Commit your changes (git commit -m 'Add some AmazingFeature').
+
+Push to the branch (git push origin feature/AmazingFeature).
+
+Open a Pull Request.
+
+📄 License
+This project is licensed under the MIT License - see the LICENSE file for details.
