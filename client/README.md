@@ -57,34 +57,27 @@ Make sure you have the following installed:
 2. Create a `.env` file in the root of the `client` directory:
    ```bash
    cp .env.example .env
-Populate the .env file with your Supabase and API credentials:
+   
+1. Populate the .env file with your Supabase and API credentials:
+  EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url
+  EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+  EXPO_PUBLIC_AI_API_URL=your_ai_backend_endpoint
 
-ข้อมูลโค้ด
-EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-EXPO_PUBLIC_AI_API_URL=your_ai_backend_endpoint
 Installation
 Install the required dependencies:
-
-Bash
 npm install
-# or
+or
 yarn install
+
 Running the App
 Start the Expo development server:
-
-Bash
 npx expo start
-Press a to open on Android Emulator.
+- Press a to open on Android Emulator.
+- Press i to open on iOS Simulator.
+- Scan the QR Code with the Expo Go app to test on a physical device.
 
-Press i to open on iOS Simulator.
-
-Scan the QR Code with the Expo Go app to test on a physical device.
-
-📁 Project Structure
+#📁 Project Structure
 A modular architecture for scalability and maintainability:
-
-Plaintext
 client/
 ├── assets/                 # Static assets (images, fonts, Lottie JSONs)
 ├── src/                    # Main application code
@@ -98,18 +91,14 @@ client/
 ├── App.js                  # Application entry point
 ├── app.json                # Expo configuration file
 └── babel.config.js         # Babel compiler configuration
-🤝 Contributing
+
+#🤝 Contributing
 We welcome contributions! If you'd like to improve the app:
+1.Fork the repository.
+2.Create a new feature branch (git checkout -b feature/AmazingFeature).
+3.Commit your changes (git commit -m 'Add some AmazingFeature').
+4.Push to the branch (git push origin feature/AmazingFeature).
+5.Open a Pull Request.
 
-Fork the repository.
-
-Create a new feature branch (git checkout -b feature/AmazingFeature).
-
-Commit your changes (git commit -m 'Add some AmazingFeature').
-
-Push to the branch (git push origin feature/AmazingFeature).
-
-Open a Pull Request.
-
-📄 License
+#📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.
