@@ -11,34 +11,34 @@ A comprehensive mobile application designed to track, manage, and monitor your b
 ## ✨ Key Features & Capabilities
 
 ### 1. 🤖 AI Smart Camera Integration
-- **24/7 Monitoring:** Connects seamlessly to external smart camera hardware via our custom backend.
-- **Behavior Detection:** Utilizes deep learning to detect abnormal behaviors (e.g., head pressing, vomiting, limping).
-- **Real-Time Alerts:** Push notifications immediately inform you of critical events and camera connectivity status.
+*   **24/7 Monitoring:** Connects seamlessly to external smart camera hardware via our custom backend.
+*   **Behavior Detection:** Utilizes deep learning to detect abnormal behaviors (e.g., head pressing, vomiting, limping).
+*   **Real-Time Alerts:** Push notifications immediately inform you of critical events and camera connectivity status.
 
 ### 2. 📊 Health Tracking & Dashboard
-- **Daily Logging:** Track daily habits, food/water intake, and litter box usage.
-- **Medical Records:** Centralize vaccinations, vet visits, and medication schedules.
-- **Analytics Dashboard:** Visualize health trends over time with interactive charts.
+*   **Daily Logging:** Track daily habits, food/water intake, and litter box usage.
+*   **Medical Records:** Centralize vaccinations, vet visits, and medication schedules.
+*   **Analytics Dashboard:** Visualize health trends over time with interactive charts.
 
 ### 3. 📅 Calendar & Timeline
-- **Event Scheduling:** Never miss a vet appointment, vaccination booster, or grooming session.
-- **Life Timeline:** A historical view of your cat's significant health milestones and daily activities.
+*   **Event Scheduling:** Never miss a vet appointment, vaccination booster, or grooming session.
+*   **Life Timeline:** A historical view of your cat's significant health milestones and daily activities.
 
 ### 4. 🌍 Cat Community
-- **Social Networking:** Connect, share, and interact with fellow cat owners.
-- **Knowledge Sharing:** Exchange tips and view community-driven rankings and profiles.
+*   **Social Networking:** Connect, share, and interact with fellow cat owners.
+*   **Knowledge Sharing:** Exchange tips and view community-driven rankings and profiles.
 
 ---
 
 ## 🛠 Tech Stack
 
-- **Frontend:** React Native, Expo
-- **Backend & Auth:** Supabase
-- **Local Storage:** SQLite (`expo-sqlite`), AsyncStorage
-- **UI & Styling:** `@rneui/themed`, React Native Reanimated
-- **Animations:** Lottie (`lottie-react-native`)
-- **Data Visualization:** `react-native-chart-kit`
-- **Hardware Integrations:** `expo-notifications`, `expo-av` (Audio/Video), `expo-image-picker`
+*   **Frontend:** React Native, Expo
+*   **Backend & Auth:** Supabase
+*   **Local Storage:** SQLite (`expo-sqlite`), AsyncStorage
+*   **UI & Styling:** `@rneui/themed`, React Native Reanimated
+*   **Animations:** Lottie (`lottie-react-native`)
+*   **Data Visualization:** `react-native-chart-kit`
+*   **Hardware Integrations:** `expo-notifications`, `expo-av` (Audio/Video), `expo-image-picker`
 
 ---
 
@@ -48,36 +48,44 @@ Follow these instructions to set up the project locally for development and test
 
 ### Prerequisites
 Make sure you have the following installed:
-- [Node.js](https://nodejs.org/) (v16.x or newer)
-- npm, yarn, or bun
-- [Expo Go](https://expo.dev/client) app installed on your physical device, OR an iOS Simulator / Android Emulator.
+*   [Node.js](https://nodejs.org/) (v16.x or newer)
+*   npm, yarn, or bun
+*   [Expo Go](https://expo.dev/client) app installed on your physical device, OR an iOS Simulator / Android Emulator.
 
 ### Environment Setup
-1. Clone the repository and navigate to the `client` directory.
-2. Create a `.env` file in the root of the `client` directory:
-   ```bash
-   cp .env.example .env
-   
-1. Populate the .env file with your Supabase and API credentials:
-  EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url
-  EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-  EXPO_PUBLIC_AI_API_URL=your_ai_backend_endpoint
+1.  Clone the repository and navigate to the `client` directory.
+2.  Create a `.env` file in the root of the `client` directory:
+    ```bash
+    cp .env.example .env
+    ```
+3.  Populate the `.env` file with your Supabase and API credentials:
+    ```env
+    EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url
+    EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+    EXPO_PUBLIC_AI_API_URL=your_ai_backend_endpoint
+    ```
 
-Installation
+### Installation
 Install the required dependencies:
+```bash
 npm install
-or
+# or
 yarn install
+```
 
-Running the App
+
+# Running the App
 Start the Expo development server:
+```bash
 npx expo start
+```
 - Press a to open on Android Emulator.
 - Press i to open on iOS Simulator.
 - Scan the QR Code with the Expo Go app to test on a physical device.
 
 # 📁 Project Structure
 A modular architecture for scalability and maintainability:
+```text
 client/
 ├── assets/                 # Static assets (images, fonts, Lottie JSONs)
 ├── src/                    # Main application code
@@ -91,6 +99,7 @@ client/
 ├── App.js                  # Application entry point
 ├── app.json                # Expo configuration file
 └── babel.config.js         # Babel compiler configuration
+```
 
 # 🤝 Contributing
 We welcome contributions! If you'd like to improve the app:
@@ -99,6 +108,7 @@ We welcome contributions! If you'd like to improve the app:
 3.Commit your changes (git commit -m 'Add some AmazingFeature').
 4.Push to the branch (git push origin feature/AmazingFeature).
 5.Open a Pull Request.
+
 
 # 📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.
